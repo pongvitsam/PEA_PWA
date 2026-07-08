@@ -48,10 +48,9 @@
         <label class="form-label small fw-bold text-muted">รหัสผ่าน</label>
         <input type="password" id="loginPass" class="form-control" placeholder="••••" autocomplete="current-password">
       </div>
-      <button class="btn btn-teal w-100 mb-2 py-2" id="btnLogin"><i class="fa-solid fa-right-to-bracket"></i> เข้าสู่ระบบ</button>
-      <button class="btn btn-outline-secondary w-100 py-2" id="btnGuest"><i class="fa-solid fa-user"></i> เข้าใช้งานแบบ Guest</button>
+      <button class="btn btn-teal w-100 py-2" id="btnLogin"><i class="fa-solid fa-right-to-bracket"></i> เข้าสู่ระบบ</button>
       <p class="text-muted small text-center mt-3 mb-0">
-        <i class="fa-solid fa-circle-info"></i> ใช้ GitHub Pages — ข้อมูลจาก Google Apps Script
+        <i class="fa-solid fa-circle-info"></i> ต้องเข้าสู่ระบบก่อนใช้งาน
       </p>
     </div>
   </div>
@@ -72,14 +71,18 @@
 
     function goApp() { window.location.href = 'app.html'; }
 
-    // ถ้า login อยู่แล้ว ข้ามไป app
+    function hasValidToken(t) {
+      return t && t.role && t.role !== 'guest' && t.sessionToken && t.expire && t.expire > Date.now();
+    }
+
     try {
       const raw = localStorage.getItem('pwa_token');
       if (raw) {
         const t = JSON.parse(raw);
-        if (t && t.expire && t.expire > Date.now()) goApp();
+        if (hasValidToken(t)) goApp();
+        else localStorage.removeItem('pwa_token');
       }
-    } catch (e) {}
+    } catch (e) { localStorage.removeItem('pwa_token'); }
 
     document.getElementById('btnLogin').onclick = function () {
       const user = document.getElementById('loginUser').value.trim();
@@ -89,20 +92,12 @@
       google.script.run.withSuccessHandler(data => {
         Swal.close();
         if (!data.success) { Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: data.message }); return; }
-        if (data.role === 'guest') persistAuth('guest', null, Date.now() + SESSION_TTL_MS);
-        else {
-          if (!data.sessionToken) { Swal.fire({ icon: 'error', title: 'ไม่ได้รับ session จากเซิร์ฟเวอร์' }); return; }
-          persistAuth(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
-        }
+        if (!data.sessionToken) { Swal.fire({ icon: 'error', title: 'ไม่ได้รับ session จากเซิร์ฟเวอร์' }); return; }
+        persistAuth(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
         goApp();
       }).withFailureHandler(err => {
         Swal.fire({ icon: 'error', title: 'เชื่อมต่อไม่สำเร็จ', text: err.message });
       }).authenticate(user, pass);
-    };
-
-    document.getElementById('btnGuest').onclick = function () {
-      persistAuth('guest', null, Date.now() + SESSION_TTL_MS);
-      goApp();
     };
 
     document.getElementById('loginPass').addEventListener('keydown', e => {

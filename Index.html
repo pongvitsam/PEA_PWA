@@ -953,7 +953,7 @@
     let filteredData = [];
     let selectedRoute = [];
     let dragStartIndex = -1; 
-    let userRole = 'guest';
+    let userRole = '';
     let sessionToken = null;
     const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -988,9 +988,22 @@
     }
 
     function clearAuthState() {
-      userRole = 'guest';
+      userRole = '';
       sessionToken = null;
       localStorage.removeItem('pwa_token');
+    }
+
+    function isLoggedIn() {
+      return userRole === 'admin' || userRole === 'editor';
+    }
+
+    let appStarted = false;
+
+    function startAppAfterAuth() {
+      if (appStarted) return;
+      appStarted = true;
+      fetchDocs();
+      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
     }
 
     function persistAuthState(role, token, expireMs) {
@@ -1146,8 +1159,6 @@
       });
       
       checkAuthToken();
-      fetchDocs();
-      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
     });
 
     // 🟢 แก้ไข: ย้าย initOutageSystem() มาต่อท้ายตรงนี้ เพื่อให้แน่ใจว่า allData โหลดเสร็จก่อน
@@ -1184,52 +1195,56 @@
     function checkAuthToken() {
       try {
         const raw = localStorage.getItem('pwa_token');
-        if (!raw) return;
+        if (!raw) {
+          updateUIByRole();
+          showLogin(true);
+          return;
+        }
         const token = JSON.parse(raw);
         if (!token || !token.expire || token.expire <= Date.now()) {
-          localStorage.removeItem('pwa_token');
-          return;
-        }
-        if (token.role === 'guest') {
-          userRole = 'guest';
-          sessionToken = null;
-          updateUIByRole();
-          return;
-        }
-        if (!token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
           clearAuthState();
           updateUIByRole();
+          showLogin(true);
+          return;
+        }
+        if (token.role === 'guest' || !token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
+          clearAuthState();
+          updateUIByRole();
+          showLogin(true);
           return;
         }
         google.script.run.withSuccessHandler(function(res) {
           if (!res || !res.valid) {
             clearAuthState();
             updateUIByRole();
+            showLogin(true);
             return;
           }
           persistAuthState(res.role, token.sessionToken, token.expire);
           updateUIByRole();
+          startAppAfterAuth();
         }).withFailureHandler(function() {
           clearAuthState();
           updateUIByRole();
+          showLogin(true);
         }).validateClientSession(token.sessionToken);
       } catch (e) {
         clearAuthState();
         updateUIByRole();
+        showLogin(true);
       }
     }
 
     function doLogout() {
       const tok = sessionToken;
       clearAuthState();
-      updateUIByRole();
       if (tok) {
         google.script.run.withFailureHandler(function() {}).revokeSession(tok);
       }
-      Toast.fire({ icon: 'success', title: 'ออกจากระบบแล้ว' });
+      window.location.reload();
     }
 
-    function showLogin() {
+    function showLogin(mandatory) {
       if(userRole === 'admin' || userRole === 'editor') {
         Swal.fire({
           title: 'ออกจากระบบ?', text: "คุณต้องการออกจากระบบหรือไม่", icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787'
@@ -1238,27 +1253,40 @@
         }); return;
       }
       Swal.fire({
-        title: 'เข้าสู่ระบบ', html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน"><input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">',
-        confirmButtonText: 'เข้าสู่ระบบ', confirmButtonColor: '#20c997',
-        preConfirm: () => ({ user: document.getElementById('swal-user').value, pass: document.getElementById('swal-pass').value })
+        title: 'เข้าสู่ระบบ',
+        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน"><input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">',
+        confirmButtonText: 'เข้าสู่ระบบ',
+        confirmButtonColor: '#20c997',
+        allowOutsideClick: !mandatory,
+        allowEscapeKey: !mandatory,
+        preConfirm: () => {
+          const user = document.getElementById('swal-user').value.trim();
+          if (!user) { Swal.showValidationMessage('กรอกชื่อผู้ใช้'); return false; }
+          return { user: user, pass: document.getElementById('swal-pass').value };
+        }
       }).then((res) => {
         if (res.isConfirmed) {
           google.script.run.withSuccessHandler(data => {
             if(data.success) {
-              if (data.role === 'guest') {
-                persistAuthState('guest', null, Date.now() + SESSION_TTL_MS);
-              } else {
-                if (!data.sessionToken) {
-                  Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'ไม่ได้รับ session token จากเซิร์ฟเวอร์' });
-                  return;
-                }
-                persistAuthState(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
+              if (!data.sessionToken) {
+                Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'ไม่ได้รับ session token จากเซิร์ฟเวอร์' });
+                showLogin(true);
+                return;
               }
-              updateUIByRole(); Toast.fire({ icon: 'success', title: data.message });
-            } else { Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message }); }
+              persistAuthState(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
+              updateUIByRole();
+              Toast.fire({ icon: 'success', title: data.message });
+              startAppAfterAuth();
+            } else {
+              Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+              if (mandatory) showLogin(true);
+            }
           }).withFailureHandler(err => {
             Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: err.message });
+            if (mandatory) showLogin(true);
           }).authenticate(res.value.user, res.value.pass);
+        } else if (mandatory) {
+          showLogin(true);
         }
       });
     }
@@ -1276,7 +1304,7 @@
     statusEl.innerHTML = '<i class="fa-solid fa-user-pen text-warning"></i> แอดมินรอง';
     authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
   } else {
-    statusEl.innerHTML = '<i class="fa-solid fa-user text-secondary"></i> Guest';
+    statusEl.innerHTML = '<i class="fa-solid fa-user-lock text-secondary"></i> ยังไม่ได้เข้าสู่ระบบ';
     authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login'; authBtn.className = 'btn btn-sm btn-custom-secondary';
   }
   const outageEditable = canEditOutage();

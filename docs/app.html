@@ -954,7 +954,7 @@
     let filteredData = [];
     let selectedRoute = [];
     let dragStartIndex = -1; 
-    let userRole = 'guest';
+    let userRole = '';
     let sessionToken = null;
     const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -989,9 +989,27 @@
     }
 
     function clearAuthState() {
-      userRole = 'guest';
+      userRole = '';
       sessionToken = null;
       localStorage.removeItem('pwa_token');
+    }
+
+    function isLoggedIn() {
+      return userRole === 'admin' || userRole === 'editor';
+    }
+
+    function redirectToLogin() {
+      clearAuthState();
+      window.location.href = 'index.html';
+    }
+
+    let appStarted = false;
+
+    function startAppAfterAuth() {
+      if (appStarted) return;
+      appStarted = true;
+      fetchDocs();
+      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
     }
 
     function persistAuthState(role, token, expireMs) {
@@ -1147,8 +1165,6 @@
       });
       
       checkAuthToken();
-      fetchDocs();
-      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
     });
 
     // 🟢 แก้ไข: ย้าย initOutageSystem() มาต่อท้ายตรงนี้ เพื่อให้แน่ใจว่า allData โหลดเสร็จก่อน
@@ -1185,38 +1201,26 @@
     function checkAuthToken() {
       try {
         const raw = localStorage.getItem('pwa_token');
-        if (!raw) return;
+        if (!raw) { redirectToLogin(); return; }
         const token = JSON.parse(raw);
         if (!token || !token.expire || token.expire <= Date.now()) {
-          localStorage.removeItem('pwa_token');
-          return;
+          redirectToLogin(); return;
         }
-        if (token.role === 'guest') {
-          userRole = 'guest';
-          sessionToken = null;
-          updateUIByRole();
-          return;
-        }
-        if (!token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
-          clearAuthState();
-          updateUIByRole();
-          return;
+        if (token.role === 'guest' || !token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
+          redirectToLogin(); return;
         }
         google.script.run.withSuccessHandler(function(res) {
           if (!res || !res.valid) {
-            clearAuthState();
-            updateUIByRole();
-            return;
+            redirectToLogin(); return;
           }
           persistAuthState(res.role, token.sessionToken, token.expire);
           updateUIByRole();
+          startAppAfterAuth();
         }).withFailureHandler(function() {
-          clearAuthState();
-          updateUIByRole();
+          redirectToLogin();
         }).validateClientSession(token.sessionToken);
       } catch (e) {
-        clearAuthState();
-        updateUIByRole();
+        redirectToLogin();
       }
     }
 
@@ -1253,7 +1257,7 @@
     statusEl.innerHTML = '<i class="fa-solid fa-user-pen text-warning"></i> แอดมินรอง';
     authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
   } else {
-    statusEl.innerHTML = '<i class="fa-solid fa-user text-secondary"></i> Guest';
+    statusEl.innerHTML = '<i class="fa-solid fa-user-lock text-secondary"></i> ยังไม่ได้เข้าสู่ระบบ';
     authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login'; authBtn.className = 'btn btn-sm btn-custom-secondary';
   }
   const outageEditable = canEditOutage();

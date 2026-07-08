@@ -341,8 +341,8 @@ function authenticate(username, password) {
   username = (username || '').toString().trim();
   password = (password || '').toString();
 
-  if (username === 'guest' || username === '') {
-    return { success: true, role: 'guest', sessionToken: null, expire: 0, message: 'เข้าใช้งานในฐานะ Guest' };
+  if (username === '' || username.toLowerCase() === 'guest') {
+    return { success: false, message: 'กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่าน' };
   }
 
   let userSheet = ss.getSheetByName(USERS_SHEET);
