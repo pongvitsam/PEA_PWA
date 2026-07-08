@@ -1,0 +1,2704 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PWA Project Dashboard</title>
+  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script><script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+  <style>
+    /* สไตล์แผนดับไฟ */
+    .outage-page-header {
+      background: linear-gradient(135deg, #0f766e 0%, #14b8a6 45%, #5eead4 100%);
+      border-radius: 20px; padding: 1.25rem 1.5rem; color: #fff;
+      box-shadow: 0 12px 40px rgba(15, 118, 110, 0.25); margin-bottom: 1.25rem;
+    }
+    .outage-stat-card {
+      background: rgba(255,255,255,0.18); backdrop-filter: blur(8px);
+      border-radius: 14px; padding: 0.85rem 1rem; text-align: center;
+      border: 1px solid rgba(255,255,255,0.25); transition: transform 0.2s;
+    }
+    .outage-stat-card:hover { transform: translateY(-2px); }
+    .outage-stat-card h4 { font-size: 1.75rem; font-weight: 700; margin: 0; line-height: 1.1; }
+    .outage-stat-card small { opacity: 0.92; font-weight: 500; }
+    .calendar-container {
+      background: linear-gradient(180deg, #ffffff 0%, #f0fdfa 100%);
+      border-radius: 20px; padding: 1.25rem 1.5rem 1.5rem;
+      box-shadow: 0 8px 32px rgba(15, 118, 110, 0.1);
+      border: 1px solid rgba(20, 184, 166, 0.15);
+      min-height: 520px; transition: min-height 0.35s ease;
+    }
+    .calendar-container .fc { font-family: 'Prompt', sans-serif; }
+    .fc .fc-toolbar { flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem !important; }
+    .fc .fc-toolbar-title {
+      font-weight: 700; font-size: 1.35rem;
+      background: linear-gradient(90deg, #0f766e, #14b8a6);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .fc .fc-button-primary {
+      background: linear-gradient(135deg, #14b8a6, #0d9488) !important;
+      border: none !important; border-radius: 10px !important;
+      font-weight: 600; box-shadow: 0 2px 8px rgba(20, 184, 166, 0.35);
+    }
+    .fc .fc-button-primary:hover { filter: brightness(1.08); }
+    .fc .fc-button-primary:not(:disabled).fc-button-active {
+      background: linear-gradient(135deg, #0f766e, #115e59) !important;
+    }
+    .fc .fc-col-header-cell { background: #f0fdfa; border-color: #ccfbf1 !important; }
+    .fc .fc-col-header-cell-cushion {
+      color: #0f766e; font-weight: 600; padding: 10px 4px; text-decoration: none !important;
+    }
+    .fc .fc-daygrid-day { min-height: 88px; transition: min-height 0.3s ease; }
+    .fc .fc-daygrid-day-number { color: #334155; font-weight: 600; padding: 6px 8px; text-decoration: none !important; }
+    .fc .fc-daygrid-day.fc-day-today { background: rgba(20, 184, 166, 0.12) !important; }
+    .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number {
+      background: #14b8a6; color: #fff; border-radius: 8px; min-width: 28px; text-align: center;
+    }
+    .fc .fc-daygrid-day-events { min-height: 1.5em; padding-bottom: 4px; }
+    .fc-event {
+      border-radius: 8px; border: none !important; padding: 3px 8px;
+      font-weight: 600; cursor: pointer; font-size: 0.78rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12); margin-bottom: 3px !important;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .fc-event:hover { transform: scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,0.18); z-index: 5; }
+    .fc .fc-daygrid-event-dot { display: none; }
+    .outage-list-panel {
+      background: #fff; border-radius: 20px; padding: 1.25rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
+    }
+    .outage-card { background: #fff; border-radius: 14px; padding: 15px; margin-bottom: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border-left: 5px solid #f59e0b; transition: 0.3s; position: relative; }
+    .outage-card.past { opacity: 0.65; border-left-color: #94a3b8; }
+    .outage-card.done { border-left-color: #10b981; background: linear-gradient(90deg, #f0fdf4, #fff); }
+    .outage-card:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,0,0,0.08); }
+    .outage-loc-panel {
+      background: linear-gradient(180deg, #f8fafc, #f0fdfa);
+      border: 1px solid #99f6e4; border-radius: 14px; padding: 1rem 1.15rem;
+      max-height: 320px; overflow-y: auto;
+    }
+    .outage-loc-panel .loc-row { font-size: 0.85rem; color: #475569; margin-bottom: 0.35rem; }
+    .outage-loc-panel .loc-row b { color: #0f766e; min-width: 110px; display: inline-block; }
+    .form-switch .form-check-input:checked { background-color: #14b8a6; border-color: #14b8a6; }
+    /* สไตล์ Project Docs */
+.doc-list { list-style: none; padding-left: 0; min-height: 50px; }
+.doc-item { background: #fff; border: 1px solid #e9ecef; border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: 0.2s; }
+.doc-item.group { background: #f8f9fa; border-left: 4px solid #ffc107; font-weight: 600; flex-wrap: wrap; }
+.doc-item.file { border-left: 4px solid #20c997; }
+.doc-item.link { border-left: 4px solid #4dabf7; }
+.doc-item:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+.doc-drag-handle { cursor: grab; color: #adb5bd; margin-right: 15px; font-size: 1.2rem; }
+.doc-drag-handle:active { cursor: grabbing; }
+.doc-icon { width: 35px; height: 35px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; margin-right: 15px; }
+.group .doc-icon { background: #fff3cd; color: #ffc107; }
+.file .doc-icon { background: #e6fcf5; color: #20c997; }
+.link .doc-icon { background: #e7f5ff; color: #4dabf7; }
+.doc-children { width: 100%; padding-left: 40px; margin-top: 10px; display: block; }
+.sortable-ghost { opacity: 0.4; background: #f1f3f5; }
+  </style>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap');
+    body { background-color: #f4f7f6; color: #333; font-family: 'Prompt', sans-serif; }
+    .navbar-custom { background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .nav-link { font-weight: 500; color: #6c757d !important; cursor: pointer; border-radius: 8px; margin: 0 5px; transition: 0.3s; }
+    .nav-link:hover { background-color: #f8f9fa; color: #20c997 !important; }
+    .nav-link.active { background-color: #e6fcf5; color: #20c997 !important; font-weight: 600; }
+    .btn-custom-primary { background-color: #20c997; color: white; border: none; border-radius: 8px; font-weight: 500; }
+    .btn-custom-primary:hover { background-color: #1aa179; color: white; }
+    .btn-custom-secondary { background-color: #4dabf7; color: white; border: none; border-radius: 8px; font-weight: 500; }
+    .btn-custom-secondary:hover { background-color: #3b8fd9; color: white; }
+    .btn-custom-danger { background-color: #ff8787; color: white; border: none; border-radius: 8px; font-weight: 500; }
+    #map { height: 75vh; border-radius: 16px; border: 4px solid #fff; box-shadow: 0 8px 16px rgba(0,0,0,0.08); z-index: 1; }
+    .details-panel { height: 75vh; overflow-y: auto; background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 8px 16px rgba(0,0,0,0.08); }
+    .filter-bar { background: #fff; border-radius: 12px; padding: 15px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.03); }
+    .form-select, .form-control { border-radius: 8px; border: 1px solid #e9ecef; box-shadow: none; }
+    .form-control:focus, .form-select:focus { border-color: #20c997; box-shadow: 0 0 0 0.25rem rgba(32, 201, 151, 0.25); }
+    .info-card { background: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #20c997; }
+    .info-card h6 { color: #495057; font-weight: 600; font-size: 0.95rem; }
+    .table-custom { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .table-custom thead { background-color: #f8f9fa; }
+    
+    .route-item { background: #fff; border-radius: 10px; padding: 15px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); display: flex; align-items: center; border: 1px solid #f1f3f5; cursor: grab; transition: transform 0.2s, box-shadow 0.2s; }
+    .route-item:active { cursor: grabbing; }
+    .route-item.dragging { opacity: 0.5; box-shadow: 0 10px 20px rgba(0,0,0,0.1); transform: scale(1.02); }
+    .drag-handle { color: #adb5bd; margin-right: 10px; cursor: grab; font-size: 1.2rem; }
+    .route-icon { width: 30px; height: 30px; background: #e6fcf5; color: #20c997; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-weight: bold; margin-right: 15px; font-size: 0.9rem;}
+    
+    .route-summary { background: #e7f5ff; border-radius: 10px; padding: 15px; margin-bottom: 10px; border-left: 4px solid #339af0; font-size: 0.9rem;}
+    div:where(.swal2-container) { z-index: 9999 !important; font-family: 'Prompt', sans-serif !important; }
+    .marker-label-tooltip { background: rgba(32, 201, 151, 0.92); color: #fff; border: 0; border-radius: 14px; font-weight: 600; padding: 2px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .marker-label-tooltip::before { display: none; }
+    /* Leaflet vector layers — กันสไตล์ img/svg ของ Bootstrap ทำให้วงรัศมีไม่แสดง */
+    .leaflet-container img.leaflet-tile,
+    .leaflet-container svg { max-width: none !important; }
+    .leaflet-container .leaflet-marker-icon { max-width: none !important; }
+    
+    .dash-card { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.04); text-align: center; height: 100%; border-bottom: 4px solid #20c997; cursor: pointer; transition: transform 0.2s;}
+    .dash-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+    .dash-card h3 { font-size: 2.2rem; font-weight: bold; margin-bottom: 5px; color: #20c997; }
+    .dash-card p { color: #6c757d; margin-bottom: 0; font-size: 0.95rem; font-weight: 500; }
+    .dash-icon { font-size: 2rem; color: #e9ecef; position: absolute; top: 20px; right: 20px; }
+  </style>
+</head>
+<body>
+
+  <nav class="navbar navbar-expand-lg navbar-custom sticky-top py-2 mb-3">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand lh-1" style="color: #20c997;">
+        <span class="fw-bold fs-4"><i class="fa-solid fa-bolt"></i> PWA Project</span><br>
+        <small class="text-muted fw-normal" style="font-size: 0.75rem;">Organized by Sammy สุดหล่อ</small>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-1 ms-3">
+          <li class="nav-item"><a class="nav-link active" id="tab-map" onclick="switchMenu('map')"><i class="fa-solid fa-map-location-dot"></i> แผนที่โครงการ</a></li>
+          <li class="nav-item"><a class="nav-link" id="tab-route" onclick="switchMenu('route')"><i class="fa-solid fa-route"></i> นำทางหลายจุด</a></li>
+          <li class="nav-item"><a class="nav-link" id="tab-db" onclick="switchMenu('db')"><i class="fa-solid fa-database"></i> ฐานข้อมูล</a></li>
+          <li class="nav-item"><a class="nav-link" id="tab-dash" onclick="switchMenu('dash')"><i class="fa-solid fa-chart-pie"></i> แดชบอร์ดสรุป</a></li><li class="nav-item"><a class="nav-link" id="tab-outage" onclick="switchMenu('outage')"><i class="fa-solid fa-calendar-days"></i> แผนดับไฟ</a></li>
+          <li class="nav-item"><a class="nav-link" id="tab-docs" onclick="switchMenu('docs')"><i class="fa-solid fa-folder-open"></i> ข้อมูลโครงการ</a></li>
+        </ul>
+        
+        <div class="d-flex align-items-center">
+          <button id="btnManageUsers" class="btn btn-sm btn-outline-success me-2" style="display:none;" onclick="openUserManageModal()" title="จัดการแอดมินรอง">
+            <i class="fa-solid fa-users-gear"></i> <span class="d-none d-md-inline">แอดมินรอง</span>
+          </button>
+          <span id="userStatus" class="me-3 fw-bold text-muted"><i class="fa-solid fa-user-circle"></i> รอเข้าสู่ระบบ</span>
+          <button id="authBtn" class="btn btn-sm btn-custom-secondary" onclick="showLogin()"><i class="fa-solid fa-right-to-bracket"></i> Login</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid px-4">
+    <div id="loading" class="text-center py-5">
+      <div class="spinner-border text-success" style="width: 3rem; height: 3rem;"></div>
+      <h5 class="mt-3 text-muted">กำลังโหลดระบบและข้อมูล...</h5>
+    </div>
+
+    <div id="menu-map" style="display: none;">
+      <div class="filter-bar row g-3 align-items-center">
+        <div class="col-md-3">
+          <span class="fw-bold"><i class="fa-solid fa-magnifying-glass"></i> ค้นหาสถานที่บนแผนที่:</span>
+          <div class="input-group mt-1">
+            <input type="text" list="mapSearchList" id="mapSearchInput" class="form-control" placeholder="พิมพ์ชื่อเพื่อค้นหา..." onchange="searchOnMap()">
+            <button class="btn btn-outline-primary" onclick="searchOnMap()"><i class="fa-solid fa-search"></i></button>
+          </div>
+          <datalist id="mapSearchList"></datalist>
+        </div>
+
+        <div class="col-md-5">
+          <span class="fw-bold me-3"><i class="fa-solid fa-palette"></i> สีของหมุดแต่ละเฟส:</span><br>
+          <div class="form-check form-check-inline mt-1">
+            <input class="form-check-input phase-filter" type="checkbox" value="1" id="ph1" checked onchange="applyFilters()">
+            <label class="form-check-label text-success fw-bold" for="ph1">เฟส 1 (เขียว)</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input phase-filter" type="checkbox" value="2" id="ph2" checked onchange="applyFilters()">
+            <label class="form-check-label text-primary fw-bold" for="ph2">เฟส 2 (ฟ้า)</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input phase-filter" type="checkbox" value="3" id="ph3" checked onchange="applyFilters()">
+            <label class="form-check-label text-danger fw-bold" for="ph3">เฟส 3 (แดง)</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input phase-filter" type="checkbox" value="4" id="ph4" checked onchange="applyFilters()">
+            <label class="form-check-label text-danger fw-bold" for="ph4">เฟส 4 (แดง)</label>
+          </div>
+        </div>
+        
+        <div class="col-md-4">
+          <span class="fw-bold"><i class="fa-solid fa-map"></i> จังหวัด:</span>
+          <div class="input-group mt-1">
+            <input type="text" list="provinceList" id="filterProv" class="form-control" placeholder="พิมพ์ชื่อจังหวัด..." autocomplete="off" oninput="applyFilters()" onchange="applyFilters()">
+            <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('filterProv').value=''; applyFilters();" title="ล้างจังหวัด"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <datalist id="provinceList"></datalist>
+          <small class="text-muted">พิมพ์ชื่อจังหวัดได้ เช่น เชียงใหม่ นครราชสีมา</small>
+        </div>
+        
+        <div class="col-md-4 mt-2">
+          <select id="filterPEA" class="form-select" onchange="applyFilters()"><option value="">ทุกเขต กฟภ.</option></select>
+        </div>
+        <div class="col-md-4 mt-2">
+          <select id="filterPWA" class="form-select" onchange="applyFilters()"><option value="">ทุกเขต กปภ.</option></select>
+        </div>
+        <div class="col-md-4 mt-2">
+          <button class="btn btn-light border w-100" onclick="resetFilters()"><i class="fa-solid fa-rotate-right"></i> ล้างตัวกรองทั้งหมด</button>
+        </div>
+        <div class="col-12 mt-1">
+          <div id="mapGpsStatus" class="small text-muted"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
+        </div>
+        <div class="col-12 mt-2">
+          <div class="border rounded-3 p-3 bg-white shadow-sm">
+            <div class="fw-bold small mb-2 text-secondary"><i class="fa-solid fa-bullseye text-info"></i> ค้นหาโครงการในรัศมี (กม.)</div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <select id="mapRadiusKm" class="form-select form-select-sm" style="width:auto; min-width: 110px;" onchange="reapplyRadiusIfActive()" title="เลือกระยะสำเร็จรูป">
+                <option value="5">5 กม.</option>
+                <option value="10" selected>10 กม.</option>
+                <option value="25">25 กม.</option>
+                <option value="50">50 กม.</option>
+                <option value="100">100 กม.</option>
+                <option value="150">150 กม.</option>
+              </select>
+              <div class="input-group input-group-sm" style="width:auto; min-width: 140px;" title="ถ้ากรอกช่องนี้ จะใช้แทนค่าจากเมนู dropdown">
+                <span class="input-group-text py-0 px-2 small">กำหนดเอง</span>
+                <input type="number" id="mapRadiusKmCustom" class="form-control form-control-sm py-0" style="max-width:88px;" min="0.1" max="500" step="0.1" placeholder="กม." oninput="reapplyRadiusIfActive()" onchange="reapplyRadiusIfActive()">
+              </div>
+              <button type="button" class="btn btn-sm btn-info text-white" onclick="showRadiusFromGps()" title="ใช้พิกัด GPS ปัจจุบันเป็นจุดกลาง"><i class="fa-solid fa-location-crosshairs"></i> จากตำแหน่งฉัน</button>
+              <button type="button" class="btn btn-sm btn-outline-info" onclick="enableRadiusPickOnMap()" title="คลิกบนแผนที่ 1 ครั้ง"><i class="fa-solid fa-hand-pointer"></i> เลือกจุดบนแผนที่</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearRadiusFilter()"><i class="fa-solid fa-eraser"></i> ล้างวง</button>
+            </div>
+            <p class="small text-muted mb-0 mt-2">เลือกจากเมนูหรือ<strong>พิมพ์ระยะในช่องกำหนดเอง</strong> (มีผลแทนเมนูเมื่อกรอกตัวเลข 0.1–500 กม.) แล้วกด &quot;จากตำแหน่งฉัน&quot; หรือ &quot;เลือกจุดบนแผนที่&quot; — จะมี<strong>วงสีฟ้า</strong>บนแผนที่ และหมุดในรัศมีจะชัด นอกรัศมีจะจาง</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-lg-8 mb-4">
+          <div id="map"></div>
+          <div id="radiusSummary" class="d-none mt-2 p-3 small rounded-3 border border-success bg-light text-dark"></div>
+        </div>
+        <div class="col-lg-4 mb-4">
+          <div class="details-panel" id="detailsPanel">
+            <div class="text-center text-muted mt-5"><i class="fa-solid fa-hand-pointer fa-3x mb-3"></i><h5>คลิกหมุดบนแผนที่</h5><p>เพื่อดูรายละเอียดและคำนวณระยะทาง</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="menu-route" style="display: none;">
+      <div class="row">
+        <div class="col-md-5 mb-4">
+          <div class="filter-bar">
+            <h5 class="fw-bold"><i class="fa-solid fa-magnifying-glass-location"></i> เลือกและเพิ่มสถานที่ลงเส้นทาง</h5>
+            <p class="text-muted small">กำหนดจุดเริ่มต้น และเรียงลำดับสถานที่ที่จะเดินทางไป</p>
+            
+            <div class="d-flex gap-2 mb-3">
+              <button class="btn btn-outline-info flex-grow-1" onclick="addCurrentLocationToRoute()" id="btnMyLoc">
+                <i class="fa-solid fa-location-crosshairs"></i> ใช้ GPS จากเครื่อง
+              </button>
+            </div>
+            
+            <label class="fw-bold small text-muted">หรือ พิมพ์จุดเริ่มต้นด้วยตัวเอง (เช่น บ้าน, ออฟฟิศ)</label>
+            <div class="input-group mb-4">
+              <input type="text" id="customLocInput" class="form-control" placeholder="ระบุตำแหน่งด้วยตัวเอง (สถานที่/พิกัด)">
+              <button class="btn btn-outline-primary" onclick="addCustomLocationToRoute()"><i class="fa-solid fa-thumbtack"></i> เพิ่ม</button>
+            </div>
+
+            <label class="fw-bold small text-muted">เพิ่มสถานที่ในฐานข้อมูล</label>
+            <div class="input-group mb-3">
+              <input type="text" list="routeSearchList" id="routeInput" class="form-control" placeholder="พิมพ์ชื่อเพื่อค้นหา หรือเลือกจากรายการ">
+              <datalist id="routeSearchList"></datalist>
+              <button class="btn btn-custom-secondary" onclick="addToRoute()">เพิ่ม <i class="fa-solid fa-plus"></i></button>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-7">
+          <div class="filter-bar">
+            <h5 class="fw-bold"><i class="fa-solid fa-list-ol"></i> ลำดับเส้นทางนำทาง</h5>
+            <div class="alert alert-light text-muted small py-1 px-2 mb-2"><i class="fa-solid fa-circle-info"></i> คุณสามารถ <b>ลากและวาง (Drag & Drop)</b> รายการเพื่อสลับลำดับก่อน-หลังได้</div>
+            <div id="routeList" class="mb-3"><p class="text-muted small" id="emptyRouteMsg">ยังไม่มีสถานที่ เลือกค้นหาจากด้านบน</p></div>
+            <div id="routeDetails" class="mb-3"></div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-custom-primary flex-grow-1" onclick="startNavigation()" id="startNavBtn" disabled><i class="fa-brands fa-google"></i> เริ่มนำทางผ่าน Maps</button>
+              <button class="btn btn-custom-danger" onclick="clearRoute()" id="clearNavBtn" disabled><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="menu-db" style="display: none;">
+      <div class="filter-bar d-flex justify-content-between align-items-center">
+        <h5 class="fw-bold mb-0"><i class="fa-solid fa-table"></i> ฐานข้อมูลทั้งหมด</h5>
+        <input type="text" id="searchInput" class="form-control w-25" placeholder="ค้นหาชื่อสถานที่..." onkeyup="searchTable()">
+      </div>
+      <div class="table-responsive table-custom">
+        <table class="table table-hover align-middle mb-0" id="dataTable">
+          <thead><tr><th>เฟส</th><th>ชื่อสถานที่</th><th>กฟภ.</th><th>กปภ.</th><th>พิกัด</th><th class="text-center">จัดการ</th></tr></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="menu-dash" style="display: none;">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold"><i class="fa-solid fa-chart-line text-primary"></i> สรุปภาพรวมโครงการ (Executive Dashboard)</h4>
+        <small class="text-muted">* คลิกที่ตัวเลขหรือกราฟเพื่อดูรายชื่อโครงการและ Export PDF</small>
+      </div>
+      
+      <div class="row g-4 mb-4">
+        <div class="col-md-3">
+          <div class="dash-card position-relative" style="border-bottom-color: #20c997;" onclick="showDrilldown('สถานที่ติดตั้งทั้งหมด', allData)">
+            <i class="fa-solid fa-map-pin dash-icon"></i>
+            <h3 id="dashTotalSites">0</h3>
+            <p>สถานที่ติดตั้งทั้งหมด</p>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="dash-card position-relative" style="border-bottom-color: #ffc107;" onclick="showDrilldown('ข้อมูลโครงการที่มีการผลิตไฟ', allData.filter(d => parseFloat(d.kwp) > 0))">
+            <i class="fa-solid fa-solar-panel dash-icon"></i>
+            <h3 id="dashTotalKwp" style="color: #ffc107;">0.00</h3>
+            <p>กำลังการผลิตรวม (kWp)</p>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="dash-card position-relative" style="border-bottom-color: #4dabf7;" onclick="showDrilldown('ข้อมูลทุกเขต กปภ.', allData.filter(d => d.pwaRegion))">
+            <i class="fa-solid fa-faucet-drip dash-icon"></i>
+            <h3 id="dashTotalPWA" style="color: #4dabf7;">0</h3>
+            <p>ครอบคลุมเขต กปภ. (แห่ง)</p>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="dash-card position-relative" style="border-bottom-color: #ff8787;" onclick="showDrilldown('ข้อมูลทุกเขต กฟภ.', allData.filter(d => d.peaRegion))">
+            <i class="fa-solid fa-bolt dash-icon"></i>
+            <h3 id="dashTotalPEA" style="color: #ff8787;">0</h3>
+            <p>ครอบคลุมเขต กฟภ. (แห่ง)</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-4 mb-4">
+        <div class="col-md-5">
+          <div class="filter-bar h-100">
+            <h5 class="fw-bold mb-4 text-center">สัดส่วนโครงการแยกตามเฟส</h5>
+            <div style="height: 300px; display: flex; justify-content: center; cursor: pointer;">
+              <canvas id="phaseChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-7">
+          <div class="filter-bar h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold mb-0">จำนวนสถานที่ติดตั้ง</h5>
+              <select id="dashRegionFilter" class="form-select form-select-sm w-auto border-primary" onchange="generateDashboard()">
+                <option value="pwa">แยกตามเขต กปภ.</option>
+                <option value="pea">แยกตามเขต กฟภ.</option>
+              </select>
+            </div>
+            <div style="height: 300px; cursor: pointer;">
+              <canvas id="pwaChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="menu-outage" style="display: none;">
+      <div class="outage-page-header">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <div>
+            <h4 class="fw-bold mb-1"><i class="fa-solid fa-calendar-days"></i> แผนดับไฟ</h4>
+            <small class="opacity-90">ติดตามกำหนดการดับไฟทุกสถานที่ — ปฏิทินขยายตามจำนวนงานอัตโนมัติ</small>
+          </div>
+          <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openOutageModal()" id="btnAddOutageTop" disabled>
+            <i class="fa-solid fa-plus text-success"></i> เพิ่มงานดับไฟ
+          </button>
+        </div>
+        <div class="row g-2" id="outageStatsRow">
+          <div class="col-6 col-md-3"><div class="outage-stat-card"><h4 id="statOutageTotal">0</h4><small>ทั้งหมด</small></div></div>
+          <div class="col-6 col-md-3"><div class="outage-stat-card"><h4 id="statOutagePending">0</h4><small>รอดำเนินการ</small></div></div>
+          <div class="col-6 col-md-3"><div class="outage-stat-card"><h4 id="statOutageDone">0</h4><small>เสร็จแล้ว</small></div></div>
+          <div class="col-6 col-md-3"><div class="outage-stat-card"><h4 id="statOutagePast">0</h4><small>เลยกำหนด</small></div></div>
+        </div>
+      </div>
+      <div class="row g-4">
+        <div class="col-lg-7">
+          <div class="calendar-container"><div id="calendar"></div></div>
+        </div>
+        <div class="col-lg-5">
+          <div class="outage-list-panel">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-warning"></i> รายละเอียดงานดับไฟ</h5>
+              <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openOutageModal()" id="btnAddOutage" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
+            </div>
+            <div class="row g-2 mb-3">
+              <div class="col-md-7">
+                <input type="text" id="outageSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาชื่อสถานที่..." onkeyup="filterOutages()">
+              </div>
+              <div class="col-md-5">
+                <select id="outageRegionSelect" class="form-select form-select-sm" onchange="filterOutages()">
+                  <option value="">ทุกเขต กฟภ.</option>
+                </select>
+              </div>
+            </div>
+            <div id="outageListContainer" style="max-height: 70vh; overflow-y: auto; padding-right: 5px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  
+  <div id="menu-docs" style="display: none;">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold"><i class="fa-solid fa-folder-tree text-warning"></i> แหล่งรวมเอกสารโครงการ (Assets & Docs)</h4>
+    <div id="docActionButtons" style="display: none;">
+      <button class="btn btn-warning text-dark fw-bold me-2 shadow-sm" onclick="openDocModal('GROUP')"><i class="fa-solid fa-folder-plus"></i> สร้างกลุ่ม</button>
+      <button class="btn btn-custom-primary me-2 shadow-sm" onclick="openDocModal('FILE')"><i class="fa-solid fa-file-arrow-up"></i> อัปโหลดไฟล์</button>
+      <button class="btn btn-custom-secondary shadow-sm" onclick="openDocModal('LINK')"><i class="fa-solid fa-link"></i> แนบลิงก์</button>
+    </div>
+  </div>
+  
+  <div class="alert alert-light text-muted small py-2 mb-3 shadow-sm border"><i class="fa-solid fa-circle-info"></i> เฉพาะแอดมินหลักเท่านั้นที่จัดการเอกสารได้</div>
+  
+  <div class="card border-0 shadow-sm" style="border-radius: 16px;">
+    <div class="card-body p-4">
+      <ul id="mainDocList" class="doc-list">
+        </ul>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="docModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius: 16px; border: none;">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title fw-bold" id="docModalTitle">เพิ่มข้อมูล</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="docType">
+        
+        <div class="mb-3">
+          <label class="fw-bold small text-muted" id="docTitleLabel">ชื่อโฟลเดอร์/ไฟล์/ลิงก์</label>
+          <input type="text" id="docTitle" class="form-control" placeholder="กรอกชื่อที่ต้องการแสดง...">
+        </div>
+        
+        <div class="mb-3">
+          <label class="fw-bold small text-muted">จัดให้อยู่ในกลุ่ม (ไม่บังคับ)</label>
+          <select id="docParent" class="form-select"><option value="">(ไม่มีหน้าหลัก)</option></select>
+        </div>
+
+        <div class="mb-3" id="docFileSection" style="display: none;">
+          <label class="fw-bold small text-muted">อัปโหลดไฟล์ (PDF, Image, etc. ขนาดไม่เกิน 50MB)</label>
+          <input class="form-control" type="file" id="docFile">
+        </div>
+
+        <div class="mb-3" id="docLinkSection" style="display: none;">
+          <label class="fw-bold small text-muted">URL / ลิงก์ Google Drive</label>
+          <input type="url" id="docUrl" class="form-control" placeholder="https://...">
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-custom-primary px-4" id="btnSaveDoc" onclick="submitDoc()"><i class="fa-solid fa-save"></i> บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
+  <div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content" style="border-radius: 16px; border: none;">
+        <div class="modal-header bg-light">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen-to-square text-warning"></i> แก้ไขข้อมูล</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body small" style="background-color: #f8f9fa;">
+          <input type="hidden" id="editIndex">
+          <div class="card border-0 shadow-sm p-3 mb-3" style="border-radius: 12px;">
+            <div class="row g-2 mt-1">
+              <div class="col-md-6"><label class="text-muted">ชื่อสถานที่</label><input type="text" class="form-control" id="e_name"></div>
+              <div class="col-md-3"><label class="text-muted">เฟส (1-4)</label><input type="text" class="form-control" id="e_phase"></div>
+              <div class="col-md-3"><label class="text-muted">ลำดับ</label><input type="text" class="form-control" id="e_seq"></div>
+              
+              <div class="col-md-12"><label class="text-muted">พิกัด (lat,long)</label><input type="text" class="form-control" id="e_latlngRaw"></div>
+              <div class="col-md-6 mt-2"><label class="text-muted">ลิงก์ SLD Asbuilt</label><input type="text" class="form-control" id="e_link"></div>
+              <div class="col-md-6 mt-2"><label class="text-muted">ลิงก์ SLD PEA Approved</label><input type="text" class="form-control" id="e_linkPEA"></div>
+            </div>
+          </div>
+          <div class="card border-0 shadow-sm p-3 mb-3" style="border-radius: 12px;">
+            <div class="row g-2 mt-1">
+              <div class="col-4"><label class="text-muted">กฟภ. เขต</label><input type="text" class="form-control" id="e_peaRegion"></div>
+              <div class="col-4"><label class="text-muted">กปภ. เขต</label><input type="text" class="form-control" id="e_pwaRegion"></div>
+              <div class="col-4"><label class="text-muted">kWp</label><input type="text" class="form-control" id="e_kwp"></div>
+              <div class="col-6"><label class="text-muted">เลขบัญชี (CA)</label><input type="text" class="form-control" id="e_caNum"></div>
+              <div class="col-6"><label class="text-muted">เลขมิเตอร์</label><input type="text" class="form-control" id="e_meterNum"></div>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="card border-0 shadow-sm p-3 h-100" style="border-radius: 12px;">
+                <h6 class="fw-bold text-info border-bottom pb-2">ผู้ประสานงาน กฟภ.</h6>
+                <div class="mt-2"><input type="text" class="form-control mb-1" id="e_pea1Name" placeholder="ชื่อคนที่ 1"><input type="text" class="form-control mb-1" id="e_pea1Phone" placeholder="เบอร์โทร"><input type="text" class="form-control mb-3" id="e_pea1Pos" placeholder="ตำแหน่ง"></div>
+                <div><input type="text" class="form-control mb-1" id="e_pea2Name" placeholder="ชื่อคนที่ 2"><input type="text" class="form-control mb-1" id="e_pea2Phone" placeholder="เบอร์โทร"><input type="text" class="form-control mb-1" id="e_pea2Pos" placeholder="ตำแหน่ง"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card border-0 shadow-sm p-3 h-100" style="border-radius: 12px;">
+                <h6 class="fw-bold text-secondary border-bottom pb-2">ผู้ประสานงาน บริษัท</h6>
+                <div class="mt-2"><input type="text" class="form-control mb-1" id="e_comp1Name" placeholder="ชื่อคนที่ 1"><input type="text" class="form-control mb-3" id="e_comp1Phone" placeholder="เบอร์โทร"></div>
+                <div><input type="text" class="form-control mb-1" id="e_comp2Name" placeholder="ชื่อคนที่ 2"><input type="text" class="form-control mb-1" id="e_comp2Phone" placeholder="เบอร์โทร"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+          <button class="btn btn-custom-primary px-4" onclick="saveEdit()" id="saveBtn"><i class="fa-solid fa-save"></i> บันทึกข้อมูล</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="drilldownModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content" style="border-radius: 16px; border: none;">
+        <div class="modal-header bg-light">
+          <h5 class="modal-title fw-bold text-primary" id="drilldownTitle">แจกแจงข้อมูล</h5>
+          <div>
+            <button class="btn btn-sm btn-danger me-2" onclick="printDrilldownPDF()"><i class="fa-solid fa-file-pdf"></i> Export PDF</button>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+        </div>
+        <div class="modal-body p-0">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light"><tr><th class="ps-3">เฟส</th><th>ชื่อสถานที่</th><th>เขต กปภ. / กฟภ.</th><th class="text-center">ดูพิกัด</th></tr></thead>
+            <tbody id="drilldownTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+<div class="modal fade" id="outageModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content" style="border-radius: 16px; border: none; overflow: hidden;">
+        <div class="modal-header text-white" style="background: linear-gradient(135deg, #0f766e, #14b8a6);">
+          <h5 class="modal-title fw-bold"><i class="fa-solid fa-bolt"></i> กำหนดการดับไฟ</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body bg-white">
+          <input type="hidden" id="o_id">
+          <div class="mb-3">
+            <label class="fw-bold small text-muted">1. โครงการ/สถานที่ดับไฟ</label>
+            <input type="text" list="mapSearchList" id="o_project" class="form-control" placeholder="พิมพ์หรือเลือกจากฐานข้อมูล..." onchange="onOutageProjectChange()" oninput="onOutageProjectChange()">
+            <small class="text-muted">เลือกสถานที่แล้วระบบจะแสดงข้อมูลโครงการด้านล่าง (อ่านอย่างเดียว)</small>
+          </div>
+          <div id="o_locationPanel" class="outage-loc-panel mb-3" style="display:none;"></div>
+          <div class="row mb-3">
+            <div class="col-md-6"><label class="fw-bold small text-muted">2. เริ่มวันที่/เวลา</label><input type="text" id="o_start" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
+            <div class="col-md-6"><label class="fw-bold small text-muted">ถึงวันที่/เวลา</label><input type="text" id="o_end" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
+          </div>
+          <div class="mb-3"><label class="fw-bold small text-muted">3. หมายเหตุ (เช่น เลื่อนดับไฟ)</label><textarea id="o_remark" class="form-control" rows="2" placeholder="กรอกหมายเหตุ..."></textarea></div>
+          <div class="mb-2">
+            <label class="fw-bold small text-muted">4. ลิงก์หนังสือ PEA (URL)</label>
+            <input type="url" id="o_peaUrl" class="form-control" placeholder="https://drive.google.com/... หรือลิงก์เอกสารอื่น">
+            <small class="text-muted"><i class="fa-solid fa-link"></i> วางลิงก์ Google Drive หรือ URL เอกสารหนังสือ PEA</small>
+          </div>
+        </div>
+        <div class="modal-footer border-0 bg-light">
+          <button class="btn btn-outline-danger me-auto" id="btnDelOutage" onclick="deleteCurrentOutage()" style="display:none;"><i class="fa-solid fa-trash"></i> ลบ</button>
+          <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+          <button class="btn btn-custom-primary px-4" onclick="saveOutage()"><i class="fa-solid fa-save"></i> บันทึก</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<div class="modal fade" id="userManageModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius: 16px; border: none;">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-users-gear text-success"></i> จัดการแอดมินรอง</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">แอดมินรองสามารถแก้ไขหน้าแผนดับไฟได้เท่านั้น ไม่สามารถแก้ไขข้อมูลอื่นในระบบ</p>
+        <div class="border rounded-3 p-3 mb-3 bg-light">
+          <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างแอดมินรองใหม่</h6>
+          <input type="text" id="newDeputyUser" class="form-control form-control-sm mb-2" placeholder="ชื่อผู้ใช้">
+          <input type="password" id="newDeputyPass" class="form-control form-control-sm mb-2" placeholder="รหัสผ่าน">
+          <button class="btn btn-custom-primary btn-sm w-100" onclick="createDeputyAdmin()"><i class="fa-solid fa-check"></i> สร้างบัญชี</button>
+        </div>
+        <h6 class="fw-bold small mb-2">รายชื่อผู้ใช้ในระบบ</h6>
+        <div id="userListContainer" class="small"></div>
+      </div>
+    </div>
+  </div>
+</div>
+  <div class="modal fade" id="editDocModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius: 16px; border: none;">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen text-warning"></i> แก้ไขข้อมูลโครงการ</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="eDocId">
+        
+        <div class="mb-3">
+          <label class="fw-bold small text-muted">ชื่อโฟลเดอร์/ไฟล์/ลิงก์</label>
+          <input type="text" id="eDocTitle" class="form-control">
+        </div>
+        
+        <div class="mb-3">
+          <label class="fw-bold small text-muted">Note (หมายเหตุ/รายละเอียด)</label>
+          <textarea id="eDocNote" class="form-control" rows="3" placeholder="เพิ่มรายละเอียดที่นี่... (เช่น อัปเดตเมื่อไหร่, รหัสผ่านไฟล์)"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-custom-primary px-4" id="btnSaveEditDoc" onclick="saveEditDoc()"><i class="fa-solid fa-save"></i> บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+  <script>
+    let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, calendar;
+    let mapGpsWatchId = null;
+    let myLocationMarker = null;
+    let radiusCircle = null;
+    let radiusCenterMarker = null;
+    let _radiusPickOnce = null;
+    let radiusFilter = { active: false, km: 10, lat: null, lng: null };
+    /** รายการโครงการในรัศมีล่าสุด (ครบทุกจุด) — ใช้ Export CSV/PDF */
+    let radiusLastExportRows = [];
+    /** พิกัดล่าสุดจาก GPS บนแผนที่ — ใช้คำนวณระยะได้ทันทีโดยไม่ต้องรอ getCurrentPosition ซ้ำ */
+    let lastUserGps = { lat: null, lng: null, at: 0 };
+    const LAST_GPS_MAX_AGE_MS = 90000;
+
+    function haversineKm_(lat1, lng1, lat2, lng2) {
+      const R = 6371;
+      const toRad = (d) => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function escHtml_(s) {
+      if (s == null || s === '') return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    }
+
+    /** ถ้ากรอกช่องกำหนดเอง (0.1–500) ใช้ค่านั้น ไม่เช่นนั้นใช้ dropdown */
+    function getSelectedRadiusKm_() {
+      var inp = document.getElementById('mapRadiusKmCustom');
+      if (inp && String(inp.value).trim() !== '') {
+        var v = parseFloat(String(inp.value).replace(',', '.'));
+        if (isFinite(v) && v >= 0.1 && v <= 500) return v;
+      }
+      var sel = document.getElementById('mapRadiusKm');
+      return parseFloat(sel && sel.value) || 10;
+    }
+
+    function csvEscapeCell_(val) {
+      if (val == null || val === '') return '';
+      var s = String(val);
+      if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    function clearRadiusVisualOnly_() {
+      if (radiusCircle && map) { try { map.removeLayer(radiusCircle); } catch (e) {} }
+      if (radiusCenterMarker && map) { try { map.removeLayer(radiusCenterMarker); } catch (e) {} }
+      radiusCircle = null;
+      radiusCenterMarker = null;
+    }
+
+    window.reapplyRadiusIfActive = function() {
+      if (radiusFilter.active && radiusFilter.lat != null && radiusFilter.lng != null) {
+        window.applyRadiusFilter(radiusFilter.lat, radiusFilter.lng);
+      }
+    };
+
+    window.styleMarkersByRadius = function() {
+      if (!map || !markersLayer || !radiusFilter.active) return;
+      var km = radiusFilter.km;
+      var lat0 = radiusFilter.lat;
+      var lng0 = radiusFilter.lng;
+      if (lat0 == null || lng0 == null) return;
+      var insideList = [];
+      var inside = 0;
+      markersLayer.eachLayer(function(m) {
+        if (!(m instanceof L.Marker)) return;
+        var ll = m.getLatLng();
+        var d = haversineKm_(lat0, lng0, ll.lat, ll.lng);
+        if (d <= km) {
+          m.setOpacity(1);
+          inside++;
+          var loc = m._loc;
+          if (loc) {
+            insideList.push({
+              name: (loc.name || '(ไม่มีชื่อ)').toString(),
+              phase: loc.phase != null ? loc.phase : '',
+              peaRegion: loc.peaRegion != null ? loc.peaRegion : '',
+              pwaRegion: loc.pwaRegion != null ? loc.pwaRegion : '',
+              kwp: loc.kwp != null ? loc.kwp : '',
+              km: d,
+              lat: loc.lat,
+              lng: loc.lng
+            });
+          }
+        } else {
+          m.setOpacity(0.28);
+        }
+      });
+      insideList.sort(function(a, b) { return a.km - b.km; });
+      radiusLastExportRows = insideList.slice(0);
+
+      var el = document.getElementById('radiusSummary');
+      if (!el) return;
+      el.classList.remove('d-none');
+      var lines = insideList.slice(0, 30).map(function(it) {
+        return '<li class="mb-1"><strong>' + escHtml_(it.name) + '</strong> <span class="text-muted font-monospace">' + it.km.toFixed(1) + ' กม.</span></li>';
+      });
+      var more = insideList.length > 30 ? '<p class="text-muted mb-0 mt-1">… แสดง 30 รายการแรก — Export จะรวมครบ <strong>' + insideList.length + '</strong> รายการ</p>' : '';
+      var exportBar = '<div class="d-flex flex-wrap gap-2 mb-3 pb-2 border-bottom">' +
+        '<button type="button" class="btn btn-sm btn-success" onclick="exportRadiusListCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>' +
+        '<button type="button" class="btn btn-sm btn-danger" onclick="exportRadiusListPDF()"><i class="fa-solid fa-file-pdf"></i> Export PDF</button></div>';
+      el.innerHTML = exportBar +
+        '<p class="fw-bold mb-2"><i class="fa-solid fa-circle-dot text-success"></i> ในรัศมี ' + km + ' กม. พบ <strong>' + inside + '</strong> จุด</p>' +
+        '<ul class="list-unstyled mb-0 small" style="max-height:180px;overflow-y:auto;">' + lines.join('') + '</ul>' + more;
+    };
+
+    window.exportRadiusListCSV = function() {
+      if (!radiusLastExportRows || radiusLastExportRows.length === 0) {
+        Toast.fire({ icon: 'warning', title: 'ไม่มีข้อมูลในรัศมีให้ส่งออก' });
+        return;
+      }
+      var rows = radiusLastExportRows;
+      var hdr = ['ลำดับ', 'ชื่อสถานที่', 'เฟส', 'เขต กฟภ.', 'เขต กปภ.', 'kWp', 'ระยะจากจุดกลาง (กม.)', 'Lat', 'Lng'];
+      var lines = [hdr.map(csvEscapeCell_).join(',')];
+      rows.forEach(function(r, i) {
+        var line = [
+          i + 1,
+          r.name,
+          r.phase,
+          r.peaRegion,
+          r.pwaRegion,
+          r.kwp,
+          r.km.toFixed(3),
+          r.lat,
+          r.lng
+        ].map(csvEscapeCell_);
+        lines.push(line.join(','));
+      });
+      var meta = '# รัศมี ' + radiusFilter.km + ' กม. | จุดกลาง ' + (radiusFilter.lat != null ? radiusFilter.lat.toFixed(6) : '') + ', ' + (radiusFilter.lng != null ? radiusFilter.lng.toFixed(6) : '') + ' | ' + new Date().toLocaleString('th-TH') + '\n';
+      var blob = new Blob(['\ufeff' + meta + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'โครงการในรัศมี_' + radiusFilter.km + 'km_' + new Date().toISOString().slice(0, 10) + '.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      Toast.fire({ icon: 'success', title: 'ดาวน์โหลด CSV แล้ว' });
+    };
+
+    window.exportRadiusListPDF = function() {
+      if (!radiusLastExportRows || radiusLastExportRows.length === 0) {
+        Toast.fire({ icon: 'warning', title: 'ไม่มีข้อมูลในรัศมีให้ส่งออก' });
+        return;
+      }
+      var rows = radiusLastExportRows;
+      var km = radiusFilter.km;
+      var la = radiusFilter.lat != null ? radiusFilter.lat.toFixed(6) : '-';
+      var ln = radiusFilter.lng != null ? radiusFilter.lng.toFixed(6) : '-';
+      var when = new Date().toLocaleString('th-TH', { dateStyle: 'long', timeStyle: 'short' });
+      var tableRows = rows.map(function(r, idx) {
+        var bg = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+        return '<tr style="background:' + bg + ';"><td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;">' + (idx + 1) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#0f766e;">' + escHtml_(r.name) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">' + escHtml_(r.phase) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:11px;">' + escHtml_(r.peaRegion) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:11px;">' + escHtml_(r.pwaRegion) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;">' + escHtml_(r.kwp) + '</td>' +
+          '<td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-variant-numeric:tabular-nums;">' + r.km.toFixed(2) + '</td></tr>';
+      }).join('');
+
+      var html = '<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>รายงานโครงการในรัศมี</title>' +
+        '<style>@page { margin: 16mm; } body { font-family: "Sarabun","Prompt","Tahoma",sans-serif; margin:0; color:#1e293b; font-size:13px; } ' +
+        '.cover { background: linear-gradient(135deg,#0d9488 0%,#0369a1 55%,#f59e0b 100%); color:#fff; padding: 32px 36px 28px; margin: 0 0 24px 0; border-radius: 0 0 24px 24px; box-shadow: 0 12px 40px rgba(13,148,136,0.25); } ' +
+        '.cover h1 { margin:0 0 8px; font-size: 26px; letter-spacing: 0.02em; } .cover p { margin:4px 0; opacity: 0.95; font-size: 14px; } .badge { display:inline-block; background: rgba(255,255,255,0.25); padding: 6px 14px; border-radius: 999px; font-weight: 700; margin-top: 12px; } ' +
+        '.wrap { padding: 0 24px 32px; max-width: 1200px; margin: 0 auto; } table { width: 100%; border-collapse: collapse; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(15,23,42,0.08); } ' +
+        'thead th { background: linear-gradient(180deg,#14b8a6,#0d9488); color:#fff; padding: 12px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; } ' +
+        '.foot { margin-top: 24px; padding-top: 16px; border-top: 2px solid #e2e8f0; color:#64748b; font-size: 12px; text-align: center; }</style></head><body>' +
+        '<div class="cover"><h1>รายงานโครงการในรัศมี</h1><p>ใช้สำหรับการนำเสนอภาพรวมพื้นที่เป้าหมาย</p>' +
+        '<p>สร้างเมื่อ ' + escHtml_(when) + '</p>' +
+        '<span class="badge">รัศมี ' + km + ' กม. · พบ ' + rows.length + ' โครงการ</span></div>' +
+        '<div class="wrap"><p style="margin:0 0 16px;"><strong>จุดศูนย์กลาง:</strong> Lat ' + la + ', Lng ' + ln + '</p>' +
+        '<table><thead><tr><th style="width:48px;">#</th><th>ชื่อสถานที่</th><th style="width:52px;">เฟส</th><th>เขต กฟภ.</th><th>เขต กปภ.</th><th style="width:72px;">kWp</th><th style="width:88px;">ระยะ (กม.)</th></tr></thead><tbody>' +
+        tableRows + '</tbody></table>' +
+        '<div class="foot">PWA Project Dashboard · ระยะคำนวณเป็นเส้นตรงบนพื้นผิวโลก (Haversine)</div></div>' +
+        '<script>window.onload=function(){ window.print(); };<\/script></body></html>';
+
+      var w = window.open('', '_blank');
+      if (!w) {
+        Toast.fire({ icon: 'error', title: 'เปิดหน้าต่างไม่ได้ — อนุญาต Popup' });
+        return;
+      }
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    };
+
+    window.applyRadiusFilter = function(lat, lng) {
+      if (!map || typeof L === 'undefined' || !L.circle) return;
+      var la = parseFloat(lat);
+      var ln = parseFloat(lng);
+      if (!isFinite(la) || !isFinite(ln)) return;
+      var km = getSelectedRadiusKm_();
+      radiusFilter = { active: true, km: km, lat: la, lng: ln };
+      clearRadiusVisualOnly_();
+      try { map.invalidateSize(); } catch (e) {}
+      var radiusM = Math.max(100, km * 1000);
+      radiusCircle = L.circle([la, ln], {
+        radius: radiusM,
+        color: '#0284c7',
+        fillColor: '#0ea5e9',
+        fillOpacity: 0.22,
+        opacity: 1,
+        weight: 3
+      }).addTo(map);
+      if (typeof radiusCircle.bringToFront === 'function') radiusCircle.bringToFront();
+      radiusCenterMarker = L.marker([la, ln], {
+        icon: L.divIcon({
+          html: '<div style="background:#0284c7;width:24px;height:24px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 10px rgba(2,132,199,.9);"></div>',
+          className: '',
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        })
+      }).addTo(map);
+      if (typeof radiusCenterMarker.bringToFront === 'function') radiusCenterMarker.bringToFront();
+      window.styleMarkersByRadius();
+      try {
+        map.fitBounds(radiusCircle.getBounds(), { padding: [40, 40], maxZoom: 11 });
+      } catch (e) {}
+    };
+
+    window.showRadiusFromGps = function() {
+      if (!map) {
+        Toast.fire({ icon: 'warning', title: 'เปิดหน้าแผนที่ก่อน' });
+        return;
+      }
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
+        window.applyRadiusFilter(lastUserGps.lat, lastUserGps.lng);
+        return;
+      }
+      if (!navigator.geolocation) {
+        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          var la = pos.coords.latitude;
+          var ln = pos.coords.longitude;
+          lastUserGps = { lat: la, lng: ln, at: Date.now() };
+          window.applyRadiusFilter(la, ln);
+        },
+        function() {
+          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
+        },
+        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
+      );
+    };
+
+    window.enableRadiusPickOnMap = function() {
+      if (!map) return;
+      if (_radiusPickOnce) {
+        map.off('click', _radiusPickOnce);
+        _radiusPickOnce = null;
+      }
+      Toast.fire({ icon: 'info', title: 'คลิกบนแผนที่เพื่อวางจุดกลางรัศมี' });
+      map.getContainer().style.cursor = 'crosshair';
+      _radiusPickOnce = function(e) {
+        map.off('click', _radiusPickOnce);
+        map.getContainer().style.cursor = '';
+        _radiusPickOnce = null;
+        window.applyRadiusFilter(e.latlng.lat, e.latlng.lng);
+      };
+      map.once('click', _radiusPickOnce);
+    };
+
+    window.clearRadiusFilter = function() {
+      radiusFilter = { active: false, km: 10, lat: null, lng: null };
+      radiusLastExportRows = [];
+      var cust = document.getElementById('mapRadiusKmCustom');
+      if (cust) cust.value = '';
+      clearRadiusVisualOnly_();
+      if (markersLayer) {
+        markersLayer.eachLayer(function(m) {
+          if (m instanceof L.Marker) {
+            try { m.setOpacity(1); } catch (e) {}
+          }
+        });
+      }
+      var el = document.getElementById('radiusSummary');
+      if (el) {
+        el.classList.add('d-none');
+        el.innerHTML = '';
+      }
+      if (_radiusPickOnce && map) {
+        map.off('click', _radiusPickOnce);
+        try { map.getContainer().style.cursor = ''; } catch (e) {}
+        _radiusPickOnce = null;
+      }
+    };
+    let outageData = [];
+    let filteredOutageData = []; 
+    let allData = [];
+    let filteredData = [];
+    let selectedRoute = [];
+    let dragStartIndex = -1; 
+    let userRole = 'guest';
+    let sessionToken = null;
+    const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+    function escapeHtml(s) {
+      if (s == null || s === '') return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function isSafeHttpUrl(url) {
+      return /^https?:\/\//i.test((url || '').trim());
+    }
+
+    function sanitizeUrl(url) {
+      const u = (url || '').trim();
+      return isSafeHttpUrl(u) ? u : '';
+    }
+
+    function dateToLocalIso(d) {
+      const pad = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+        'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+
+    function normalizeNameForMatch(s) {
+      return (s || '').toString().trim().replace(/\s+/g, ' ').toLowerCase()
+        .replace(/\s*\(เฟส\s*[^)]+\)\s*$/i, '').trim();
+    }
+
+    function clearAuthState() {
+      userRole = 'guest';
+      sessionToken = null;
+      localStorage.removeItem('pwa_token');
+    }
+
+    function persistAuthState(role, token, expireMs) {
+      userRole = role;
+      sessionToken = token || null;
+      localStorage.setItem('pwa_token', JSON.stringify({
+        role: role,
+        sessionToken: sessionToken,
+        expire: expireMs || (Date.now() + SESSION_TTL_MS)
+      }));
+    }
+
+    function isValidSessionTokenFormat(tok) {
+      return tok && typeof tok === 'string' && tok.length >= 32 && tok.indexOf('-') > 0;
+    }
+
+    function gasAuthArgs() {
+      if (!sessionToken) throw new Error('กรุณาเข้าสู่ระบบ');
+      return sessionToken;
+    }
+
+    function handleOutageAuthError(err) {
+      const msg = (err && err.message) ? err.message : String(err || '');
+      if (/เซสชัน|เข้าสู่ระบบ|login/i.test(msg)) {
+        clearAuthState();
+        updateUIByRole();
+        Swal.fire({
+          icon: 'warning',
+          title: 'กรุณาเข้าสู่ระบบใหม่',
+          text: msg.replace(/^Error:\s*/i, ''),
+          confirmButtonText: 'Login',
+          confirmButtonColor: '#20c997'
+        }).then(r => { if (r.isConfirmed) showLogin(); });
+        return true;
+      }
+      return false;
+    }
+    let phaseChartInstance = null;
+    let pwaChartInstance = null;
+    let currentDrilldownData = []; 
+
+    const BASE_NAV_URL = "https://www" + ".goo" + "gle.com/maps/dir/?api=1";
+
+    const THAI_PROVINCES = [
+      "กรุงเทพมหานคร", "กระบี่", "กาญจนบุรี", "กาฬสินธุ์", "กำแพงเพชร", "ขอนแก่น", "จันทบุรี", "ฉะเชิงเทรา", "ชลบุรี", "ชัยนาท", "ชัยภูมิ", "ชุมพร", "เชียงราย", "เชียงใหม่", "ตรัง", "ตราด", "ตาก", "นครนายก", "นครปฐม", "นครพนม", "นครราชสีมา", "นครศรีธรรมราช", "นครสวรรค์", "นนทบุรี", "นราธิวาส", "น่าน", "บึงกาฬ", "บุรีรัมย์", "ปทุมธานี", "ประจวบคีรีขันธ์", "ปราจีนบุรี", "ปัตตานี", "พระนครศรีอยุธยา", "พะเยา", "พังงา", "พัทลุง", "พิจิตร", "พิษณุโลก", "เพชรบุรี", "เพชรบูรณ์", "แพร่", "ภูเก็ต", "มหาสารคาม", "มุกดาหาร", "แม่ฮ่องสอน", "ยโสธร", "ยะลา", "ร้อยเอ็ด", "ระนอง", "ระยอง", "ราชบุรี", "ลพบุรี", "ลำปาง", "ลำพูน", "เลย", "ศรีสะเกษ", "สกลนคร", "สงขลา", "สตูล", "สมุทรปราการ", "สมุทรสงคราม", "สมุทรสาคร", "สระแก้ว", "สระบุรี", "สิงห์บุรี", "สุโขทัย", "สุพรรณบุรี", "สุราษฎร์ธานี", "สุรินทร์", "หนองคาย", "หนองบัวลำภู", "อ่างทอง", "อำนาจเจริญ", "อุดรธานี", "อุตรดิตถ์", "อุทัยธานี", "อุบลราชธานี"
+    ];
+
+    const Toast = Swal.mixin({
+      toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true
+    });
+
+    const iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-';
+    const icons = {
+      green: new L.Icon({ iconUrl: iconUrl+'green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }),
+      blue: new L.Icon({ iconUrl: iconUrl+'blue.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }),
+      red: new L.Icon({ iconUrl: iconUrl+'red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] })
+    };
+
+    function getIcon(phase) {
+      let p = String(phase).trim();
+      if (p === '1') return icons.green;
+      if (p === '2') return icons.blue;
+      if (p === '3' || p === '4') return icons.red;
+      return icons.blue;
+    }
+
+    function getLocLabel(loc) {
+      let n = (loc.name || "").toString().trim().replace(/\s+/g, ' ');
+      let p = (loc.phase || "").toString().trim();
+      return n + " (เฟส " + p + ")";
+    }
+
+    function updateMapGpsStatus(message, cls) {
+      let statusEl = document.getElementById('mapGpsStatus');
+      if(!statusEl) return;
+      statusEl.className = 'small ' + (cls || 'text-muted');
+      statusEl.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ' + message;
+    }
+
+    function startMapGpsTracking() {
+      if(!navigator.geolocation) {
+        updateMapGpsStatus('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
+        return;
+      }
+      if(mapGpsWatchId !== null) return;
+      updateMapGpsStatus('กำลังรออนุญาต GPS...', 'text-warning');
+      mapGpsWatchId = navigator.geolocation.watchPosition(function(pos) {
+        let lat = pos.coords.latitude;
+        let lng = pos.coords.longitude;
+        lastUserGps = { lat: lat, lng: lng, at: Date.now() };
+        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6), 'text-success');
+        if(!map) return;
+        if(!myLocationMarker) {
+          myLocationMarker = L.circleMarker([lat, lng], {
+            radius: 8, color: '#198754', weight: 2, fillColor: '#20c997', fillOpacity: 0.9
+          }).addTo(map);
+          myLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
+        } else {
+          myLocationMarker.setLatLng([lat, lng]);
+        }
+      }, function() {
+        updateMapGpsStatus('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
+      }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 15000 });
+    }
+
+    // 🟢 แก้ไข: นำ initOutageSystem ออกจากตรงนี้
+    document.addEventListener('DOMContentLoaded', function() {
+      editModalObj = new bootstrap.Modal(document.getElementById('editModal'));
+      drilldownModalObj = new bootstrap.Modal(document.getElementById('drilldownModal'));
+      outageModalObj = new bootstrap.Modal(document.getElementById('outageModal'), { focus: false });
+      document.getElementById('outageModal').addEventListener('shown.bs.modal', function() {
+        const first = document.getElementById('o_project');
+        if (first) first.focus();
+      });
+      document.addEventListener('hidden.bs.modal', function(ev) {
+        if (ev.target && ev.target.id === 'outageModal') {
+          const back = document.getElementById('btnAddOutage') || document.getElementById('tab-outage');
+          if (back) back.focus();
+        }
+      });
+      docModalObj = new bootstrap.Modal(document.getElementById('docModal'));
+      editDocModalObj = new bootstrap.Modal(document.getElementById('editDocModal'));
+      
+      flatpickr(".datepicker", {
+        enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
+        onChange: function(selectedDates, dateStr, instance) {
+          if(selectedDates[0]) {
+            let d = selectedDates[0];
+            instance.input.value = `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()+543} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+          }
+        }
+      });
+      
+      checkAuthToken();
+      fetchDocs();
+      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
+    });
+
+    // 🟢 แก้ไข: ย้าย initOutageSystem() มาต่อท้ายตรงนี้ เพื่อให้แน่ใจว่า allData โหลดเสร็จก่อน
+    function initApp(data) {
+      allData = data;
+      filteredData = [...allData];
+      document.getElementById('loading').style.display = 'none';
+      
+      setupFiltersAndSelect();
+      generateDashboard();
+      switchMenu('map');
+      
+      let streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' });
+      let satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: 'Google Satellite' });
+
+      map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
+      L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
+      markersLayer = L.layerGroup().addTo(map);
+      startMapGpsTracking();
+
+      fetch('https://raw.githubusercontent.com/apisit/thailand.json/master/thailand.json')
+        .then(res => res.json())
+        .then(data => {
+          L.geoJSON(data, {
+            style: { color: "#4dabf7", weight: 1.5, opacity: 0.6, fillOpacity: 0.02 }
+          }).addTo(map);
+        }).catch(err => console.log('โหลดแผนที่จังหวัดล้มเหลว', err));
+      
+      renderMap();
+      renderTable();
+      initOutageSystem(); 
+    }
+
+    function checkAuthToken() {
+      try {
+        const raw = localStorage.getItem('pwa_token');
+        if (!raw) return;
+        const token = JSON.parse(raw);
+        if (!token || !token.expire || token.expire <= Date.now()) {
+          localStorage.removeItem('pwa_token');
+          return;
+        }
+        if (token.role === 'guest') {
+          userRole = 'guest';
+          sessionToken = null;
+          updateUIByRole();
+          return;
+        }
+        if (!token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
+          clearAuthState();
+          updateUIByRole();
+          return;
+        }
+        google.script.run.withSuccessHandler(function(res) {
+          if (!res || !res.valid) {
+            clearAuthState();
+            updateUIByRole();
+            return;
+          }
+          persistAuthState(res.role, token.sessionToken, token.expire);
+          updateUIByRole();
+        }).withFailureHandler(function() {
+          clearAuthState();
+          updateUIByRole();
+        }).validateClientSession(token.sessionToken);
+      } catch (e) {
+        clearAuthState();
+        updateUIByRole();
+      }
+    }
+
+    function doLogout() {
+      const tok = sessionToken;
+      clearAuthState();
+      updateUIByRole();
+      if (tok) {
+        google.script.run.withFailureHandler(function() {}).revokeSession(tok);
+      }
+      Toast.fire({ icon: 'success', title: 'ออกจากระบบแล้ว' });
+    }
+
+    function showLogin() {
+      if(userRole === 'admin' || userRole === 'editor') {
+        Swal.fire({
+          title: 'ออกจากระบบ?', text: "คุณต้องการออกจากระบบหรือไม่", icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787'
+        }).then((res) => {
+          if(res.isConfirmed) doLogout();
+        }); return;
+      }
+      Swal.fire({
+        title: 'เข้าสู่ระบบ', html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน"><input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">',
+        confirmButtonText: 'เข้าสู่ระบบ', confirmButtonColor: '#20c997',
+        preConfirm: () => ({ user: document.getElementById('swal-user').value, pass: document.getElementById('swal-pass').value })
+      }).then((res) => {
+        if (res.isConfirmed) {
+          google.script.run.withSuccessHandler(data => {
+            if(data.success) {
+              if (data.role === 'guest') {
+                persistAuthState('guest', null, Date.now() + SESSION_TTL_MS);
+              } else {
+                if (!data.sessionToken) {
+                  Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'ไม่ได้รับ session token จากเซิร์ฟเวอร์' });
+                  return;
+                }
+                persistAuthState(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
+              }
+              updateUIByRole(); Toast.fire({ icon: 'success', title: data.message });
+            } else { Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message }); }
+          }).withFailureHandler(err => {
+            Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: err.message });
+          }).authenticate(res.value.user, res.value.pass);
+        }
+      });
+    }
+
+    function canEditOutage() { return userRole === 'admin' || userRole === 'editor'; }
+    function canEditAll() { return userRole === 'admin'; }
+
+    function updateUIByRole() {
+  const statusEl = document.getElementById('userStatus');
+  const authBtn = document.getElementById('authBtn');
+  if(userRole === 'admin') {
+    statusEl.innerHTML = '<i class="fa-solid fa-user-shield text-success"></i> แอดมินหลัก';
+    authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
+  } else if (userRole === 'editor') {
+    statusEl.innerHTML = '<i class="fa-solid fa-user-pen text-warning"></i> แอดมินรอง';
+    authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
+  } else {
+    statusEl.innerHTML = '<i class="fa-solid fa-user text-secondary"></i> Guest';
+    authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login'; authBtn.className = 'btn btn-sm btn-custom-secondary';
+  }
+  const outageEditable = canEditOutage();
+  document.getElementById('btnAddOutage').disabled = !outageEditable;
+  const btnTop = document.getElementById('btnAddOutageTop');
+  if (btnTop) btnTop.disabled = !outageEditable;
+  const btnUsers = document.getElementById('btnManageUsers');
+  if (btnUsers) btnUsers.style.display = canEditAll() ? 'inline-block' : 'none';
+
+  let docBtnContainer = document.getElementById('docActionButtons');
+  if(docBtnContainer) docBtnContainer.style.display = canEditAll() ? 'flex' : 'none';
+
+  document.querySelectorAll('.doc-drag-handle').forEach(el => el.style.display = canEditAll() ? 'block' : 'none');
+  document.querySelectorAll('.btn-del-doc').forEach(el => el.style.display = canEditAll() ? 'block' : 'none');
+  document.querySelectorAll('.btn-edit-doc').forEach(el => el.style.display = canEditAll() ? 'block' : 'none');
+  renderTable();
+  if (typeof renderOutageList === 'function' && filteredOutageData) renderOutageList();
+}
+
+    function showDrilldown(title, locData) {
+      document.getElementById('drilldownTitle').innerText = title;
+      currentDrilldownData = locData; 
+      let tbody = document.getElementById('drilldownTableBody');
+      tbody.innerHTML = '';
+      
+      let regionType = document.getElementById('dashRegionFilter') ? document.getElementById('dashRegionFilter').value : 'pwa';
+
+      locData.forEach(loc => {
+        let realIndex = allData.findIndex(d => d.row === loc.row);
+        let btn = '<button class="btn btn-sm btn-outline-info" onclick="viewDetailsFromDrilldown(' + realIndex + ')"><i class="fa-solid fa-map"></i> ดู</button>';
+        let regionText = regionType === 'pea' ? loc.peaRegion : loc.pwaRegion; 
+        
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr><td class="ps-3"><span class="badge bg-secondary">' + (loc.phase||'-') + '</span></td>' +
+          '<td>' + (loc.name||'-') + '</td><td>' + (regionText||'-') + '</td><td class="text-center">' + btn + '</td></tr>'
+        );
+      });
+      drilldownModalObj.show();
+    }
+
+    function viewDetailsFromDrilldown(index) {
+      drilldownModalObj.hide();
+      viewDetails(index);
+    }
+
+    function printDrilldownPDF() {
+      let sortedData = [...currentDrilldownData].sort((a, b) => parseInt(a.phase) - parseInt(b.phase));
+      let title = document.getElementById('drilldownTitle').innerText;
+      let regionType = document.getElementById('dashRegionFilter') ? document.getElementById('dashRegionFilter').value : 'pwa';
+
+      let html = '<!DOCTYPE html><html><head><title>Export - ' + title + '</title>';
+      html += '<style>';
+      html += 'body { font-family: "Sarabun", "Tahoma", sans-serif; padding: 20px; }';
+      html += 'h2 { text-align: center; color: #333; }';
+      html += 'table { width: 100%; border-collapse: collapse; margin-top: 20px; }';
+      html += 'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; }';
+      html += 'th { background-color: #20c997; color: white; }';
+      html += 'tr:nth-child(even) { background-color: #f9f9f9; }';
+      html += '</style></head><body>';
+      html += '<h2>สรุปรายงาน: ' + title + ' (เรียงตามเฟส)</h2>';
+      html += '<table><tr><th>ลำดับ</th><th>เฟส</th><th>ชื่อสถานที่</th><th>กปภ. เขต</th><th>กฟภ. เขต</th><th>กำลังการผลิต (kWp)</th></tr>';
+      
+      sortedData.forEach((loc, idx) => {
+        html += '<tr><td>' + (idx+1) + '</td><td>เฟส ' + (loc.phase||'-') + '</td><td>' + (loc.name||'-') + '</td><td>' + (loc.pwaRegion||'-') + '</td><td>' + (loc.peaRegion||'-') + '</td><td>' + (loc.kwp||'-') + '</td></tr>';
+      });
+      
+      html += '</table></body></html>';
+
+      let printWindow = window.open('', '_blank');
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(function() { printWindow.print(); }, 500);
+    }
+
+    function generateDashboard() {
+      let totalSites = allData.length;
+      let totalKwp = allData.reduce((sum, loc) => sum + (parseFloat(loc.kwp) || 0), 0);
+      let pwaSet = new Set(), peaSet = new Set();
+      let phaseCount = { '1':0, '2':0, '3':0, '4':0 };
+      
+      let regionType = document.getElementById('dashRegionFilter') ? document.getElementById('dashRegionFilter').value : 'pwa';
+      let regionCount = {};
+
+      allData.forEach(loc => {
+        if(loc.pwaRegion) { pwaSet.add(loc.pwaRegion); }
+        if(loc.peaRegion) { peaSet.add(loc.peaRegion); }
+        
+        let ph = String(loc.phase).trim();
+        if(phaseCount[ph] !== undefined) phaseCount[ph]++;
+        
+        let r = regionType === 'pwa' ? loc.pwaRegion : loc.peaRegion;
+        if(r) regionCount[r] = (regionCount[r] || 0) + 1;
+      });
+
+      document.getElementById('dashTotalSites').innerText = totalSites;
+      document.getElementById('dashTotalKwp').innerText = totalKwp.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      document.getElementById('dashTotalPWA').innerText = pwaSet.size;
+      document.getElementById('dashTotalPEA').innerText = peaSet.size;
+
+      Chart.defaults.font.family = "'Prompt', sans-serif";
+      
+      if(phaseChartInstance) phaseChartInstance.destroy();
+      const ctxPhase = document.getElementById('phaseChart').getContext('2d');
+      phaseChartInstance = new Chart(ctxPhase, {
+        type: 'doughnut',
+        data: {
+          labels: ['เฟส 1', 'เฟส 2', 'เฟส 3', 'เฟส 4'],
+          datasets: [{ data: [phaseCount['1'], phaseCount['2'], phaseCount['3'], phaseCount['4']], backgroundColor: ['#20c997', '#4dabf7', '#ff8787', '#f03e3e'] }]
+        },
+        options: { 
+          responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+          onClick: (e, activeEls) => {
+            if(activeEls.length > 0) {
+              const idx = activeEls[0].index;
+              const phLabel = phaseChartInstance.data.labels[idx].replace('เฟส ', '');
+              const fData = allData.filter(d => String(d.phase) === phLabel);
+              showDrilldown('สถานที่ติดตั้ง เฟส ' + phLabel, fData);
+            }
+          }
+        }
+      });
+
+      if(pwaChartInstance) pwaChartInstance.destroy();
+      const ctxPwa = document.getElementById('pwaChart').getContext('2d');
+      let sortedRegions = Object.keys(regionCount).sort();
+      let rData = sortedRegions.map(k => regionCount[k]);
+      let rLabel = regionType === 'pwa' ? 'กปภ.' : 'กฟภ.';
+      let rColor = regionType === 'pwa' ? '#4dabf7' : '#ff8787'; 
+
+      pwaChartInstance = new Chart(ctxPwa, {
+        type: 'bar',
+        data: {
+          labels: sortedRegions,
+          datasets: [{ label: 'จำนวนสถานที่', data: rData, backgroundColor: rColor, borderRadius: 4 }]
+        },
+        options: { 
+          responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } },
+          onClick: (e, activeEls) => {
+            if(activeEls.length > 0) {
+              const idx = activeEls[0].index;
+              const lbl = pwaChartInstance.data.labels[idx];
+              const fData = allData.filter(d => regionType === 'pwa' ? d.pwaRegion === lbl : d.peaRegion === lbl);
+              showDrilldown('สถานที่ติดตั้ง ' + rLabel + ' ' + lbl, fData);
+            }
+          }
+        }
+      });
+    }
+
+    function setupFiltersAndSelect() {
+      let peas = new Set(), pwas = new Set();
+      let routeSearchList = document.getElementById('routeSearchList'); 
+      let mapSearchList = document.getElementById('mapSearchList');
+      
+      routeSearchList.innerHTML = '';
+      mapSearchList.innerHTML = '';
+      
+      allData.forEach((loc, idx) => {
+        if(loc.peaRegion) peas.add(loc.peaRegion);
+        if(loc.pwaRegion) pwas.add(loc.pwaRegion);
+        
+        let strLabel = getLocLabel(loc);
+        mapSearchList.insertAdjacentHTML('beforeend', '<option value="' + strLabel + '">');
+        routeSearchList.insertAdjacentHTML('beforeend', '<option value="' + strLabel + '">');
+      });
+
+      let fProvList = document.getElementById('provinceList');
+      fProvList.innerHTML = '';
+      THAI_PROVINCES.forEach(p => {
+        fProvList.insertAdjacentHTML('beforeend', '<option value="' + p + '">');
+      });
+
+      let fPea = document.getElementById('filterPEA');
+      fPea.innerHTML = '<option value="">ทุกเขต กฟภ.</option>';
+      [...peas].sort().forEach(p => fPea.insertAdjacentHTML('beforeend', '<option value="' + p + '">' + p + '</option>'));
+
+      // 🟢 เพิ่มโค้ดส่วนนี้เข้าไป เพื่อให้ Dropdown กปภ. มีตัวเลือก 🟢
+      let fPwa = document.getElementById('filterPWA');
+      fPwa.innerHTML = '<option value="">ทุกเขต กปภ.</option>';
+      [...pwas].sort().forEach(p => fPwa.insertAdjacentHTML('beforeend', '<option value="' + p + '">' + p + '</option>'));
+
+      let oPea = document.getElementById('outageRegionSelect');
+      oPea.innerHTML = '<option value="">ทุกเขต กฟภ.</option>';
+      [...peas].sort().forEach(p => oPea.insertAdjacentHTML('beforeend', '<option value="' + p + '">' + p + '</option>'));
+    }
+
+    function applyFilters() {
+      let p = document.getElementById('filterPEA').value;
+      let w = document.getElementById('filterPWA').value;
+      let prov = document.getElementById('filterProv').value.trim();
+      let checkedPhases = Array.from(document.querySelectorAll('.phase-filter:checked')).map(cb => cb.value);
+
+      filteredData = allData.filter(loc => {
+        let phaseMatch = checkedPhases.includes(String(loc.phase));
+        let peaMatch = (!p || loc.peaRegion === p);
+        let pwaMatch = (!w || loc.pwaRegion === w);
+        let provMatch = true;
+
+        if (prov !== "") {
+          let concatText = (loc.name + " " + loc.peaRegion + " " + loc.pwaRegion).toLowerCase();
+          let provLower = prov.toLowerCase();
+          if (!concatText.includes(provLower)) provMatch = false;
+        }
+
+        return phaseMatch && peaMatch && pwaMatch && provMatch;
+      });
+      renderMap();
+    }
+
+    function resetFilters() {
+      document.getElementById('filterPEA').value = '';
+      document.getElementById('filterPWA').value = '';
+      document.getElementById('filterProv').value = '';
+      document.querySelectorAll('.phase-filter').forEach(cb => cb.checked = true);
+      document.getElementById('mapSearchInput').value = '';
+      applyFilters();
+    }
+
+    function searchOnMap() {
+      let val = document.getElementById('mapSearchInput').value.trim().toLowerCase();
+      if(val === "") return;
+      
+      let idx = allData.findIndex(loc => {
+        let label = getLocLabel(loc).toLowerCase();
+        let nameOnly = (loc.name || "").toString().trim().replace(/\s+/g, ' ').toLowerCase();
+        return label === val || nameOnly === val || label.includes(val);
+      });
+
+      if(idx > -1) {
+        let loc = allData[idx];
+        if(loc.lat && loc.lng) {
+          map.flyTo([loc.lat, loc.lng], 15);
+          showDetailsPanel(idx);
+          document.getElementById('mapSearchInput').value = ''; 
+        } else {
+          Toast.fire({ icon: 'warning', title: 'สถานที่นี้ไม่มีพิกัดในระบบ' });
+        }
+      } else {
+        Toast.fire({ icon: 'error', title: 'ค้นหาไม่พบ กรุณาตรวจสอบชื่ออีกครั้ง' });
+      }
+    }
+
+    function viewDetails(index) {
+      switchMenu('map');
+      let loc = allData[index];
+      if(loc && loc.lat && loc.lng) {
+        setTimeout(() => { map.flyTo([loc.lat, loc.lng], 15); showDetailsPanel(index); }, 300);
+      } else {
+        showDetailsPanel(index);
+      }
+    }
+
+    function renderMap() {
+      markersLayer.clearLayers();
+      let bounds = [];
+      const rowToIndex = new Map(allData.map((item, idx) => [item.row, idx]));
+      filteredData.forEach(loc => {
+        let marker = L.marker([loc.lat, loc.lng], { icon: getIcon(loc.phase) });
+        marker._loc = loc;
+        let realIndex = rowToIndex.get(loc.row);
+        let hasName = !!(loc.name && String(loc.name).trim());
+        if(hasName) {
+          marker.bindTooltip(String(loc.name).trim(), {
+            permanent: false, direction: 'top', offset: [0, -30], className: 'marker-label-tooltip'
+          });
+        }
+        
+        marker.on('click', function() {
+          showDetailsPanel(realIndex);
+          if(!hasName) return;
+          if(marker.isTooltipOpen()) marker.closeTooltip();
+          else marker.openTooltip();
+        });
+        
+        markersLayer.addLayer(marker);
+        bounds.push([loc.lat, loc.lng]);
+      });
+      if (radiusFilter.active && radiusFilter.lat != null && radiusFilter.lng != null) {
+        window.applyRadiusFilter(radiusFilter.lat, radiusFilter.lng);
+      } else if (bounds.length > 0) {
+        map.fitBounds(bounds);
+      } else {
+        map.setView([13.7563, 100.5018], 6);
+      }
+    }
+
+    function getUserLatLngForRoute_() {
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= LAST_GPS_MAX_AGE_MS) {
+        return Promise.resolve({ lat: lastUserGps.lat, lng: lastUserGps.lng, fromCache: true });
+      }
+      return new Promise(function(resolve, reject) {
+        if (!navigator.geolocation) { reject(new Error('no geo')); return; }
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            var la = pos.coords.latitude;
+            var ln = pos.coords.longitude;
+            lastUserGps = { lat: la, lng: ln, at: Date.now() };
+            resolve({ lat: la, lng: ln, fromCache: false });
+          },
+          function(err) { reject(err); },
+          { enableHighAccuracy: false, maximumAge: 120000, timeout: 12000 }
+        );
+      });
+    }
+
+    window.calcDistanceMyLoc = function(destLat, destLng) {
+      var resultBox = document.getElementById('distMeResult');
+      if (!resultBox) return;
+
+      resultBox.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> กำลังเตรียมพิกัดและคำนวณเส้นทาง...';
+
+      getUserLatLngForRoute_().then(function(user) {
+        if (user.fromCache) {
+          resultBox.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> กำลังคำนวณเส้นทางถนน...';
+        }
+        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var t = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, 18000) : null;
+        var fetchOpts = ctrl ? { signal: ctrl.signal } : {};
+        return fetch(
+          'https://router.project-osrm.org/route/v1/driving/' + user.lng + ',' + user.lat + ';' + destLng + ',' + destLat + '?overview=false',
+          fetchOpts
+        ).then(function(res) {
+          if (t) clearTimeout(t);
+          return res.json();
+        }).then(function(data) {
+          if (data.code === 'Ok' && data.routes && data.routes[0]) {
+            var distKm = (data.routes[0].distance / 1000).toFixed(1);
+            var timeMin = Math.round(data.routes[0].duration / 60);
+            var hour = Math.floor(timeMin / 60);
+            var minute = timeMin % 60;
+            resultBox.innerHTML = '<div class="alert alert-success py-2 mb-0">' +
+              '<i class="fa-solid fa-car"></i> ระยะทางจากจุดที่ฉันอยู่: <b>' + distKm + ' กม.</b><br>' +
+              '<i class="fa-regular fa-clock"></i> เวลาเดินทางประมาณ: <b>' + hour + ' ชั่วโมง ' + minute + ' นาที</b>' +
+              '</div>';
+          } else {
+            var straight = haversineKm_(user.lat, user.lng, destLat, destLng).toFixed(1);
+            resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0"><span class="text-danger">คำนวณเส้นทางถนนไม่สำเร็จ</span><br>' +
+              '<i class="fa-solid fa-ruler"></i> ระยะเส้นตรงประมาณ: <b>' + straight + ' กม.</b></div>';
+          }
+        }).catch(function() {
+          if (t) clearTimeout(t);
+          try {
+            var straight = haversineKm_(user.lat, user.lng, destLat, destLng).toFixed(1);
+            resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0"><span class="text-muted">เซิร์ฟเวอร์เส้นทางตอบช้าหรือไม่พร้อม</span><br>' +
+              '<i class="fa-solid fa-ruler"></i> ระยะเส้นตรงประมาณ: <b>' + straight + ' กม.</b></div>';
+          } catch (e2) {
+            resultBox.innerHTML = '<span class="text-warning">คำนวณระยะไม่สำเร็จ</span>';
+          }
+        });
+      }).catch(function() {
+        resultBox.innerHTML = '<span class="text-danger">❌ ไม่ได้พิกัดของคุณภายในเวลาที่กำหนด — เปิดสิทธิ์ Location และลองใหม่ (หรือรอให้แผนที่แสดงพิกัดของฉันก่อน)</span>';
+      });
+    };
+
+    function showDetailsPanel(index) {
+      let loc = allData[index];
+      let panel = document.getElementById('detailsPanel');
+      
+      let linkAsbuilt = loc.link ? '<a href="' + loc.link + '" target="_blank" class="btn btn-sm btn-outline-primary mb-2 me-2"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>' : '';
+      let linkPEA = loc.linkPEA ? '<a href="' + loc.linkPEA + '" target="_blank" class="btn btn-sm btn-outline-success mb-2"><i class="fa-solid fa-file-signature"></i> SLD PEA Approved</a>' : '';
+      let combinedLinks = (linkAsbuilt || linkPEA) ? '<div class="mt-2">' + linkAsbuilt + linkPEA + '</div>' : '';
+
+      let editBtn = userRole === 'admin' ? '<button class="btn btn-custom-secondary w-100 mt-3" onclick="openEdit(' + index + ')"><i class="fa-solid fa-pen"></i> แก้ไขข้อมูลนี้</button>' : '';
+
+      panel.innerHTML = 
+        '<h5 class="fw-bold" style="color:#20c997;">' + (loc.name || 'ไม่มีชื่อ') + '</h5>' +
+        '<div class="badge bg-secondary mb-3">เฟส ' + (loc.phase || '-') + '</div>' +
+        '<div class="badge bg-info text-dark mb-3 ms-1">ลำดับ ' + (loc.seq || '-') + '</div>' +
+        
+        '<div class="info-card">' +
+          '<h6><i class="fa-solid fa-building-circle-check"></i> ข้อมูลโครงการ</h6>' +
+          '<small class="text-muted d-block"><b>กฟภ. เขต:</b> ' + (loc.peaRegion || '-') + ' | <b>กปภ. เขต:</b> ' + (loc.pwaRegion || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>kWp:</b> ' + (loc.kwp || '-') + ' | <b>CA:</b> ' + (loc.caNum || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + (loc.meterNum || '-') + '</small>' +
+          combinedLinks +
+        '</div>' +
+        '<div class="info-card" style="border-left-color: #4dabf7;">' +
+          '<h6><i class="fa-solid fa-user-tie"></i> กฟภ. ผู้ดูแล</h6>' +
+          '<small class="text-muted d-block">1. ' + (loc.pea1Name||'-') + ' (' + (loc.pea1Phone||'-') + ') ' + (loc.pea1Pos||'') + '</small>' +
+          '<small class="text-muted d-block mt-1">2. ' + (loc.pea2Name||'-') + ' (' + (loc.pea2Phone||'-') + ') ' + (loc.pea2Pos||'') + '</small>' +
+        '</div>' +
+        '<div class="info-card" style="border-left-color: #ff8787;">' +
+          '<h6><i class="fa-solid fa-helmet-safety"></i> บริษัท ผู้ประสานงาน</h6>' +
+          '<small class="text-muted d-block">1. ' + (loc.comp1Name||'-') + ' (' + (loc.comp1Phone||'-') + ')</small>' +
+          '<small class="text-muted d-block mt-1">2. ' + (loc.comp2Name||'-') + ' (' + (loc.comp2Phone||'-') + ')</small>' +
+        '</div>' +
+        '<div class="d-flex gap-2 mt-3">' +
+          '<button class="btn btn-outline-info flex-grow-1" onclick="calcDistanceMyLoc(' + loc.lat + ',' + loc.lng + ')"><i class="fa-solid fa-crosshairs"></i> คำนวณระยะทางจากฉัน</button>' +
+        '</div>' +
+        '<div class="d-flex gap-2 mt-2">' +
+          '<button class="btn btn-custom-primary flex-grow-1" onclick="navTo(' + index + ')"><i class="fa-brands fa-google"></i> เริ่มนำทางจากจุดที่ฉันอยู่</button>' +
+        '</div>' +
+        '<div id="distMeResult" class="mt-3 text-primary small"></div>' + editBtn;
+
+      if(loc && loc.lat && loc.lng) {
+        calcDistanceMyLoc(loc.lat, loc.lng);
+      }
+    }
+
+    function navTo(index) {
+      let loc = allData[index];
+      if(!loc || !loc.lat || !loc.lng) { Toast.fire({ icon: 'error', title: 'ไม่พบพิกัดที่ถูกต้อง' }); return; }
+      let finalUrl = BASE_NAV_URL + "&destination=" + loc.lat + "," + loc.lng;
+      window.open(finalUrl, '_blank');
+    }
+
+    window.dragStart = function(index, e) {
+      dragStartIndex = index;
+      e.target.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    };
+    window.dragEnd = function(e) { e.target.classList.remove('dragging'); };
+    window.dragOver = function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
+    window.dragEnter = function(e) { e.preventDefault(); e.currentTarget.style.border = "2px dashed #20c997"; };
+    window.dragLeave = function(e) { e.currentTarget.style.border = "1px solid #f1f3f5"; };
+    window.dropItem = function(dropIndex, e) {
+      e.preventDefault();
+      e.currentTarget.style.border = "1px solid #f1f3f5";
+      if (dragStartIndex === dropIndex || dragStartIndex === -1) return;
+
+      let itemToMove = selectedRoute.splice(dragStartIndex, 1)[0];
+      selectedRoute.splice(dropIndex, 0, itemToMove);
+      dragStartIndex = -1;
+      
+      renderRoute();
+    };
+
+    function addCurrentLocationToRoute() {
+      if(selectedRoute.some(r => r.isMyLocation)) {
+        Toast.fire({ icon: 'warning', title: 'มีจุดเริ่มต้น GPS อยู่ในรายการแล้ว' }); return;
+      }
+      
+      let btn = document.getElementById('btnMyLoc');
+      let origHtml = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังดึงพิกัด GPS...';
+      btn.disabled = true;
+
+      navigator.geolocation.getCurrentPosition(pos => {
+        let myLoc = {
+          isMyLocation: true, name: "📍 จุดเริ่มต้น (GPS ของคุณ)",
+          lat: pos.coords.latitude, lng: pos.coords.longitude,
+          phase: "-", peaRegion: "ตำแหน่งปัจจุบัน"
+        };
+        selectedRoute.unshift(myLoc); 
+        renderRoute();
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+        Toast.fire({ icon: 'success', title: 'เพิ่มตำแหน่งปัจจุบันแล้ว' });
+      }, err => {
+        Toast.fire({ icon: 'error', title: 'ดึงพิกัดไม่ได้ กรุณาอนุญาตการเข้าถึง GPS' });
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+      });
+    }
+
+    function addCustomLocationToRoute() {
+      let val = document.getElementById('customLocInput').value.trim();
+      if(val === "") { Toast.fire({ icon: 'warning', title: 'กรุณาพิมพ์สถานที่ หรือพิกัด' }); return; }
+      
+      let customLoc = {
+        isCustomText: true, name: "📍 จุดเริ่มต้น (กำหนดเอง)",
+        customText: val, phase: "-", peaRegion: "ระบุเอง: " + val
+      };
+      
+      selectedRoute.unshift(customLoc); 
+      document.getElementById('customLocInput').value = '';
+      renderRoute();
+      Toast.fire({ icon: 'success', title: 'เพิ่มจุดเริ่มต้นของคุณแล้ว' });
+    }
+
+    function addToRoute() {
+      let val = document.getElementById('routeInput').value.trim().toLowerCase();
+      if (val === "") { Toast.fire({ icon: 'warning', title: 'กรุณาพิมพ์หรือเลือกสถานที่ก่อนกดเพิ่ม' }); return; }
+      
+      let idx = allData.findIndex(loc => {
+        let label = getLocLabel(loc).toLowerCase();
+        let nameOnly = (loc.name || "").toString().trim().replace(/\s+/g, ' ').toLowerCase();
+        return label === val || nameOnly === val || label.includes(val);
+      });
+
+      if(idx > -1) {
+        selectedRoute.push(allData[idx]);
+        document.getElementById('routeInput').value = ''; 
+        renderRoute();
+      } else {
+        Toast.fire({ icon: 'error', title: 'ไม่พบสถานที่ในระบบ กรุณาเลือกจากรายการ' });
+      }
+    }
+
+    async function renderRoute() {
+      let list = document.getElementById('routeList');
+      let detailsDiv = document.getElementById('routeDetails');
+      
+      if (selectedRoute.length === 0) {
+        list.innerHTML = '<p class="text-muted small">ยังไม่มีสถานที่ เลือกค้นหาจากด้านบน</p>';
+        detailsDiv.innerHTML = '';
+        document.getElementById('startNavBtn').disabled = true;
+        document.getElementById('clearNavBtn').disabled = true;
+        return;
+      }
+      
+      document.getElementById('startNavBtn').disabled = false;
+      document.getElementById('clearNavBtn').disabled = false;
+      
+      list.innerHTML = '';
+      selectedRoute.forEach((loc, idx) => {
+        let bgClass = (loc.isMyLocation || loc.isCustomText) ? 'bg-info text-white border-info' : 'bg-light';
+        list.innerHTML += 
+          '<div class="route-item position-relative ' + bgClass + '" draggable="true" ' +
+          'ondragstart="dragStart(' + idx + ', event)" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)" ondrop="dropItem(' + idx + ', event)">' +
+            '<div class="drag-handle" title="ลากเพื่อย้ายลำดับ"><i class="fa-solid fa-grip-vertical"></i></div>' +
+            '<div class="route-icon">' + (idx+1) + '</div>' +
+            '<div class="flex-grow-1">' +
+              '<span class="fw-bold d-block">' + (loc.name || '-') + '</span>' +
+              '<small class="' + ((loc.isMyLocation||loc.isCustomText)?'text-white':'text-muted') + '">เฟส ' + (loc.phase || '-') + ' | ' + (loc.peaRegion || '-') + '</small>' +
+            '</div>' +
+            '<button class="btn btn-sm btn-outline-danger border-0 bg-white" onclick="removeRoute(' + idx + ')"><i class="fa-solid fa-xmark"></i></button>' +
+          '</div>';
+      });
+
+      let hasCustomText = selectedRoute.some(r => r.isCustomText);
+      if (selectedRoute.length > 1 && !hasCustomText) {
+        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณระยะทางรวม...</small></div>';
+        let coords = selectedRoute.map(l => l.lng + "," + l.lat).join(';');
+        try {
+          let res = await fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=false');
+          let data = await res.json();
+          if(data.code === 'Ok') {
+            let distKm = (data.routes[0].distance / 1000).toFixed(1);
+            let timeMin = Math.round(data.routes[0].duration / 60);
+            let timeHr = Math.floor(timeMin / 60);
+            let minRemain = timeMin % 60;
+            let timeStr = timeHr > 0 ? timeHr + ' ชม. ' + minRemain + ' นาที' : timeMin + ' นาที';
+            detailsDiv.innerHTML = 
+              '<div class="route-summary">' +
+                '<div class="fw-bold mb-1"><i class="fa-solid fa-stopwatch text-primary"></i> ข้อมูลเส้นทางรวมทุกจุด (เรียงตามลำดับ)</div>' +
+                'ระยะทางขับรถ: <b>' + distKm + ' กม.</b> <br>' +
+                'เวลาเดินทางโดยประมาณ: <b>' + timeStr + '</b>' +
+              '</div>';
+          } else { detailsDiv.innerHTML = '<small class="text-danger">ไม่สามารถคำนวณเส้นทางได้</small>'; }
+        } catch(e) { detailsDiv.innerHTML = '<small class="text-warning">คำนวณระยะทางขัดข้อง (ยังสามารถกดนำทางผ่าน Maps ได้ปกติ)</small>'; }
+      } else { detailsDiv.innerHTML = ''; }
+    }
+
+    function removeRoute(idx) { selectedRoute.splice(idx, 1); renderRoute(); }
+    function clearRoute() { selectedRoute = []; renderRoute(); }
+
+    function startNavigation() {
+      if (selectedRoute.length === 0) return;
+      
+      let originStr = "";
+      if (selectedRoute[0].isCustomText) {
+        originStr = encodeURIComponent(selectedRoute[0].customText); 
+      } else {
+        originStr = selectedRoute[0].lat + "," + selectedRoute[0].lng;
+      }
+      
+      let destIdx = selectedRoute.length - 1;
+      let destStr = "";
+      if (selectedRoute[destIdx].isCustomText) destStr = encodeURIComponent(selectedRoute[destIdx].customText);
+      else destStr = selectedRoute[destIdx].lat + "," + selectedRoute[destIdx].lng;
+
+      let waypoints = '';
+      if (selectedRoute.length > 2) {
+        let wpArray = selectedRoute.slice(1, destIdx).map(loc => {
+          if (loc.isCustomText) return encodeURIComponent(loc.customText);
+          return loc.lat + "," + loc.lng;
+        });
+        waypoints = '&waypoints=' + wpArray.join('|');
+      }
+      
+      let mapsUrl = BASE_NAV_URL;
+      if (selectedRoute.length === 1 && !selectedRoute[0].isMyLocation && !selectedRoute[0].isCustomText) {
+        mapsUrl += "&destination=" + originStr;
+      } else {
+        mapsUrl += "&origin=" + originStr + "&destination=" + destStr + waypoints;
+      }
+      
+      window.open(mapsUrl, '_blank');
+    }
+
+    function renderTable() {
+      let tbody = document.getElementById('tableBody');
+      tbody.innerHTML = '';
+      allData.forEach((loc, i) => {
+        let actionBtn = userRole === 'admin' 
+            ? '<button class="btn btn-sm btn-outline-info me-1" onclick="viewDetails(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-primary" onclick="openEdit(' + i + ')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>' 
+            : '<button class="btn btn-sm btn-outline-info me-1" onclick="viewDetails(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-secondary" disabled title="Admin เท่านั้น"><i class="fa-solid fa-lock"></i></button>';
+        tbody.insertAdjacentHTML('beforeend', 
+          '<tr>' +
+            '<td><span class="badge bg-secondary">' + (loc.phase || '-') + '</span></td>' +
+            '<td class="fw-bold">' + (loc.name || '-') + '</td>' +
+            '<td>' + (loc.peaRegion || '-') + '</td>' +
+            '<td>' + (loc.pwaRegion || '-') + '</td>' +
+            '<td class="small text-muted">' + (loc.lat || '-') + ', ' + (loc.lng || '-') + '</td>' +
+            '<td class="text-center text-nowrap">' + actionBtn + '</td>' +
+          '</tr>'
+        );
+      });
+    }
+
+    function searchTable() {
+      let filter = document.getElementById('searchInput').value.toLowerCase();
+      let rows = document.getElementById("tableBody").getElementsByTagName("tr");
+      for (let i = 0; i < rows.length; i++) {
+        let text = rows[i].getElementsByTagName("td")[1].textContent.toLowerCase();
+        rows[i].style.display = text.indexOf(filter) > -1 ? "" : "none";
+      }
+    }
+
+    function openEdit(index) {
+      if(userRole !== 'admin') {
+        Swal.fire({ icon: 'error', title: 'สิทธิ์ไม่เพียงพอ', text: 'เฉพาะ Admin เท่านั้นที่สามารถแก้ไขได้', confirmButtonColor: '#20c997' }); return;
+      }
+      let loc = allData[index];
+      document.getElementById('editIndex').value = index;
+      
+      const fields = ['name','phase','seq','latlngRaw','link','linkPEA','peaRegion','pwaRegion','kwp','caNum','meterNum',
+                      'pea1Name','pea1Phone','pea1Pos','pea2Name','pea2Phone','pea2Pos',
+                      'comp1Name','comp1Phone','comp2Name','comp2Phone'];
+      fields.forEach(f => document.getElementById('e_' + f).value = loc[f] || '');
+      editModalObj.show();
+    }
+
+    function saveEdit() {
+      let index = document.getElementById('editIndex').value;
+      let loc = allData[index];
+      
+      const fields = ['name','phase','seq','latlngRaw','link','linkPEA','peaRegion','pwaRegion','kwp','caNum','meterNum',
+                      'pea1Name','pea1Phone','pea1Pos','pea2Name','pea2Phone','pea2Pos',
+                      'comp1Name','comp1Phone','comp2Name','comp2Phone'];
+      fields.forEach(f => loc[f] = document.getElementById('e_' + f).value);
+
+      if(loc.latlngRaw && loc.latlngRaw.includes(',')){
+        let p = loc.latlngRaw.split(',');
+        loc.lat = parseFloat(p[0].trim());
+        loc.lng = parseFloat(p[1].trim());
+      }
+
+      let btn = document.getElementById('saveBtn');
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังบันทึก...';
+      btn.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(() => {
+          btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึกข้อมูล';
+          btn.disabled = false;
+          editModalObj.hide();
+          Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ!', text: 'อัปเดตข้อมูลลงฐานข้อมูลแล้ว', confirmButtonColor: '#20c997', timer: 2000});
+          
+          setupFiltersAndSelect();
+          generateDashboard(); 
+          applyFilters();
+          renderTable();
+          showDetailsPanel(index);
+        })
+        .withFailureHandler((err) => {
+          btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึกข้อมูล';
+          btn.disabled = false;
+          Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: err.message, confirmButtonColor: '#20c997' });
+        })
+        .updateLocation(loc, userRole);
+    }
+
+    function switchMenu(menuId) {
+      ['dash', 'map', 'route', 'db', 'outage', 'docs'].forEach(id => {
+        document.getElementById('menu-' + id).style.display = 'none';
+        document.getElementById('tab-' + id).classList.remove('active');
+      });
+      
+      document.getElementById('menu-' + menuId).style.display = 'block';
+      document.getElementById('tab-' + menuId).classList.add('active');
+      
+      if(menuId === 'map' && map) {
+        setTimeout(() => map.invalidateSize(), 200);
+        startMapGpsTracking();
+      }
+      
+      if(menuId === 'outage') {
+        setTimeout(() => {
+          if (!calendar) renderCalendar();
+          else calendar.updateSize();
+          window.dispatchEvent(new Event('resize'));
+        }, 200);
+      }
+    }
+
+    function initOutageSystem() {
+      google.script.run.withSuccessHandler(res => {
+        outageData = res || [];
+        filterOutages();
+      }).withFailureHandler(err => {
+        outageData = [];
+        filterOutages();
+        Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
+      }).getOutages();
+    }
+
+    function updateOutageStats() {
+      const now = new Date();
+      const source = filteredOutageData || [];
+      let pending = 0, done = 0, past = 0;
+      source.forEach(o => {
+        if (o.checkDone) done++;
+        else if (new Date(o.end) < now) past++;
+        else pending++;
+      });
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('statOutageTotal', source.length);
+      set('statOutagePending', pending);
+      set('statOutageDone', done);
+      set('statOutagePast', past);
+    }
+
+    function getOutageEventStyle(o) {
+      if (o.checkDone) return { bg: '#10b981', border: '#059669' };
+      if (new Date(o.end) < new Date()) return { bg: '#94a3b8', border: '#64748b' };
+      const hues = ['#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1'];
+      let hash = 0;
+      const name = (o.projectName || '').toString();
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      const bg = hues[Math.abs(hash) % hues.length];
+      return { bg, border: bg };
+    }
+
+    function calcMaxEventsPerDay(events) {
+      const counts = {};
+      const bump = (d) => {
+        if (isNaN(d)) return;
+        const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+        counts[key] = (counts[key] || 0) + 1;
+      };
+      events.forEach(e => {
+        const start = new Date(e.start);
+        const end = new Date(e.end || e.start);
+        if (isNaN(start)) return;
+        if (isNaN(end) || end <= start) { bump(start); return; }
+        const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        let guard = 0;
+        while (cursor <= last && guard < 366) {
+          bump(cursor);
+          cursor.setDate(cursor.getDate() + 1);
+          guard++;
+        }
+      });
+      const vals = Object.values(counts);
+      return vals.length ? Math.max(...vals) : 1;
+    }
+
+    function buildOutageCalendarEvents() {
+      return filteredOutageData.map(o => {
+        const style = getOutageEventStyle(o);
+        return {
+          id: o.id, title: o.projectName, start: o.start, end: o.end,
+          backgroundColor: style.bg, borderColor: style.border, textColor: '#fff',
+          extendedProps: { status: o.checkDone ? 'done' : (new Date(o.end) < new Date() ? 'past' : 'pending') }
+        };
+      });
+    }
+
+    function applyOutageCalendarLayout(events) {
+      const maxPerDay = calcMaxEventsPerDay(events);
+      const dayMinH = Math.max(88, 52 + maxPerDay * 28);
+      const calHeight = Math.min(920, Math.max(520, 300 + maxPerDay * 34));
+      const container = document.querySelector('.calendar-container');
+      if (container) {
+        container.style.minHeight = calHeight + 'px';
+        container.style.maxHeight = '92vh';
+        container.style.overflowY = 'auto';
+      }
+      document.querySelectorAll('.fc .fc-daygrid-day').forEach(el => {
+        el.style.minHeight = dayMinH + 'px';
+      });
+      return { dayMinH, calHeight };
+    }
+
+    function refreshOutageCalendar() {
+      const events = buildOutageCalendarEvents();
+      const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
+      if (calendar) {
+        calendar.setOption('height', calHeight);
+        calendar.removeAllEvents();
+        events.forEach(ev => calendar.addEvent(ev));
+        calendar.updateSize();
+        setTimeout(function() {
+          document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
+            el.style.minHeight = dayMinH + 'px';
+          });
+          if (calendar) calendar.updateSize();
+        }, 50);
+        return;
+      }
+      renderCalendar();
+    }
+
+    function renderCalendar() {
+      let calendarEl = document.getElementById('calendar');
+      let events = buildOutageCalendarEvents();
+      const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
+      if(calendar) calendar.destroy();
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        locale: 'th',
+        height: calHeight,
+        dayMaxEvents: false,
+        eventDisplay: 'block',
+        eventOrder: 'start',
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
+        buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
+        events: events,
+        eventClick: function(info) { editOutage(info.event.id); },
+        eventDidMount: function(info) {
+          info.el.style.borderLeft = '4px solid rgba(255,255,255,0.85)';
+          info.el.title = info.event.title;
+        },
+        datesSet: function() {
+          setTimeout(function() {
+            document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
+              el.style.minHeight = dayMinH + 'px';
+            });
+            if (calendar) calendar.updateSize();
+          }, 50);
+        }
+      });
+      calendar.render();
+    }
+
+    function findLocationForOutage(projectName) {
+      if (!projectName || !allData) return null;
+      const q = normalizeNameForMatch(projectName);
+      if (!q) return null;
+      let exact = allData.find(d => {
+        const nameOnly = normalizeNameForMatch(d.name);
+        const label = normalizeNameForMatch(getLocLabel(d));
+        return nameOnly === q || label === q;
+      });
+      if (exact) return exact;
+      return allData.find(d => {
+        const nameOnly = normalizeNameForMatch(d.name);
+        return nameOnly.includes(q) || q.includes(nameOnly);
+      }) || null;
+    }
+
+    function escHtml(s) {
+      if (s == null || s === '') return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderOutageLocReadonly(loc) {
+      const esc = (s) => (s == null || s === '') ? '-' : escHtml(s);
+      let links = '';
+      if (loc.link) links += `<a href="${loc.link}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary me-1 mb-1"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>`;
+      if (loc.linkPEA) links += `<a href="${loc.linkPEA}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mb-1"><i class="fa-solid fa-file-signature"></i> SLD PEA</a>`;
+      return `
+        <h6 class="fw-bold text-success mb-2"><i class="fa-solid fa-building"></i> ${esc(loc.name)} <span class="badge bg-secondary ms-1">เฟส ${esc(loc.phase)}</span></h6>
+        <div class="loc-row"><b>กฟภ. เขต:</b> ${esc(loc.peaRegion)} &nbsp;|&nbsp; <b>กปภ. เขต:</b> ${esc(loc.pwaRegion)}</div>
+        <div class="loc-row"><b>kWp:</b> ${esc(loc.kwp)} &nbsp;|&nbsp; <b>CA:</b> ${esc(loc.caNum)} &nbsp;|&nbsp; <b>มิเตอร์:</b> ${esc(loc.meterNum)}</div>
+        <div class="loc-row"><b>พิกัด:</b> ${esc(loc.latlngRaw)}</div>
+        <div class="loc-row"><b>กฟภ. ผู้ดูแล 1:</b> ${esc(loc.pea1Name)} (${esc(loc.pea1Phone)}) ${esc(loc.pea1Pos)}</div>
+        <div class="loc-row"><b>กฟภ. ผู้ดูแล 2:</b> ${esc(loc.pea2Name)} (${esc(loc.pea2Phone)}) ${esc(loc.pea2Pos)}</div>
+        <div class="loc-row"><b>บริษัท 1:</b> ${esc(loc.comp1Name)} (${esc(loc.comp1Phone)})</div>
+        <div class="loc-row"><b>บริษัท 2:</b> ${esc(loc.comp2Name)} (${esc(loc.comp2Phone)})</div>
+        ${links ? '<div class="mt-2">' + links + '</div>' : ''}
+        <div class="alert alert-info py-1 px-2 mt-2 mb-0 small border-0"><i class="fa-solid fa-lock"></i> ข้อมูลโครงการอ่านอย่างเดียว — แก้ได้เฉพาะวันที่ดับไฟและหมายเหตุ</div>`;
+    }
+
+    function onOutageProjectChange() {
+      const name = document.getElementById('o_project').value;
+      const panel = document.getElementById('o_locationPanel');
+      const loc = findLocationForOutage(name);
+      if (!loc) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+      panel.style.display = 'block';
+      panel.innerHTML = renderOutageLocReadonly(loc);
+    }
+
+    function renderOutageList() {
+      const container = document.getElementById('outageListContainer'); 
+      container.innerHTML = '';
+      
+      let sortedData = [...filteredOutageData].sort((a,b) => {
+        let now = new Date(); let isAPast = new Date(a.end) < now; let isBPast = new Date(b.end) < now;
+        if(isAPast && !isBPast) return 1; if(!isAPast && isBPast) return -1;
+        return new Date(a.start) - new Date(b.start);
+      });
+
+      sortedData.forEach(o => {
+        let isPast = new Date(o.end) < new Date();
+        const safeId = String(o.id).replace(/'/g, "\\'");
+        let cardStyle = o.checkDone ? 'border-left: 5px solid #20c997; background-color: #f8fffb;' : 
+                        (isPast ? 'border-left: 5px solid #ced4da; opacity: 0.7;' : 'border-left: 5px solid #ffc107;');
+                        
+        let statusBadge = o.checkDone ? '<span class="badge bg-success mb-2"><i class="fa-solid fa-check-circle"></i> ดำเนินการแล้ว</span>' : 
+                          (isPast ? '<span class="badge bg-secondary mb-2"><i class="fa-solid fa-clock-rotate-left"></i> เลยกำหนด</span>' : 
+                          '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-spinner fa-spin"></i> รอดำเนินการ</span>');
+
+        let fileBtn = (o.fileUrl && /^https?:\/\//i.test(o.fileUrl))
+          ? `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> หนังสือ PEA</a>` : '';
+        
+        let fStart = new Date(o.start).toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + new Date(o.start).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+        let fEnd = new Date(o.end).toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + new Date(o.end).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+        
+        let disabledStr = canEditOutage() ? '' : 'disabled';
+        let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข/ลบ"><i class="fa-solid fa-pen"></i></button>` : '';
+        let locHint = findLocationForOutage(o.projectName) ? `<button class="btn btn-sm btn-outline-info rounded-pill mt-1" onclick="viewOutageLocation('${safeId}')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>` : '';
+
+        container.innerHTML += `
+          <div class="card border-0 shadow-sm mb-3" style="border-radius: 12px; ${cardStyle} transition: 0.3s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="card-body p-3">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  ${statusBadge}
+                  <h6 class="fw-bold mb-1 text-dark" style="font-size: 1.1rem;">${escHtml(o.projectName)}</h6>
+                  <div class="text-muted small mb-2"><i class="fa-regular fa-calendar-days text-primary"></i> ${fStart} <i class="fa-solid fa-arrow-right mx-1"></i> ${fEnd}</div>
+                  ${o.remark ? `<div class="alert alert-danger py-1 px-2 small mb-2 border-0"><i class="fa-solid fa-circle-exclamation"></i> <b>หมายเหตุ:</b> ${escHtml(o.remark)}</div>` : ''}
+                </div>
+                <div>${editBtn}</div>
+              </div>
+              
+              <div class="bg-white rounded-3 p-3 mt-2 border" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-bold text-muted">1. Vendor ส่งหนังสือแจ้ง</span>
+                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c1_${safeId}" onchange="tglStatus('${safeId}','checkVendor',this.checked)" ${o.checkVendor ? 'checked':''} ${disabledStr}></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-bold text-muted">2. PEA ทำหนังสือแจ้ง กปภ.</span>
+                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c2_${safeId}" onchange="tglStatus('${safeId}','checkPEAPwa',this.checked)" ${o.checkPEAPwa ? 'checked':''} ${disabledStr}></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-bold text-muted">3. PEA ทำหนังสือแจ้ง กฟภ.หน้างาน</span>
+                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c3_${safeId}" onchange="tglStatus('${safeId}','checkPEASite',this.checked)" ${o.checkPEASite ? 'checked':''} ${disabledStr}></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-bold text-muted">4. PEA โทรยืนยันก่อน 1 วัน</span>
+                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c4_${safeId}" onchange="tglStatus('${safeId}','checkPEAPhone',this.checked)" ${o.checkPEAPhone ? 'checked':''} ${disabledStr}></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center border-top pt-2 mt-2">
+                  <span class="small fw-bold ${o.checkDone ? 'text-success' : 'text-dark'}">5. ดำเนินการดับไฟเรียบร้อย</span>
+                  <div class="form-check form-switch m-0"><input class="form-check-input" style="transform: scale(1.2);" type="checkbox" id="c5_${safeId}" onchange="tglStatus('${safeId}','checkDone',this.checked)" ${o.checkDone ? 'checked':''} ${disabledStr}></div>
+                </div>
+              </div>
+              ${fileBtn}
+              ${locHint}
+            </div>
+          </div>`;
+      });
+    }
+
+    const OUTAGE_STATUS_CHECKBOX = { checkVendor: 'c1_', checkPEAPwa: 'c2_', checkPEASite: 'c3_', checkPEAPhone: 'c4_', checkDone: 'c5_' };
+
+    function revertOutageCheckbox(id, field, isChecked) {
+      const cb = document.getElementById(OUTAGE_STATUS_CHECKBOX[field] + id);
+      if (cb) cb.checked = !isChecked;
+    }
+
+    function tglStatus(id, field, isChecked) {
+      if (!canEditOutage()) return;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        revertOutageCheckbox(id, field, isChecked);
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Toast.fire({ icon: 'info', title: 'กำลังอัปเดต...' });
+      google.script.run.withSuccessHandler(() => {
+        let idx = outageData.findIndex(o => o.id == id); if(idx > -1) outageData[idx][field] = isChecked;
+        updateOutageStats(); refreshOutageCalendar(); renderOutageList();
+      }).withFailureHandler(err => {
+        revertOutageCheckbox(id, field, isChecked);
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'อัปเดตไม่สำเร็จ', text: err.message });
+        }
+      }).updateOutageStatus(id, field, isChecked, auth);
+    }
+
+    function viewOutageLocation(id) {
+      let o = outageData.find(x => x.id == id); if(!o) return;
+      const loc = findLocationForOutage(o.projectName);
+      if (!loc) { Swal.fire({ icon: 'info', title: 'ไม่พบข้อมูลสถานที่ในฐานข้อมูล' }); return; }
+      Swal.fire({
+        title: loc.name || o.projectName,
+        html: renderOutageLocReadonly(loc),
+        width: 620,
+        confirmButtonColor: '#14b8a6',
+        confirmButtonText: 'ปิด'
+      });
+    }
+
+    function showOutageModalSafe() {
+      if (document.activeElement) document.activeElement.blur();
+      outageModalObj.show();
+    }
+
+    function openOutageModal() {
+      if (!canEditOutage()) return;
+      document.getElementById('o_id').value = '';
+      document.getElementById('o_project').value = '';
+      document.getElementById('o_project').readOnly = false;
+      document.getElementById('o_remark').value = '';
+      document.getElementById('o_peaUrl').value = '';
+      document.getElementById('o_locationPanel').style.display = 'none';
+      document.getElementById('o_locationPanel').innerHTML = '';
+      document.getElementById('btnDelOutage').style.display = 'none';
+      document.getElementById('o_start')._flatpickr.clear();
+      document.getElementById('o_end')._flatpickr.clear();
+      showOutageModalSafe();
+    }
+
+    function editOutage(id) {
+      let o = outageData.find(x => x.id == id);
+      if(!o) return;
+      if (!canEditOutage()) {
+        const fStart = new Date(o.start).toLocaleString('th-TH');
+        const fEnd = new Date(o.end).toLocaleString('th-TH');
+        Swal.fire({
+          title: o.projectName,
+          html: `<div class="text-start small"><p><b>เริ่ม:</b> ${escHtml(fStart)}</p><p><b>สิ้นสุด:</b> ${escHtml(fEnd)}</p>${o.remark ? '<p><b>หมายเหตุ:</b> ' + escHtml(o.remark) + '</p>' : ''}</div>`,
+          confirmButtonColor: '#14b8a6',
+          confirmButtonText: 'ปิด'
+        });
+        return;
+      }
+      document.getElementById('o_id').value = o.id;
+      document.getElementById('o_project').value = o.projectName;
+      document.getElementById('o_project').readOnly = true;
+      document.getElementById('o_remark').value = o.remark || '';
+      document.getElementById('o_peaUrl').value = o.fileUrl || '';
+      document.getElementById('o_start')._flatpickr.setDate(o.start);
+      document.getElementById('o_end')._flatpickr.setDate(o.end);
+      onOutageProjectChange();
+      document.getElementById('btnDelOutage').style.display = 'block';
+      showOutageModalSafe();
+    }
+
+    function saveOutage() {
+      if (!canEditOutage()) return;
+      let project = document.getElementById('o_project').value.trim();
+      let start = document.getElementById('o_start')._flatpickr.selectedDates[0];
+      let end = document.getElementById('o_end')._flatpickr.selectedDates[0];
+      if(!project || !start || !end) { Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ' }); return; }
+      if (end < start) { Swal.fire({ icon: 'warning', title: 'วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น' }); return; }
+
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+
+      let formData = {
+        id: document.getElementById('o_id').value,
+        projectName: project,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        remark: document.getElementById('o_remark').value,
+        fileUrl: document.getElementById('o_peaUrl').value.trim()
+      };
+
+      if (document.activeElement) document.activeElement.blur();
+      outageModalObj.hide();
+      Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); }});
+      executeSaveOutage(formData, auth);
+    }
+
+    function executeSaveOutage(formData, authToken) {
+      google.script.run.withSuccessHandler(res => {
+        Swal.fire({ icon: 'success', title: 'สำเร็จ', timer: 1500 });
+        initOutageSystem();
+      }).withFailureHandler(err => {
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
+        }
+      }).saveOutageData(formData, authToken);
+    }
+
+    function deleteCurrentOutage() {
+      if (!canEditOutage()) return;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      let id = document.getElementById('o_id').value;
+      Swal.fire({ title: 'ลบรายการนี้?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
+        if(res.isConfirmed) {
+          google.script.run.withSuccessHandler(() => { outageModalObj.hide(); initOutageSystem(); })
+            .withFailureHandler(err => {
+              if (!handleOutageAuthError(err)) {
+                Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+              }
+            })
+            .deleteOutage(id, auth);
+        }
+      });
+    }
+
+    function getOutageRegion(projectName) {
+      const loc = findLocationForOutage(projectName);
+      return loc ? (loc.peaRegion || '') : '';
+    }
+
+    function filterOutages() {
+      let textVal = document.getElementById('outageSearchInput').value.toLowerCase().trim();
+      let regionVal = document.getElementById('outageRegionSelect').value;
+
+      filteredOutageData = outageData.filter(o => {
+        let matchText = (o.projectName || '').toLowerCase().includes(textVal);
+        let region = getOutageRegion(o.projectName);
+        let matchRegion = (regionVal === "" || region === regionVal);
+        
+        return matchText && matchRegion;
+      });
+
+      refreshOutageCalendar();
+      renderOutageList();
+      updateOutageStats();
+    }
+
+    // --- จัดการแอดมินรอง (แอดมินหลักเท่านั้น) ---
+    let userManageModalObj;
+
+    function openUserManageModal() {
+      if (!canEditAll()) return;
+      if (!userManageModalObj) userManageModalObj = new bootstrap.Modal(document.getElementById('userManageModal'));
+      loadUserList();
+      userManageModalObj.show();
+    }
+
+    function loadUserList() {
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      google.script.run.withSuccessHandler(users => {
+        const box = document.getElementById('userListContainer');
+        if (!users || users.length === 0) {
+          box.innerHTML = '<p class="text-muted mb-0">ยังไม่มีผู้ใช้ในระบบ (นอกจาก fallback admin)</p>';
+          return;
+        }
+        box.innerHTML = users.map(u => {
+          const isAdmin = u.role === 'admin';
+          const label = isAdmin ? 'แอดมินหลัก' : (u.role === 'editor' ? 'แอดมินรอง' : u.role);
+          const badge = isAdmin ? 'bg-success' : (u.role === 'editor' ? 'bg-warning text-dark' : 'bg-secondary');
+          const delBtn = (!isAdmin && u.role === 'editor')
+            ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteDeputyUser('${u.username.replace(/'/g, "\\'")}')"><i class="fa-solid fa-trash"></i></button>`
+            : '';
+          const pwd = escHtml(u.password || '-');
+          const name = escHtml(u.username);
+          return `<div class="d-flex justify-content-between align-items-center border rounded-2 px-2 py-2 mb-2 bg-white">
+            <div>
+              <div><i class="fa-solid fa-user"></i> <b>${name}</b> <span class="badge ${badge} ms-1">${label}</span></div>
+              <div class="text-muted mt-1"><i class="fa-solid fa-key"></i> รหัสผ่าน: <code class="user-pwd">${pwd}</code></div>
+            </div>${delBtn}</div>`;
+        }).join('');
+      }).withFailureHandler(err => {
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'โหลดไม่สำเร็จ', text: err.message });
+      }).getUsers(auth);
+    }
+
+    function createDeputyAdmin() {
+      if (!canEditAll()) return;
+      const username = document.getElementById('newDeputyUser').value.trim();
+      const password = document.getElementById('newDeputyPass').value.trim();
+      if (!username || !password) { Swal.fire({ icon: 'warning', title: 'กรอกชื่อผู้ใช้และรหัสผ่าน' }); return; }
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      google.script.run.withSuccessHandler(res => {
+        Toast.fire({ icon: 'success', title: res.message });
+        document.getElementById('newDeputyUser').value = '';
+        document.getElementById('newDeputyPass').value = '';
+        loadUserList();
+      }).withFailureHandler(err => {
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'สร้างไม่สำเร็จ', text: err.message });
+      }).createDeputyAdmin(username, password, auth);
+    }
+
+    function deleteDeputyUser(username) {
+      if (!canEditAll()) return;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Swal.fire({ title: 'ลบแอดมินรอง ' + username + '?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' })
+        .then(r => {
+          if (!r.isConfirmed) return;
+          google.script.run.withSuccessHandler(res => {
+            Toast.fire({ icon: 'success', title: res.message });
+            loadUserList();
+          }).withFailureHandler(err => {
+            if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+          }).deleteUserAccount(username, auth);
+        });
+    }
+
+    // ==========================================
+// ระบบ Project Docs ฝั่ง Frontend
+// ==========================================
+let projectDocs = [];
+let docModalObj;
+let editDocModalObj;
+
+function fetchDocs() {
+  google.script.run.withSuccessHandler(res => {
+    projectDocs = res || []; // 🟢 ป้องกันค่า null ถ้าระบบหลังบ้านส่งมาพลาด
+    renderDocs();
+  }).getProjectDocs();
+}
+
+function renderDocs() {
+  const container = document.getElementById('mainDocList');
+  const parentSelect = document.getElementById('docParent');
+  container.innerHTML = '';
+  parentSelect.innerHTML = '<option value="">(หน้าหลัก Root)</option>';
+
+  // แยก Group และ Items
+  const groups = projectDocs.filter(d => d.type === 'GROUP');
+  const rootItems = projectDocs.filter(d => !d.parentId);
+
+  // อัปเดต Dropdown เลือกกลุ่ม
+  groups.forEach(g => parentSelect.innerHTML += `<option value="${g.id}">📁 ${g.title}</option>`);
+
+  // สร้าง HTML
+  rootItems.forEach(item => {
+    container.appendChild(createDocElement(item));
+  });
+
+  initSortable();
+  updateUIByRole(); // เรียกเช็คสิทธิ์เพื่อซ่อน/โชว์ปุ่มลบและลากวาง
+}
+
+function createDocElement(item) {
+  const li = document.createElement('li');
+  li.className = `doc-item ${item.type.toLowerCase()}`;
+  li.dataset.id = item.id;
+  
+  let icon = item.type === 'GROUP' ? 'fa-folder' : (item.type === 'FILE' ? 'fa-file-pdf' : 'fa-link');
+  let actionBtn = '';
+  
+  if(item.type !== 'GROUP') {
+    actionBtn = `<a href="${item.url}" target="_blank" class="btn btn-sm btn-outline-primary ms-auto me-2"><i class="fa-solid fa-arrow-up-right-from-square"></i> เปิด</a>`;
+  }
+  
+  // 🟢 สร้างปุ่มแก้ไข และปุ่มลบ
+  let editBtn = `<button class="btn btn-sm btn-outline-secondary btn-edit-doc ms-${item.type === 'GROUP' ? 'auto' : '0'} me-1" onclick="openEditDoc('${item.id}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>`;
+  let delBtn = `<button class="btn btn-sm btn-outline-danger btn-del-doc" onclick="deleteDocItem('${item.id}')" title="ลบ"><i class="fa-solid fa-trash"></i></button>`;
+
+  // 🟢 สร้างกล่องแสดง Note (ถ้ามีข้อมูล)
+  let noteHtml = item.note ? `<div class="text-muted mt-1 p-2 bg-light rounded border-start border-3 border-secondary" style="font-size: 0.8rem; line-height: 1.3;"><i class="fa-solid fa-note-sticky text-warning"></i> ${item.note.replace(/\n/g, '<br>')}</div>` : '';
+
+  li.innerHTML = `
+    <div class="doc-drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+    <div class="doc-icon"><i class="fa-solid ${icon}"></i></div>
+    <div class="flex-grow-1 text-dark fw-bold" style="min-width: 0; padding-right: 10px;">
+      ${item.title} 
+      <small class="text-muted fw-normal d-inline-block ms-2" style="font-size:0.75rem;">(โดย: ${item.createdBy})</small>
+      ${noteHtml}
+    </div>
+    ${actionBtn}
+    ${editBtn}
+    ${delBtn}
+  `;
+
+  // ถ้าเป็น Group ให้หาลูกๆ มาใส่ข้างใน
+  if (item.type === 'GROUP') {
+    const childUl = document.createElement('ul');
+    childUl.className = 'doc-children doc-list';
+    childUl.dataset.parentId = item.id;
+    
+    const children = projectDocs.filter(d => d.parentId === item.id);
+    children.forEach(child => childUl.appendChild(createDocElement(child)));
+    
+    li.appendChild(childUl);
+  }
+
+  return li;
+}
+
+function initSortable() {
+  if (!canEditAll()) return;
+
+  const lists = document.querySelectorAll('.doc-list');
+  lists.forEach(el => {
+    new Sortable(el, {
+      group: 'nested', // อนุญาตให้ลากข้ามกลุ่มได้
+      animation: 150,
+      handle: '.doc-drag-handle',
+      fallbackOnBody: true,
+      swapThreshold: 0.65,
+      onEnd: function (evt) {
+        saveNewOrder(); // บันทึกลำดับลง Database เมื่อลากเสร็จ
+      }
+    });
+  });
+}
+
+function saveNewOrder() {
+  Toast.fire({ icon: 'info', title: 'กำลังบันทึกลำดับใหม่...' });
+  let newOrderData = [];
+  
+  // แกะข้อมูลจาก UI
+  const parseList = (ul, parentId) => {
+    Array.from(ul.children).forEach((li, index) => {
+      newOrderData.push({ id: li.dataset.id, parentId: parentId, sortOrder: index + 1 });
+      const childUl = li.querySelector('.doc-children');
+      if (childUl) parseList(childUl, li.dataset.id);
+    });
+  };
+
+  parseList(document.getElementById('mainDocList'), '');
+
+  google.script.run.withSuccessHandler(() => {
+    Toast.fire({ icon: 'success', title: 'จัดลำดับเรียบร้อย' });
+    fetchDocs(); // รีเฟรชข้อมูลใน RAM
+  }).updateDocOrders(newOrderData, userRole);
+}
+
+function openDocModal(type) {
+  document.getElementById('docType').value = type;
+  document.getElementById('docTitle').value = '';
+  document.getElementById('docFile').value = '';
+  document.getElementById('docUrl').value = '';
+  
+  let titleStr = type === 'GROUP' ? 'โฟลเดอร์' : (type === 'FILE' ? 'ไฟล์' : 'ลิงก์');
+  document.getElementById('docModalTitle').innerHTML = `<i class="fa-solid fa-plus text-primary"></i> สร้าง${titleStr}ใหม่`;
+  document.getElementById('docTitleLabel').innerText = `ชื่อ${titleStr}`;
+  
+  document.getElementById('docFileSection').style.display = type === 'FILE' ? 'block' : 'none';
+  document.getElementById('docLinkSection').style.display = type === 'LINK' ? 'block' : 'none';
+  
+  docModalObj.show();
+}
+
+function submitDoc() {
+  let type = document.getElementById('docType').value;
+  let title = document.getElementById('docTitle').value.trim();
+  let parentId = document.getElementById('docParent').value;
+  
+  if (!title) { Swal.fire({icon: 'warning', title: 'กรุณาระบุชื่อ'}); return; }
+
+  let formData = { type: type, title: title, parentId: parentId, sortOrder: projectDocs.length + 1 };
+
+  if (type === 'LINK') {
+    let url = document.getElementById('docUrl').value.trim();
+    if (!url) { Swal.fire({icon: 'warning', title: 'กรุณาระบุลิงก์'}); return; }
+    formData.url = url;
+    executeSaveDoc(formData);
+  } 
+  else if (type === 'FILE') {
+    let fileInput = document.getElementById('docFile');
+    if (fileInput.files.length === 0) { Swal.fire({icon: 'warning', title: 'กรุณาเลือกไฟล์'}); return; }
+    
+    let file = fileInput.files[0];
+    if(file.size > 50 * 1024 * 1024) { Swal.fire({icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB หากไฟล์ใหญ่ให้ใช้วิธีแนบลิงก์ Google Drive แทน'}); return; }
+
+    Swal.fire({ title: 'กำลังอัปโหลดไฟล์...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); }});
+    
+    let reader = new FileReader();
+    reader.onload = function(e) {
+      formData.fileBase64 = e.target.result.split(',')[1];
+      formData.fileName = file.name;
+      formData.mimeType = file.type;
+      executeSaveDoc(formData);
+    };
+    reader.readAsDataURL(file);
+  } 
+  else {
+    executeSaveDoc(formData); // กรณีเป็น GROUP
+  }
+}
+
+function executeSaveDoc(formData) {
+  let btn = document.getElementById('btnSaveDoc');
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังบันทึก...';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึก';
+      btn.disabled = false;
+      docModalObj.hide();
+      Swal.fire({ icon: 'success', title: 'สำเร็จ', timer: 1500 });
+      fetchDocs();
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึก';
+      btn.disabled = false;
+      Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
+    })
+    .saveProjectDoc(formData, userRole);
+}
+
+function deleteDocItem(id) {
+  Swal.fire({ title: 'ยืนยันการลบ?', text: 'หากลบกลุ่ม โฟลเดอร์และไฟล์ข้างในจะหลุดออกมาอยู่หน้าหลัก', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
+    if (res.isConfirmed) {
+      Toast.fire({ icon: 'info', title: 'กำลังลบ...' });
+      google.script.run.withSuccessHandler(() => { fetchDocs(); }).deleteDoc(id, userRole);
+    }
+  });
+}
+// ==========================
+// ส่วนจัดการการแก้ไข Project Docs
+// ==========================
+// อัปเดต Event DOMContentLoaded ให้ผูก Modal ใหม่
+
+function openEditDoc(id) {
+  let doc = projectDocs.find(d => d.id === id);
+  if(!doc) return;
+  document.getElementById('eDocId').value = doc.id;
+  document.getElementById('eDocTitle').value = doc.title;
+  document.getElementById('eDocNote').value = doc.note || '';
+  editDocModalObj.show();
+}
+
+function saveEditDoc() {
+  let id = document.getElementById('eDocId').value;
+  let newTitle = document.getElementById('eDocTitle').value.trim();
+  let newNote = document.getElementById('eDocNote').value.trim();
+  
+  if(!newTitle) { Swal.fire({icon: 'warning', title: 'กรุณาระบุชื่อ'}); return; }
+
+  let btn = document.getElementById('btnSaveEditDoc');
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังบันทึก...';
+  btn.disabled = true;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึก';
+      btn.disabled = false;
+      editDocModalObj.hide();
+      Toast.fire({ icon: 'success', title: 'อัปเดตข้อมูลสำเร็จ' });
+      fetchDocs(); // โหลดข้อมูลมาแสดงใหม่
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึก';
+      btn.disabled = false;
+      Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
+    })
+    .editProjectDoc(id, newTitle, newNote, userRole);
+}
+  </script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<style>
+  body { font-family: 'Prompt', sans-serif; background-color: #f8fafc; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; animation: fadeIn 0.35s ease-in-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  .nav-item { width: 100%; display: flex; gap: .75rem; align-items: center; text-align: left; padding: .75rem 1rem; border-radius: .75rem; color: #cbd5e1; transition: all .2s; }
+  .nav-item:hover { background: #1e293b; color: #fff; }
+  .nav-active { background: #2563eb; color: #fff; box-shadow: 0 6px 16px rgba(37,99,235,.35); }
+  .badge-mini { background: #f43f5e; color: #fff; border-radius: 9999px; font-size: 10px; font-weight: 700; padding: 2px 8px; }
+
+  .summary-card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; border-left-width: 4px; padding: 1.5rem; box-shadow: 0 1px 3px rgba(15,23,42,.08); }
+  .summary-card .label { color: #64748b; font-size: .75rem; text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }
+  .summary-card .value { color: #0f172a; font-size: 1.875rem; font-weight: 900; line-height: 1.1; margin-top: .25rem; }
+
+  .card { background: #fff; border-radius: 1rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+  .card-head { padding: 1rem 1.25rem; border-bottom: 1px solid #f1f5f9; background: linear-gradient(to right, #fff1f2, #fff); }
+  .thead { background: #f8fafc; color: #64748b; text-transform: uppercase; font-size: .75rem; }
+  .thead th { padding: 1rem 1.25rem; font-weight: 700; text-align: left; border-bottom: 1px solid #e2e8f0; }
+
+  .btn-blue { background: #2563eb; color: #fff; border: 1px solid #1d4ed8; border-radius: .75rem; padding: .65rem 1rem; font-size: .875rem; font-weight: 700; display: inline-flex; gap: .5rem; align-items: center; transition: all .2s; }
+  .btn-blue:hover { background: #1d4ed8; }
+  .btn-white { background: #fff; border: 1px solid #cbd5e1; color: #334155; border-radius: .6rem; padding: .6rem 1rem; font-size: .875rem; font-weight: 700; display: inline-flex; gap: .5rem; align-items: center; transition: all .2s; }
+  .btn-white:hover { background: #f8fafc; }
+  .input { width: 100%; border: 1px solid #cbd5e1; border-radius: .75rem; padding: .65rem .9rem; font-size: .875rem; background: #fff; }
+  .input:focus { outline: none; border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
+  .label-input { display: block; margin-bottom: .35rem; font-size: .875rem; font-weight: 700; color: #334155; }
+
+  .step-item { flex: 1; position: relative; text-align: center; }
+  .step-line { position: absolute; top: 16px; left: 50%; width: 100%; height: 3px; background-color: #e2e8f0; z-index: 0; }
+  .step-line.active { background-color: #10b981; }
+  .step-circle { position: relative; z-index: 1; width: 32px; height: 32px; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; transition: all .3s; }
+
+  .status { border-radius: 9999px; padding: .2rem .75rem; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; }
+  .status-normal { background: #dcfce7; color: #166534; }
+  .status-renewing { background: #e0e7ff; color: #3730a3; }
+  .status-warning { background: #fef3c7; color: #92400e; }
+  .status-expired { background: #ffe4e6; color: #be123c; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  @media print {
+    body * { visibility: hidden; }
+    #print-report, #print-report * { visibility: visible; }
+    #print-report { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; }
+  }
+</style>

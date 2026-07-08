@@ -1,0 +1,590 @@
+<script>
+const state = { token: localStorage.getItem('pk2_token') || '', user: null, settings: {}, departments: [], projects: [], companies: [], users: [], tracking: [], dashboard: { total: 0, processing: 0, warning: 0, expired: 0, urgentTasks: [] }, coreLoading: false, projectsLoaded: false, trackingLoaded: false };
+const perf = {
+  markStart: function(name) {
+    if (window.performance && performance.mark) performance.mark(name + ':start');
+    return Date.now();
+  },
+  markEnd: function(name, startedAt) {
+    const elapsed = Date.now() - startedAt;
+    if (window.performance && performance.mark && performance.measure) {
+      performance.mark(name + ':end');
+      try { performance.measure(name, name + ':start', name + ':end'); } catch (e) {}
+    }
+    return elapsed;
+  },
+  log: function(name, elapsed) {
+    if (typeof console !== 'undefined' && console.info) {
+      console.info('[PK2 PERF] ' + name + ': ' + elapsed + 'ms');
+    }
+  }
+};
+
+window.onload = () => {
+  const appRoot = document.getElementById('app-root');
+  if (appRoot) appRoot.classList.remove('hidden');
+  bootstrapPublic();
+};
+
+function toast(msg, icon = 'success') {
+  Swal.fire({ toast: true, position: 'top-end', icon: icon, title: msg, showConfirmButton: false, timer: 1800 });
+}
+
+function showError(err) {
+  Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: (err && err.message) ? err.message : 'โปรดลองอีกครั้ง' });
+}
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === '1') return resolve();
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error('โหลดสคริปต์ไม่สำเร็จ: ' + src)), { once: true });
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = src;
+    s.defer = true;
+    s.dataset.src = src;
+    s.addEventListener('load', () => { s.dataset.loaded = '1'; resolve(); }, { once: true });
+    s.addEventListener('error', () => reject(new Error('โหลดสคริปต์ไม่สำเร็จ: ' + src)), { once: true });
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureFlatpickrReady_() {
+  if (typeof window.flatpickr === 'undefined') {
+    await loadScriptOnce('https://cdn.jsdelivr.net/npm/flatpickr');
+  }
+  if (typeof window.flatpickr !== 'undefined' && (!window.flatpickr.l10ns || !window.flatpickr.l10ns.th)) {
+    await loadScriptOnce('https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js');
+  }
+}
+
+function setUserUI() {
+  const isLogin = !!state.token;
+  document.getElementById('current-user-name').textContent = isLogin ? state.user.fullName : 'Guest';
+  document.getElementById('current-user-username').textContent = isLogin ? state.user.username : 'ดูข้อมูลอย่างเดียว';
+  document.getElementById('role-tag').textContent = isLogin ? (state.user.role || 'editor').toUpperCase() : 'VIEWER';
+  document.getElementById('role-tag').className = `text-white text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${isLogin ? 'bg-rose-500' : 'bg-slate-500'}`;
+  document.getElementById('btn-login-open').classList.toggle('hidden', isLogin);
+  document.getElementById('btn-logout').classList.toggle('hidden', !isLogin);
+}
+
+function bootstrapPublic() {
+  const t0 = perf.markStart('bootstrapPublic');
+  google.script.run.withSuccessHandler((boot) => {
+    state.user = boot.user;
+    if (!state.user && state.token) {
+      state.token = '';
+      localStorage.removeItem('pk2_token');
+    }
+    state.settings = boot.settings || {};
+    state.departments = boot.departments || [];
+    state.dashboard = boot.dashboard || { total: 0, processing: 0, warning: 0, expired: 0, urgentTasks: [] };
+    setUserUI();
+    renderDepartmentFilter();
+    renderDashboardUI();
+    perf.log('bootstrapPublic', perf.markEnd('bootstrapPublic', t0));
+  }).withFailureHandler(showError).getPublicBootstrap(state.token);
+}
+
+function requireLogin(callback) {
+  if (state.token) return callback();
+  Swal.fire({ icon: 'info', title: 'ต้อง Login ก่อน', text: 'สามารถดูข้อมูลได้ แต่การแก้ไขต้องเข้าสู่ระบบก่อน' });
+}
+
+function openLogin() {
+  Swal.fire({
+    title: 'เข้าสู่ระบบ',
+    html: `<input id="sw-username" class="input mb-2" value="admin" placeholder="Username"><input id="sw-password" type="password" class="input" value="1234" placeholder="Password">`,
+    confirmButtonText: 'Login',
+    preConfirm: () => ({ username: document.getElementById('sw-username').value.trim(), password: document.getElementById('sw-password').value.trim() }),
+    showLoaderOnConfirm: true
+  }).then((result) => {
+    if (!result.isConfirmed) return;
+    const d = result.value;
+    google.script.run.withSuccessHandler((res) => {
+      state.token = res.token;
+      localStorage.setItem('pk2_token', res.token);
+      state.user = res.user;
+      setUserUI();
+      toast('เข้าสู่ระบบสำเร็จ');
+      refreshAll();
+    }).withFailureHandler(showError).authenticateUser(d.username, d.password);
+  });
+}
+
+// Legacy bridge: old overlay button still calls login()
+function login() {
+  openLogin();
+}
+
+function logout() {
+  state.token = '';
+  localStorage.removeItem('pk2_token');
+  state.user = null;
+  setUserUI();
+  toast('ออกจากระบบแล้ว', 'success');
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  document.querySelectorAll('nav .nav-item').forEach(btn => btn.classList.remove('nav-active'));
+  const nav = document.getElementById('nav-' + tabId);
+  if (nav) nav.classList.add('nav-active');
+  
+  if (tabId === 'dashboard') renderDashboardUI();
+  if (tabId === 'tracking') {
+    renderTracking();
+    if (!state.trackingLoaded) loadTrackingData(false);
+  }
+  if (tabId === 'projects') {
+    renderProjectsTable();
+    if (!state.projectsLoaded) loadProjectsData(false);
+  }
+  
+  if (tabId === 'companies' && state.companies.length === 0) loadCompanies();
+  if (tabId === 'settings' && Object.keys(state.settings).length === 0) loadSettings();
+  if (tabId === 'users' && state.users.length === 0) loadUsers();
+}
+
+function refreshAll(showLoading = false) {
+  if (state.coreLoading) return;
+  const t0 = perf.markStart('refreshAll');
+  state.coreLoading = true;
+  if (showLoading) {
+    Swal.fire({
+      title: 'กำลังโหลดข้อมูล...',
+      html: 'กรุณารอสักครู่',
+      allowOutsideClick: false,
+      didOpen: () => { Swal.showLoading(); }
+    });
+  }
+  const btn = document.getElementById('btn-refresh');
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลด...';
+  
+  const activeTab = document.querySelector('.tab-content.active');
+  const activeId = activeTab ? activeTab.id : 'dashboard';
+  google.script.run.withSuccessHandler((dash) => {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate-right text-blue-500"></i> อัปเดตข้อมูลล่าสุด';
+    if (showLoading) Swal.close();
+    state.dashboard = dash || { total: 0, processing: 0, warning: 0, expired: 0, urgentTasks: [] };
+    state.coreLoading = false;
+    renderDashboardUI();
+    if (activeId === 'projects') {
+      state.projectsLoaded = false;
+      loadProjectsData(false);
+    }
+    if (activeId === 'tracking') {
+      state.trackingLoaded = false;
+      loadTrackingData(false);
+    }
+    perf.log('refreshAll', perf.markEnd('refreshAll', t0));
+  }).withFailureHandler((err) => {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate-right text-blue-500"></i> อัปเดตข้อมูลล่าสุด';
+    if (showLoading) Swal.close();
+    state.coreLoading = false;
+    showError(err);
+  }).getDashboardData(state.token);
+}
+
+function refreshDashboard(showLoading = false) {
+  const t0 = perf.markStart('refreshDashboard');
+  if (showLoading) {
+    Swal.fire({
+      title: 'กำลังโหลดข้อมูล...',
+      html: 'กรุณารอสักครู่',
+      allowOutsideClick: false,
+      didOpen: () => { Swal.showLoading(); }
+    });
+  }
+  google.script.run.withSuccessHandler((dash) => {
+    if (showLoading) Swal.close();
+    state.dashboard = dash || { total: 0, processing: 0, warning: 0, expired: 0, urgentTasks: [] };
+    renderDashboardUI();
+    perf.log('refreshDashboard', perf.markEnd('refreshDashboard', t0));
+  }).withFailureHandler((err) => {
+    if (showLoading) Swal.close();
+    showError(err);
+  }).getDashboardData(state.token);
+}
+
+function loadProjectsData(showToast = true) {
+  const t0 = perf.markStart('loadProjectsData');
+  if (showToast) Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังโหลดโครงการ...', showConfirmButton: false, timer: 1200 });
+  google.script.run.withSuccessHandler((rows) => {
+    state.projects = Array.isArray(rows) ? rows : [];
+    state.projectsLoaded = true;
+    renderProjectsTable();
+    perf.log('loadProjectsData', perf.markEnd('loadProjectsData', t0));
+  }).withFailureHandler(showError).getProjectsData(state.token);
+}
+
+function loadTrackingData(showToast = true) {
+  const t0 = perf.markStart('loadTrackingData');
+  if (showToast) Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'กำลังโหลดติดตาม...', showConfirmButton: false, timer: 1200 });
+  google.script.run.withSuccessHandler((rows) => {
+    state.tracking = Array.isArray(rows) ? rows : [];
+    state.trackingLoaded = true;
+    renderTracking();
+    perf.log('loadTrackingData', perf.markEnd('loadTrackingData', t0));
+  }).withFailureHandler(showError).getTrackingData(state.token);
+}
+
+function renderDashboardUI() {
+  const safe = state.dashboard;
+  document.getElementById('dash-total').textContent = safe.total || 0;
+  document.getElementById('dash-process').textContent = safe.processing || 0;
+  document.getElementById('dash-warning').textContent = safe.warning || 0;
+  document.getElementById('dash-expired').textContent = safe.expired || 0;
+  renderUrgentTable(Array.isArray(safe.urgentTasks) ? safe.urgentTasks : []);
+  document.getElementById('tracking-badge').textContent = safe.processing || 0;
+}
+
+function renderUrgentTable(items) {
+  const tbody = document.getElementById('urgent-table-body');
+  tbody.innerHTML = items.map(it => `<tr class="border-t border-slate-100 hover:bg-slate-50"><td class="px-5 py-4"><p class="font-bold">${it.Project_Name}</p></td><td class="px-5 py-4 font-bold">${formatThaiDateDisplay(it.Expiry_Date)}</td><td class="px-5 py-4 text-center">${statusBadge(it.Status)}</td></tr>`).join('') || `<tr><td colspan="3" class="px-5 py-8 text-center text-slate-400">ไม่มีงานด่วน</td></tr>`;
+}
+
+function renderDepartmentFilter() {
+  const select = document.getElementById('project-filter-dept');
+  select.innerHTML = `<option value="">-- ทุกแผนก --</option>` + state.departments.map(d => `<option value="${escapeHtml(d.Dept_ID)}">${escapeHtml(d.Dept_Name)}</option>`).join('');
+}
+
+function renderProjectsTable() {
+  const search = (document.getElementById('project-search').value || '').toLowerCase();
+  const dept = document.getElementById('project-filter-dept').value;
+  const status = document.getElementById('project-filter-status').value;
+  const deptMap = Object.fromEntries(state.departments.map(d => [d.Dept_ID, d.Dept_Name]));
+  const rows = state.projects.filter(p => (!search || `${p.Project_ID} ${p.Project_Name}`.toLowerCase().includes(search)) && (!dept || String(p.Dept_ID) === dept) && (!status || String(p.Status) === status));
+  document.getElementById('projects-table-body').innerHTML = rows.map(p => `<tr class="border-t border-slate-100 hover:bg-slate-50"><td class="px-5 py-4"><p class="font-bold">${escapeHtml(p.Project_Name)}</p></td><td class="px-5 py-4">${escapeHtml(deptMap[p.Dept_ID] || p.Dept_ID || '-')}</td><td class="px-5 py-4 text-center font-bold">${p.Renewal_Round || 1}</td><td class="px-5 py-4 text-center">${p.Lifespan || '-'}</td><td class="px-5 py-4 text-center font-bold">${formatThaiDateDisplay(p.Expiry_Date)}</td><td class="px-5 py-4 text-center">${statusBadge(p.Status)}</td><td class="px-5 py-4 text-center space-x-2"><button class="btn-white !px-3 !py-1.5" onclick="openProjectModalById('${escapeHtml(p.Project_ID)}')"><i class="fa-solid fa-pen-to-square"></i></button>${(p.Status === 'ใกล้หมดอายุ' || p.Status === 'หมดอายุแล้ว') ? `<button class="btn-blue !px-3 !py-1.5" onclick="startRenewal('${escapeHtml(p.Project_ID)}')">เริ่มต่ออายุ</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="7" class="px-5 py-8 text-center text-slate-400">ยังไม่มีโครงการ</td></tr>`;
+}
+
+function startRenewal(projectId) { requireLogin(() => google.script.run.withSuccessHandler(() => { toast('เริ่มกระบวนการต่ออายุแล้ว'); switchTab('tracking'); refreshAll(); }).withFailureHandler(showError).startProjectRenewal(state.token, projectId)); }
+
+function renderTracking() {
+  const html = state.tracking.map(item => { 
+    const p = item.project; 
+    
+    const notesByRound = (item.notes || []).reduce((acc, n) => {
+      const r = n.Renewal_Round || 1;
+      if (!acc[r]) acc[r] = [];
+      acc[r].push(n);
+      return acc;
+    }, {});
+    
+    const noteHtml = Object.keys(notesByRound).sort((a,b) => b-a).map(r => `
+      <div class="mb-4">
+        <h5 class="text-xs font-bold text-slate-500 mb-2 border-b border-amber-200 pb-1">รอบที่ ${r}</h5>
+        <div class="space-y-2">
+          ${notesByRound[r].map(n => `<div class="bg-white border border-amber-100 rounded-lg p-3"><div class="flex justify-between items-start gap-2"><p class="text-sm">${escapeHtml(n.Note_Text)}</p><button class="text-blue-600 text-xs font-bold shrink-0" onclick="editNote('${escapeHtml(n.Note_ID)}','${escapeHtml(p.Project_ID)}')"><i class='fa-solid fa-pen'></i> แก้ไข</button></div><p class="text-[11px] text-slate-500 mt-2">${escapeHtml(n.User_Name)} • ${escapeHtml(n.Timestamp)}</p></div>`).join('')}
+        </div>
+      </div>
+    `).join('') || `<p class="text-sm text-slate-400">ยังไม่มีบันทึก</p>`;
+
+    return `<div class="card overflow-hidden"><div class="px-6 py-5 border-b border-slate-100 bg-slate-50/80 flex justify-between items-center gap-4 flex-wrap"><div><h3 class="font-black text-xl">${escapeHtml(p.Project_Name)}</h3><p class="text-sm text-slate-500">รอบที่ ${p.Renewal_Round} | หมดอายุ: ${formatThaiDateDisplay(p.Expiry_Date)}</p></div>${statusBadge(p.Status)}</div><div class="p-6 md:p-8"><div class="flex justify-between items-start relative max-w-5xl mx-auto mb-10 mt-2">${renderStepper(p.Current_Step)}</div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="bg-slate-50 rounded-xl p-5 border border-slate-200"><h4 class="font-bold mb-3"><i class="fa-solid fa-clock-rotate-left mr-2 text-blue-500"></i>ประวัติการดำเนินการ</h4><div class="space-y-3">${(item.timeline || []).map(t => `<div class="bg-white border border-slate-200 rounded-lg p-3"><p class="font-bold text-sm">${t.title}</p><p class="text-xs text-slate-500">${t.date}</p></div>`).join('') || `<p class="text-sm text-slate-400">ยังไม่มี timeline</p>`}</div></div><div class="bg-amber-50 rounded-xl p-5 border border-amber-200"><h4 class="font-bold mb-3"><i class="fa-regular fa-comment-dots mr-2 text-amber-500"></i>บันทึกการติดตาม</h4><div class="max-h-64 overflow-y-auto pr-2">${noteHtml}</div><div class="flex gap-2 mt-4 pt-3 border-t border-amber-100"><input id="note-${p.Project_ID}" class="input" placeholder="พิมพ์บันทึก..."><button class="btn-blue" onclick="saveNote('${p.Project_ID}')">บันทึก</button></div></div></div></div><div class="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2"><button class="btn-white" onclick="prevTrackingStep('${p.Project_ID}')"><i class="fa-solid fa-rotate-left"></i>ย้อนกลับขั้นก่อนหน้า</button><button class="btn-blue" onclick="nextTrackingStep('${p.Project_ID}')"><i class="fa-solid fa-check-circle"></i>อัปเดตขั้นตอนถัดไป</button></div></div>`; 
+  }).join('');
+  document.getElementById('tracking-container').innerHTML = html || `<div class="card p-12 text-center text-slate-400">ไม่มีโครงการที่อยู่ระหว่างการต่ออายุ</div>`;
+}
+
+function printDashboardPDF() {
+  const deptMap = Object.fromEntries(state.departments.map(d => [d.Dept_ID, d.Dept_Name]));
+  let tableRows = state.projects.map(p => {
+    return `<tr>
+      <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold;">${escapeHtml(p.Project_Name)}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(deptMap[p.Dept_ID] || p.Dept_ID || '-')}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${p.Renewal_Round || 1}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${formatThaiDateDisplay(p.Expiry_Date)}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">${escapeHtml(p.Status)}</td>
+    </tr>`;
+  }).join('');
+
+  const reportHtml = `
+    <div style="font-family: 'Prompt', sans-serif; color: #0f172a;">
+      <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 5px;">รายงานสรุปสถานะใบอนุญาต พ.ค.2</h1>
+      <p style="color: #64748b; margin-bottom: 20px;">ข้อมูล ณ วันที่: ${new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+      
+      <div style="display: flex; gap: 20px; margin-bottom: 30px;">
+        <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex: 1;">
+          <div style="font-size: 12px; color: #64748b; font-weight: bold;">โครงการทั้งหมด</div>
+          <div style="font-size: 24px; font-weight: bold;">${state.dashboard.total}</div>
+        </div>
+        <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex: 1;">
+          <div style="font-size: 12px; color: #64748b; font-weight: bold;">กำลังดำเนินการ</div>
+          <div style="font-size: 24px; font-weight: bold; color: #4f46e5;">${state.dashboard.processing}</div>
+        </div>
+        <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex: 1;">
+          <div style="font-size: 12px; color: #64748b; font-weight: bold;">ใกล้หมดอายุ</div>
+          <div style="font-size: 24px; font-weight: bold; color: #d97706;">${state.dashboard.warning}</div>
+        </div>
+        <div style="border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; flex: 1;">
+          <div style="font-size: 12px; color: #64748b; font-weight: bold;">หมดอายุแล้ว</div>
+          <div style="font-size: 24px; font-weight: bold; color: #e11d48;">${state.dashboard.expired}</div>
+        </div>
+      </div>
+
+      <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 15px; padding-bottom: 5px; border-bottom: 2px solid #e2e8f0;">รายละเอียดโครงการทั้งหมด</h2>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left;">
+        <thead>
+          <tr style="background-color: #f8fafc; color: #475569;">
+            <th style="padding: 10px; border-bottom: 2px solid #cbd5e1;">ชื่อโครงการ</th>
+            <th style="padding: 10px; border-bottom: 2px solid #cbd5e1;">แผนก</th>
+            <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; text-align: center;">รอบ</th>
+            <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; text-align: center;">วันหมดอายุ</th>
+            <th style="padding: 10px; border-bottom: 2px solid #cbd5e1; text-align: center;">สถานะ</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows || '<tr><td colspan="5" style="text-align: center; padding: 20px;">ไม่มีข้อมูล</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  const printEl = document.getElementById('print-report');
+  if (!printEl) return;
+  printEl.classList.remove('hidden');
+  printEl.innerHTML = reportHtml;
+
+  const cleanup = () => {
+    printEl.classList.add('hidden');
+    printEl.innerHTML = '';
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+}
+
+function renderStepper(currentStep) { const steps = ['ขอเอกสารลูกค้า', 'ยื่น พ.ค.1', 'ยื่น พ.ค.2', 'ออกใบ พ.ค.2', 'แจ้งลูกค้า']; return steps.map((n, i) => `<div class="step-item"><div class="step-line ${i + 1 <= currentStep ? 'active' : ''}"></div><div class="step-circle ${i + 1 <= currentStep ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400 border border-slate-200'}">${i + 1}</div><p class="text-xs font-bold mt-2 ${i + 1 <= currentStep ? 'text-emerald-600' : 'text-slate-400'}">${n}</p></div>`).join(''); }
+
+function nextTrackingStep(projectId) { requireLogin(() => {
+  google.script.run.withSuccessHandler(() => {
+    toast('อัปเดตขั้นตอนสำเร็จ'); refreshAll();
+  }).withFailureHandler(showError).updateProjectStep(state.token, projectId);
+}); }
+function prevTrackingStep(projectId) { requireLogin(() => {
+  Swal.fire({icon:'question',title:'ย้อนกลับขั้นตอน?',text:'ใช้กรณีกดผิดเท่านั้น',showCancelButton:true,confirmButtonText:'ยืนยัน'})
+    .then(r => {
+      if(!r.isConfirmed) return;
+      google.script.run.withSuccessHandler(() => { toast('ย้อนกลับขั้นตอนแล้ว'); refreshAll(); }).withFailureHandler(showError).rollbackProjectStep(state.token, projectId);
+    });
+}); }
+function saveNote(projectId) { requireLogin(() => { const el = document.getElementById(`note-${projectId}`); const text = el.value.trim(); if (!text) return; google.script.run.withSuccessHandler(() => { el.value = ''; toast('บันทึก note แล้ว'); refreshAll(); }).withFailureHandler(showError).addNote(state.token, projectId, text); }); }
+function editNote(noteId, projectId) {
+  requireLogin(() => {
+    const item = state.tracking.find(x => String(x.project.Project_ID) === String(projectId));
+    const note = item && item.notes ? item.notes.find(n => String(n.Note_ID) === String(noteId)) : null;
+    const oldText = note ? String(note.Note_Text || '') : '';
+    Swal.fire({title:'แก้ไขบันทึก',input:'text',inputValue:oldText,showCancelButton:true,confirmButtonText:'บันทึก'})
+      .then(r => {
+        if(!r.isConfirmed) return;
+        google.script.run.withSuccessHandler(() => { toast('แก้ไข note แล้ว'); refreshAll(); }).withFailureHandler(showError).updateNote(state.token, noteId, r.value || '');
+      });
+  });
+}
+
+function loadCompanies() {
+  google.script.run.withSuccessHandler((rows) => {
+    state.companies = Array.isArray(rows) ? rows : [];
+    document.getElementById('companies-grid').innerHTML = state.companies.map(c => `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative overflow-hidden"><div class="absolute top-0 left-0 w-2 h-full ${c.Line_Notify_Token ? 'bg-blue-500' : 'bg-slate-300'}"></div><div class="flex justify-between items-start mb-5 pl-2"><div><h3 class="font-black text-lg">${escapeHtml(c.Company_Name)}</h3></div><div class="flex gap-2"><button class="btn-white !px-3 !py-1.5" onclick="openCompanyModalById('${escapeHtml(c.Company_ID)}')"><i class="fa-solid fa-pen-to-square"></i></button><button class="btn-white !px-3 !py-1.5 text-rose-600" onclick="deleteCompanyAction('${escapeHtml(c.Company_ID)}')"><i class="fa-solid fa-trash"></i></button></div></div><div class="space-y-2 text-sm pl-2"><p><i class="fa-solid fa-user-tie text-slate-400 w-5"></i> ${escapeHtml(c.Contact_Person || '-')}</p><p><i class="fa-solid fa-envelope text-slate-400 w-5"></i> ${escapeHtml(c.Contact_Email || '-')}</p><p><i class="fa-solid fa-note-sticky text-slate-400 w-5"></i> ${escapeHtml(c.Note || '-')}</p><p><i class="fa-brands fa-line w-5 ${c.Line_Notify_Token ? 'text-green-500' : 'text-slate-300'}"></i> <span class="${c.Line_Notify_Token ? 'text-green-700 bg-green-50' : 'text-slate-500 bg-slate-100'} px-2 py-1 rounded text-xs font-bold">${c.Line_Status}</span></p></div></div>`).join('') || `<div class="card p-10 text-center text-slate-400 col-span-3">ยังไม่มีบริษัท</div>`;
+  }).withFailureHandler(showError).getCompanies(state.token);
+}
+function deleteCompanyAction(id) { requireLogin(() => Swal.fire({ icon: 'question', title: 'ยืนยันลบบริษัท?', showCancelButton: true, confirmButtonText: 'ลบ' }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('ลบบริษัทแล้ว'); loadCompanies(); }).withFailureHandler(showError).deleteCompany(state.token, id); })); }
+
+function loadSettings() {
+  google.script.run.withSuccessHandler((s) => { state.settings = s; document.getElementById('setting-alert-months').value = s.Alert_Threshold_Months || 6; document.getElementById('setting-lifespan-years').value = s.Default_Lifespan_Years || 4; document.getElementById('setting-admin-email').value = s.Admin_Email || ''; }).withFailureHandler(showError).getSettingsData(state.token);
+  google.script.run.withSuccessHandler((rows) => { state.departments = rows || []; renderDepartmentFilter(); document.getElementById('departments-list').innerHTML = state.departments.map(d => `<li class="flex justify-between items-center p-3 border border-slate-200 rounded-xl"><div class="flex items-center gap-3"><span class="w-3 h-3 rounded-full" style="background:${escapeHtml(d.Color_Code || '#64748b')}"></span><span class="font-bold">${escapeHtml(d.Dept_Name)} (${escapeHtml(d.Dept_ID)})</span></div><button class="text-rose-600" onclick="deleteDepartmentAction('${escapeHtml(d.Dept_ID)}')"><i class="fa-solid fa-trash-can"></i></button></li>`).join('') || `<li class="text-slate-400">ยังไม่มีแผนก</li>`; }).withFailureHandler(showError).getDepartments(state.token);
+}
+function saveSettingsAction() { requireLogin(() => google.script.run.withSuccessHandler(() => { toast('บันทึกการตั้งค่าแล้ว'); refreshAll(); }).withFailureHandler(showError).saveSettings(state.token, { Alert_Threshold_Months: Number(document.getElementById('setting-alert-months').value || 6), Default_Lifespan_Years: Number(document.getElementById('setting-lifespan-years').value || 4), Admin_Email: document.getElementById('setting-admin-email').value.trim() })); }
+function addDepartmentAction() { requireLogin(() => Swal.fire({ title: 'เพิ่มแผนก', html: `<input id="dep-name" class="input mb-2" placeholder="ชื่อแผนก">`, showCancelButton: true, confirmButtonText: 'บันทึก', preConfirm: () => ({ Dept_Name: document.getElementById('dep-name').value.trim() }) }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('เพิ่มแผนกแล้ว'); loadSettings(); }).withFailureHandler(showError).addDepartment(state.token, r.value); })); }
+function deleteDepartmentAction(id) { requireLogin(() => Swal.fire({ icon: 'question', title: 'ยืนยันลบแผนก?', showCancelButton: true }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('ลบแผนกแล้ว'); loadSettings(); }).withFailureHandler(showError).deleteDepartment(state.token, id); })); }
+
+function loadUsers() {
+  google.script.run.withSuccessHandler((rows) => { state.users = rows || []; document.getElementById('users-table-body').innerHTML = state.users.map(u => `<tr class="border-t border-slate-100"><td class="px-5 py-4 font-bold">${escapeHtml(u.Full_Name)}</td><td class="px-5 py-4">${escapeHtml(u.Role)}</td><td class="px-5 py-4">${u.Status === 'suspended' ? '<span class="status status-expired">ระงับ</span>' : '<span class="status status-normal">ใช้งาน</span>'}</td><td class="px-5 py-4 text-center space-x-2"><button class="btn-white !px-3 !py-1.5" onclick="openUserModalById('${escapeHtml(u.User_ID)}')"><i class="fa-solid fa-pen-to-square"></i></button><button class="btn-white !px-3 !py-1.5" onclick="toggleSuspend('${escapeHtml(u.User_ID)}', ${u.Status !== 'suspended'})">${u.Status === 'suspended' ? 'ปลดระงับ' : 'ระงับ'}</button><button class="btn-white !px-3 !py-1.5" onclick="changePasswordPrompt('${escapeHtml(u.User_ID)}')">เปลี่ยนรหัสผ่าน</button><button class="btn-white !px-3 !py-1.5 text-rose-600" onclick="deleteUserAction('${escapeHtml(u.User_ID)}')"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('') || `<tr><td colspan="4" class="px-5 py-8 text-center text-slate-400">ยังไม่มีผู้ใช้</td></tr>`; }).withFailureHandler(showError).getUsers(state.token);
+}
+function openProjectModalById(projectId) {
+  const project = state.projects.find(p => String(p.Project_ID) === String(projectId));
+  openProjectModal(project || null);
+}
+function openCompanyModalById(companyId) {
+  const company = state.companies.find(c => String(c.Company_ID) === String(companyId));
+  openCompanyModal(company || null);
+}
+function openUserModalById(userId) {
+  const user = state.users.find(u => String(u.User_ID) === String(userId));
+  openUserModal(user || null);
+}
+function toggleSuspend(id, suspended) { requireLogin(() => google.script.run.withSuccessHandler(() => { toast('อัปเดตสถานะผู้ใช้แล้ว'); loadUsers(); }).withFailureHandler(showError).suspendUser(state.token, id, suspended)); }
+function changePasswordPrompt(id) { requireLogin(() => Swal.fire({ title: 'รหัสผ่านใหม่', input: 'password', showCancelButton: true }).then(r => { if (!r.isConfirmed || !r.value) return; google.script.run.withSuccessHandler(() => toast('เปลี่ยนรหัสผ่านแล้ว')).withFailureHandler(showError).changeUserPassword(state.token, id, r.value); })); }
+function deleteUserAction(id) { requireLogin(() => Swal.fire({ icon: 'question', title: 'ยืนยันลบผู้ใช้?', showCancelButton: true, confirmButtonText: 'ลบ' }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('ลบผู้ใช้แล้ว'); loadUsers(); }).withFailureHandler(showError).deleteUser(state.token, id); })); }
+
+function openProjectModal(project = null) {
+  requireLogin(() => {
+    if (state.companies.length === 0) loadCompanies();
+    const deptOptions = state.departments.map(d => `<option value="${escapeHtml(d.Dept_ID)}">${escapeHtml(d.Dept_Name)}</option>`).join('');
+    const companyOptions = state.companies.map(c => `<option value="${escapeHtml(c.Company_ID)}">${escapeHtml(c.Company_Name)}</option>`).join('');
+    const draw = (nextId) => Swal.fire({
+      title: 'จัดการโครงการ',
+      width: 920,
+      html: `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-left">
+        <input type="hidden" id="m-project-id" value="${project ? escapeHtml(project.Project_ID) : nextId}">
+        <div><label class="label-input">ชื่อโครงการ (Project_Name)</label><input id="m-project-name" class="input" value="${project ? escapeHtml(project.Project_Name) : ''}"></div>
+        <div><label class="label-input">Dept_ID / ชื่อแผนก</label><input id="m-project-dept" class="input" list="dept-list" value="${project ? escapeHtml(project.Dept_ID) : ''}"><datalist id="dept-list">${deptOptions}</datalist></div>
+        <div><label class="label-input">Company_ID / บริษัท</label><input id="m-project-company" class="input" list="company-list" value="${project ? escapeHtml(project.Company_ID) : ''}"><datalist id="company-list">${companyOptions}</datalist></div>
+        <div><label class="label-input">รอบการต่ออายุ (Renewal_Round)</label><input id="m-project-round" class="input" type="number" value="${project ? Number(project.Renewal_Round || 1) : 1}"></div>
+        <div><label class="label-input">อายุใบอนุญาตเป็นปี (Lifespan)</label><input id="m-project-life" class="input" type="number" value="${project ? Number(project.Lifespan || 4) : 4}"></div>
+        <div><label class="label-input">วันที่ออกใบอนุญาต (Issue_Date)</label><input id="m-project-issue" class="input" value="${project ? escapeHtml(project.Issue_Date || '') : ''}"></div>
+        <div><label class="label-input">วันหมดอายุ (Expiry_Date)</label><input id="m-project-expiry" class="input" placeholder="(ให้ระบบคำนวณอัตโนมัติ)" value="${project ? escapeHtml(project.Expiry_Date || '') : ''}"></div>
+        <div class="md:col-span-2"><label class="label-input">หมายเหตุ (Note)</label><input id="m-project-note" class="input" placeholder="พิมพ์หมายเหตุเพิ่มเติม" value="${project ? escapeHtml(project.Note || '') : ''}"></div>
+      </div>`,
+      confirmButtonText: 'บันทึก',
+      showCancelButton: true,
+      didOpen: async () => {
+        const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+        const config = {
+          locale: 'th',
+          allowInput: true,
+          dateFormat: 'j M Y',
+          formatDate: (date, format, locale) => {
+            return date.getDate() + ' ' + TH_MONTHS[date.getMonth()] + ' ' + (date.getFullYear() + 543);
+          },
+          parseDate: (datestr, format) => {
+            if (!datestr) return null;
+            const parts = String(datestr).split(/\s+/);
+            if (parts.length >= 3) {
+              const d = parseInt(parts[0], 10);
+              const m = TH_MONTHS.indexOf(parts[1]);
+              let y = parseInt(parts[2], 10);
+              if (m > -1 && !isNaN(d) && !isNaN(y)) {
+                if (y > 2500) y -= 543;
+                return new Date(y, m, d);
+              }
+            }
+            const dp = String(datestr).split(/[\/-]/);
+            if (dp.length === 3) {
+               let y = Number(dp[2]);
+               if (y > 2500) y -= 543;
+               return new Date(y, Number(dp[1]) - 1, Number(dp[0]));
+            }
+            return new Date(datestr);
+          }
+        };
+        try {
+          await ensureFlatpickrReady_();
+        } catch (err) {
+          showError(err);
+          return;
+        }
+        flatpickr('#m-project-issue', config);
+        flatpickr('#m-project-expiry', config);
+      },
+      preConfirm: () => ({
+        Project_ID: document.getElementById('m-project-id').value.trim(),
+        Project_Name: document.getElementById('m-project-name').value.trim(),
+        Dept_ID: document.getElementById('m-project-dept').value.trim(),
+        Company_ID: document.getElementById('m-project-company').value.trim(),
+        Renewal_Round: Number(document.getElementById('m-project-round').value || 1),
+        Lifespan: Number(document.getElementById('m-project-life').value || 4),
+        Issue_Date: document.getElementById('m-project-issue').value.trim(),
+        Expiry_Date: document.getElementById('m-project-expiry').value.trim(),
+        Note: document.getElementById('m-project-note').value.trim()
+      })
+    }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('บันทึกโครงการสำเร็จ'); refreshAll(); }).withFailureHandler(showError).saveProject(state.token, r.value); });
+    if (project) return draw('');
+    google.script.run.withSuccessHandler((nextId) => draw(nextId)).withFailureHandler(showError).getNextProjectId();
+  });
+}
+
+function openCompanyModal(company = null) {
+  requireLogin(() => {
+    Swal.fire({
+      title: 'จัดการบริษัท',
+      width: 920,
+      html: `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-left">
+        <input id="m-company-id" class="input hidden" value="${company ? escapeHtml(company.Company_ID) : ''}">
+        <div><label class="label-input">ชื่อบริษัท (Company_Name)</label><input id="m-company-name" class="input" value="${company ? escapeHtml(company.Company_Name) : ''}"></div>
+        <div><label class="label-input">ชื่อผู้ติดต่อ (Contact_Person)</label><input id="m-company-contact" class="input" value="${company ? escapeHtml(company.Contact_Person || '') : ''}"></div>
+        <div><label class="label-input">อีเมล (Contact_Email)</label><input id="m-company-email" class="input" value="${company ? escapeHtml(company.Contact_Email || '') : ''}"></div>
+        <div><label class="label-input">LINE Notify Token</label><input id="m-company-token" class="input" value="${company ? escapeHtml(company.Line_Notify_Token || '') : ''}"></div>
+        <div class="md:col-span-2"><label class="label-input">หมายเหตุ</label><input id="m-company-note" class="input" placeholder="เบอร์หรือไลน์ผู้ติดต่อ" value="${company ? escapeHtml(company.Note || '') : ''}"></div>
+      </div>`,
+      showCancelButton: true,
+      confirmButtonText: 'บันทึก',
+      preConfirm: () => ({
+        Company_ID: document.getElementById('m-company-id').value.trim() || '',
+        Company_Name: document.getElementById('m-company-name').value.trim(),
+        Contact_Person: document.getElementById('m-company-contact').value.trim(),
+        Contact_Email: document.getElementById('m-company-email').value.trim(),
+        Line_Notify_Token: document.getElementById('m-company-token').value.trim(),
+        Note: document.getElementById('m-company-note').value.trim()
+      })
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      const payload = r.value;
+      if (!payload.Company_ID) payload.Company_ID = String(Date.now());
+      google.script.run.withSuccessHandler(() => { toast('บันทึกบริษัทสำเร็จ'); loadCompanies(); }).withFailureHandler(showError).saveCompany(state.token, payload);
+    });
+  });
+}
+
+function openUserModal(user = null) {
+  requireLogin(() => Swal.fire({
+    title: 'จัดการผู้ใช้งาน',
+    html: `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-left"><input id="m-user-id" class="input hidden" value="${user ? escapeHtml(user.User_ID) : ''}"><div><label class="label-input">Full_Name</label><input id="m-user-full" class="input" value="${user ? escapeHtml(user.Full_Name) : ''}"></div><div><label class="label-input">Username</label><input id="m-user-username" class="input" value="${user ? escapeHtml(user.Username) : ''}"></div><div><label class="label-input">Password</label><input id="m-user-pass" class="input" type="password" placeholder="${user ? 'กรอกใหม่หากต้องการเปลี่ยน' : 'รหัสผ่าน'}"></div><div><label class="label-input">Role</label><select id="m-user-role" class="input"><option value="editor" ${user && user.Role === 'editor' ? 'selected' : ''}>Editor</option><option value="admin" ${user && user.Role === 'admin' ? 'selected' : ''}>Admin</option></select></div><div><label class="label-input">Status</label><input id="m-user-status" class="input" value="${user ? escapeHtml(user.Status || 'active') : 'active'}"></div></div>`,
+    showCancelButton: true,
+    confirmButtonText: 'บันทึก',
+    preConfirm: () => ({ User_ID: document.getElementById('m-user-id').value.trim(), Full_Name: document.getElementById('m-user-full').value.trim(), Username: document.getElementById('m-user-username').value.trim(), Password: document.getElementById('m-user-pass').value.trim() || '1234', Role: document.getElementById('m-user-role').value, Status: document.getElementById('m-user-status').value.trim() || 'active' })
+  }).then(r => { if (!r.isConfirmed) return; google.script.run.withSuccessHandler(() => { toast('บันทึกผู้ใช้สำเร็จ'); loadUsers(); }).withFailureHandler(showError).saveUser(state.token, r.value); }));
+}
+
+function toggleMobileSidebar() { document.getElementById('sidebar').classList.toggle('hidden'); }
+function statusBadge(status) { if (status === 'กำลังต่ออายุ') return '<span class="status status-renewing">กำลังต่ออายุ</span>'; if (status === 'ใกล้หมดอายุ') return '<span class="status status-warning">ใกล้หมดอายุ</span>'; if (status === 'หมดอายุแล้ว') return '<span class="status status-expired">หมดอายุแล้ว</span>'; return '<span class="status status-normal">ปกติ</span>'; }
+function parseDateValue(value) {
+  if (!value) return null;
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value)) return value;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (text.indexOf('T') > -1) {
+    const d = new Date(text);
+    return isNaN(d) ? null : d;
+  }
+
+  const thaiMonthsShort = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  const thaiMonthsFull = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+  const parts = text.split(/\s+/);
+  if (parts.length >= 3) {
+    const day = Number(parts[0]);
+    let month = thaiMonthsShort.indexOf(parts[1]);
+    if (month < 0) month = thaiMonthsFull.indexOf(parts[1]);
+    let year = Number(parts[2]);
+    if (month > -1 && !isNaN(day) && !isNaN(year)) {
+      if (year > 2500) year -= 543;
+      const d = new Date(year, month, day);
+      return isNaN(d) ? null : d;
+    }
+  }
+
+  const dp = text.split(/[\/-]/);
+  if (dp.length === 3) {
+    const day = Number(dp[0]);
+    const month = Number(dp[1]) - 1;
+    let year = Number(dp[2]);
+    if (year > 2500) year -= 543;
+    const d = new Date(year, month, day);
+    return isNaN(d) ? null : d;
+  }
+
+  const fallback = new Date(text);
+  return isNaN(fallback) ? null : fallback;
+}
+function formatThaiDateDisplay(value) {
+  const d = parseDateValue(value);
+  if (!d) return '-';
+  return d.toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function escapeHtml(text) { return String(text == null ? '' : text).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+</script>
