@@ -25,11 +25,11 @@
   function createGasRunner() {
     let onSuccess = null;
     let onFailure = null;
-    const runner = {
-      withSuccessHandler(cb) { onSuccess = cb; return runner; },
-      withFailureHandler(cb) { onFailure = cb; return runner; }
+    const handler = {
+      withSuccessHandler(cb) { onSuccess = cb; return proxy; },
+      withFailureHandler(cb) { onFailure = cb; return proxy; }
     };
-    return new Proxy(runner, {
+    const proxy = new Proxy(handler, {
       get(target, prop) {
         if (prop in target) return target[prop];
         return function (...args) {
@@ -39,6 +39,7 @@
         };
       }
     });
+    return proxy;
   }
 
   window.google = window.google || {};
