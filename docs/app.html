@@ -331,6 +331,8 @@
         </div>
       </div>
     </div>
+
+    <div id="menu-db" style="display: none;">
       <div class="filter-bar d-flex justify-content-between align-items-center">
         <h5 class="fw-bold mb-0"><i class="fa-solid fa-table"></i> ฐานข้อมูลทั้งหมด</h5>
         <input type="text" id="searchInput" class="form-control w-25" placeholder="ค้นหาชื่อสถานที่..." onkeyup="searchTable()">
@@ -2027,12 +2029,16 @@
 
     function switchMenu(menuId) {
       ['dash', 'map', 'route', 'db', 'outage', 'docs'].forEach(id => {
-        document.getElementById('menu-' + id).style.display = 'none';
-        document.getElementById('tab-' + id).classList.remove('active');
+        var menuEl = document.getElementById('menu-' + id);
+        var tabEl = document.getElementById('tab-' + id);
+        if (menuEl) menuEl.style.display = 'none';
+        if (tabEl) tabEl.classList.remove('active');
       });
       
-      document.getElementById('menu-' + menuId).style.display = 'block';
-      document.getElementById('tab-' + menuId).classList.add('active');
+      var activeMenu = document.getElementById('menu-' + menuId);
+      var activeTab = document.getElementById('tab-' + menuId);
+      if (activeMenu) activeMenu.style.display = 'block';
+      if (activeTab) activeTab.classList.add('active');
       
       if(menuId === 'map' && map) {
         setTimeout(() => map.invalidateSize(), 200);
