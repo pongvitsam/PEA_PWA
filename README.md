@@ -17,9 +17,13 @@
 ## เปิด GitHub Pages
 
 1. Push โค้ดไป `https://github.com/pongvitsam/PEA_PWA`
-2. GitHub → **Settings** → **Pages**
-3. Source: **Deploy from a branch** → Branch `main` → Folder **`/docs`**
-4. รอ 1–2 นาที แล้วเปิด `https://pongvitsam.github.io/PEA_PWA/`
+2. รอ GitHub Actions รันเสร็จ (แท็บ **Actions** → ✅ Deploy GitHub Pages)
+3. GitHub → **Settings** → **Pages**
+4. Source: **Deploy from a branch**
+5. Branch: **`gh-pages`** → Folder **`/ (root)`** → Save
+6. รอ 1–3 นาที แล้วเปิด `https://pongvitsam.github.io/PEA_PWA/`
+
+> ถ้าเห็น 404: มักตั้ง Branch ผิด (ต้องเป็น `gh-pages` ไม่ใช่ `main`) หรือ Actions ยังไม่รันเสร็จ
 
 ## Deploy Backend (Apps Script)
 
