@@ -1,4 +1,6 @@
 (function () {
+  'use strict';
+
   function getStoredSessionToken() {
     try {
       const raw = localStorage.getItem('pwa_token');
@@ -13,7 +15,11 @@
       method: 'POST',
       redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: action, args: args || [], sessionToken: getStoredSessionToken() })
+      body: JSON.stringify({
+        action: action,
+        args: args || [],
+        sessionToken: getStoredSessionToken()
+      })
     });
     const text = await res.text();
     let data;
@@ -25,26 +31,28 @@
   function createGasRunner() {
     let onSuccess = null;
     let onFailure = null;
-    const handler = {
-      withSuccessHandler(cb) { onSuccess = cb; return proxy; },
-      withFailureHandler(cb) { onFailure = cb; return proxy; }
-    };
-    const proxy = new Proxy(handler, {
-      get(target, prop) {
-        if (prop in target) return target[prop];
+    const chain = new Proxy({}, {
+      get(_target, prop) {
+        if (prop === 'withSuccessHandler') {
+          return function (cb) { onSuccess = cb; return chain; };
+        }
+        if (prop === 'withFailureHandler') {
+          return function (cb) { onFailure = cb; return chain; };
+        }
         return function (...args) {
           gasCall(String(prop), args)
-            .then(r => { if (onSuccess) onSuccess(r); })
-            .catch(e => { if (onFailure) onFailure(e); });
+            .then(function (r) { if (onSuccess) onSuccess(r); })
+            .catch(function (e) { if (onFailure) onFailure(e); });
         };
       }
     });
-    return proxy;
+    return chain;
   }
 
-  window.google = window.google || {};
-  Object.defineProperty(window.google, 'script', {
-    get() { return { get run() { return createGasRunner(); } }; },
-    configurable: true
-  });
+  window.pwaGasCall = gasCall;
+  window.google = {
+    script: {
+      get run() { return createGasRunner(); }
+    }
+  };
 })();
