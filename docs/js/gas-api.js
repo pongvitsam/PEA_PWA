@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  if (typeof window === 'undefined') return;
 
   function getStoredSessionToken() {
     try {
@@ -14,10 +15,46 @@
     return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
   }
 
-  /** iframe + form POST — หลีกเลี่ยง CORS ของ Google Apps Script */
-  function gasCall(action, args) {
+  function gasCallJsonp(action, args, requestId) {
     return new Promise(function (resolve, reject) {
-      const requestId = newRequestId();
+      const cbName = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
+      const timeout = setTimeout(function () {
+        delete window[cbName];
+        if (script.parentNode) script.parentNode.removeChild(script);
+        reject(new Error('API timeout'));
+      }, 90000);
+
+      window[cbName] = function (data) {
+        clearTimeout(timeout);
+        delete window[cbName];
+        if (script.parentNode) script.parentNode.removeChild(script);
+        if (data.requestId && data.requestId !== requestId) return;
+        if (data.ok) resolve(data.result);
+        else reject(new Error(data.error || 'API error'));
+      };
+
+      const params = new URLSearchParams();
+      params.set('api', '1');
+      params.set('action', action);
+      params.set('args', JSON.stringify(args || []));
+      params.set('callback', cbName);
+      params.set('requestId', requestId);
+      const tok = getStoredSessionToken();
+      if (tok) params.set('sessionToken', tok);
+
+      const script = document.createElement('script');
+      script.src = window.GAS_API_URL + '?' + params.toString();
+      script.onerror = function () {
+        clearTimeout(timeout);
+        delete window[cbName];
+        reject(new Error('API script load failed'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  function gasCallIframe(action, args, requestId) {
+    return new Promise(function (resolve, reject) {
       const iframeName = 'gasfrm_' + requestId;
       const iframe = document.createElement('iframe');
       iframe.name = iframeName;
@@ -66,6 +103,13 @@
       document.body.appendChild(form);
       form.submit();
     });
+  }
+
+  function gasCall(action, args) {
+    const requestId = newRequestId();
+    const argsJson = JSON.stringify(args || []);
+    if (argsJson.length > 1800) return gasCallIframe(action, args, requestId);
+    return gasCallJsonp(action, args, requestId);
   }
 
   function createGasRunner() {
