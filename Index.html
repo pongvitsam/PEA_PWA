@@ -13,6 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script><script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
   <style>
@@ -1095,21 +1096,42 @@
       }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 15000 });
     }
 
+    function blurOutageModalFocus_() {
+      const modal = document.getElementById('outageModal');
+      const el = document.activeElement;
+      if (!el || el === document.body) return;
+      if (modal && modal.contains(el)) el.blur();
+      else if (el.id === 'btnAddOutage' || el.id === 'btnAddOutageTop') el.blur();
+    }
+
+    function clearStaleOutageAriaHidden_() {
+      document.querySelectorAll('.container-fluid[aria-hidden="true"]').forEach(function (node) {
+        node.removeAttribute('aria-hidden');
+      });
+      const modal = document.getElementById('outageModal');
+      if (modal && !modal.classList.contains('show')) modal.removeAttribute('aria-hidden');
+    }
+
+    function focusOutageModalReturn_() {
+      clearStaleOutageAriaHidden_();
+      const back = document.getElementById('btnAddOutage') || document.getElementById('btnAddOutageTop') || document.getElementById('tab-outage');
+      if (back) setTimeout(function () { back.focus(); }, 0);
+    }
+
     // 🟢 แก้ไข: นำ initOutageSystem ออกจากตรงนี้
     document.addEventListener('DOMContentLoaded', function() {
       editModalObj = new bootstrap.Modal(document.getElementById('editModal'));
       drilldownModalObj = new bootstrap.Modal(document.getElementById('drilldownModal'));
       outageModalObj = new bootstrap.Modal(document.getElementById('outageModal'), { focus: false });
-      document.getElementById('outageModal').addEventListener('shown.bs.modal', function() {
+      const outageModalEl = document.getElementById('outageModal');
+      outageModalEl.addEventListener('show.bs.modal', blurOutageModalFocus_);
+      outageModalEl.addEventListener('hide.bs.modal', blurOutageModalFocus_);
+      outageModalEl.addEventListener('shown.bs.modal', function() {
+        clearStaleOutageAriaHidden_();
         const first = document.getElementById('o_project');
         if (first) first.focus();
       });
-      document.addEventListener('hidden.bs.modal', function(ev) {
-        if (ev.target && ev.target.id === 'outageModal') {
-          const back = document.getElementById('btnAddOutage') || document.getElementById('tab-outage');
-          if (back) back.focus();
-        }
-      });
+      outageModalEl.addEventListener('hidden.bs.modal', focusOutageModalReturn_);
       docModalObj = new bootstrap.Modal(document.getElementById('docModal'));
       editDocModalObj = new bootstrap.Modal(document.getElementById('editDocModal'));
       
@@ -2340,7 +2362,12 @@
       let id = document.getElementById('o_id').value;
       Swal.fire({ title: 'ลบรายการนี้?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
         if(res.isConfirmed) {
-          google.script.run.withSuccessHandler(() => { outageModalObj.hide(); initOutageSystem(); })
+          blurOutageModalFocus_();
+          google.script.run.withSuccessHandler(() => {
+            blurOutageModalFocus_();
+            outageModalObj.hide();
+            initOutageSystem();
+          })
             .withFailureHandler(err => {
               if (!handleOutageAuthError(err)) {
                 Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
