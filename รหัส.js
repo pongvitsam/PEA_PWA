@@ -23,7 +23,7 @@ function getOrCreateSheet_(ss, name, headers) {
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.api === '1') {
-    return jsonOutput_({ ok: true, result: { status: 'online', version: 'api' } });
+    return handleApiGet_(e.parameter);
   }
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
@@ -31,13 +31,62 @@ function doGet(e) {
     .setTitle('PEA/PWA Smart Map System');
 }
 
-function doPost(e) {
+function handleApiGet_(p) {
   try {
-    const payload = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
-    const result = dispatchApi_(payload.action, payload.args || [], payload.sessionToken || null);
-    return jsonOutput_({ ok: true, result: result });
+    if (p.action) {
+      const args = p.args ? JSON.parse(p.args) : [];
+      const result = dispatchApi_(p.action, args, p.sessionToken || null);
+      const out = { ok: true, result: result, requestId: p.requestId || null };
+      if (p.callback) {
+        return jsonpOutput_(p.callback, out);
+      }
+      return jsonOutput_(out);
+    }
+    return jsonOutput_({ ok: true, result: { status: 'online', version: 'api' } });
   } catch (err) {
-    return jsonOutput_({ ok: false, error: err.message || String(err) });
+    const out = { ok: false, error: err.message || String(err), requestId: p.requestId || null };
+    if (p.callback) return jsonpOutput_(p.callback, out);
+    return jsonOutput_(out);
+  }
+}
+
+function jsonpOutput_(callback, obj) {
+  const name = String(callback).replace(/[^\w$.]/g, '');
+  if (!name) throw new Error('Invalid callback');
+  const safe = JSON.stringify(obj).replace(/<\/script/gi, '<\\/script');
+  return ContentService.createTextOutput(name + '(' + safe + ');')
+    .setMimeType(ContentService.MimeType.JAVASCRIPT);
+}
+
+function parsePostPayload_(e) {
+  if (e.postData && e.postData.contents) {
+    return JSON.parse(e.postData.contents);
+  }
+  if (e.parameter && e.parameter.payload) {
+    return JSON.parse(e.parameter.payload);
+  }
+  throw new Error('Empty payload');
+}
+
+function postMessageHtml_(obj) {
+  const safe = JSON.stringify(obj).replace(/<\/script/gi, '<\\/script');
+  const html = '<!doctype html><html><body><script>parent.postMessage(' + safe + ',"*");</script></body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function doPost(e) {
+  var payload = {};
+  try {
+    payload = parsePostPayload_(e);
+    const result = dispatchApi_(payload.action, payload.args || [], payload.sessionToken || null);
+    const out = { ok: true, result: result, requestId: payload.requestId || null };
+    if (payload.client === 'pages') return postMessageHtml_(out);
+    return jsonOutput_(out);
+  } catch (err) {
+    const out = { ok: false, error: err.message || String(err), requestId: payload.requestId || null };
+    if (payload.client === 'pages') return postMessageHtml_(out);
+    return jsonOutput_(out);
   }
 }
 
