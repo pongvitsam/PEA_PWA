@@ -136,6 +136,8 @@
     .route-icon { width: 30px; height: 30px; background: #e6fcf5; color: #20c997; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-weight: bold; margin-right: 15px; font-size: 0.9rem;}
     
     .route-summary { background: #e7f5ff; border-radius: 10px; padding: 15px; margin-bottom: 10px; border-left: 4px solid #339af0; font-size: 0.9rem;}
+    #routeMap { height: 420px; width: 100%; border-radius: 12px; z-index: 1; }
+    .route-num-marker { background: transparent; border: none; }
     div:where(.swal2-container) { z-index: 9999 !important; font-family: 'Prompt', sans-serif !important; }
     .marker-label-tooltip { background: rgba(32, 201, 151, 0.92); color: #fff; border: 0; border-radius: 14px; font-weight: 600; padding: 2px 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
     .marker-label-tooltip::before { display: none; }
@@ -319,9 +321,16 @@
           </div>
         </div>
       </div>
+      <div class="row mt-2">
+        <div class="col-12">
+          <div class="filter-bar p-2">
+            <h5 class="fw-bold mb-2"><i class="fa-solid fa-map-location-dot"></i> แผนที่เส้นทาง</h5>
+            <p class="text-muted small mb-2" id="routeMapHint">เลือกจุดในรายการด้านบน — แผนที่จะแสดงลำดับและเส้นทางจากจุดหนึ่งไปอีกจุด</p>
+            <div id="routeMap"></div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <div id="menu-db" style="display: none;">
       <div class="filter-bar d-flex justify-content-between align-items-center">
         <h5 class="fw-bold mb-0"><i class="fa-solid fa-table"></i> ฐานข้อมูลทั้งหมด</h5>
         <input type="text" id="searchInput" class="form-control w-25" placeholder="ค้นหาชื่อสถานที่..." onkeyup="searchTable()">
@@ -660,6 +669,7 @@
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, calendar;
+    let routeMap, routeMarkersLayer, routeLineLayer;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
     let radiusCircle = null;
@@ -1757,6 +1767,7 @@
         detailsDiv.innerHTML = '';
         document.getElementById('startNavBtn').disabled = true;
         document.getElementById('clearNavBtn').disabled = true;
+        updateRouteMap(null);
         return;
       }
       
@@ -1766,27 +1777,38 @@
       list.innerHTML = '';
       selectedRoute.forEach((loc, idx) => {
         let bgClass = (loc.isMyLocation || loc.isCustomText) ? 'bg-info text-white border-info' : 'bg-light';
+        let legHint = '';
+        if (idx > 0) {
+          legHint = '<small class="d-block ' + ((loc.isMyLocation||loc.isCustomText)?'text-white-50':'text-primary') + '"><i class="fa-solid fa-arrow-right"></i> จาก: ' + escapeHtml(selectedRoute[idx - 1].name || '-') + '</small>';
+        }
         list.innerHTML += 
           '<div class="route-item position-relative ' + bgClass + '" draggable="true" ' +
           'ondragstart="dragStart(' + idx + ', event)" ondragend="dragEnd(event)" ondragover="dragOver(event)" ondragenter="dragEnter(event)" ondragleave="dragLeave(event)" ondrop="dropItem(' + idx + ', event)">' +
             '<div class="drag-handle" title="ลากเพื่อย้ายลำดับ"><i class="fa-solid fa-grip-vertical"></i></div>' +
             '<div class="route-icon">' + (idx+1) + '</div>' +
             '<div class="flex-grow-1">' +
-              '<span class="fw-bold d-block">' + (loc.name || '-') + '</span>' +
-              '<small class="' + ((loc.isMyLocation||loc.isCustomText)?'text-white':'text-muted') + '">เฟส ' + (loc.phase || '-') + ' | ' + (loc.peaRegion || '-') + '</small>' +
+              '<span class="fw-bold d-block">' + escapeHtml(loc.name || '-') + '</span>' +
+              legHint +
+              '<small class="' + ((loc.isMyLocation||loc.isCustomText)?'text-white':'text-muted') + '">เฟส ' + (loc.phase || '-') + ' | ' + escapeHtml(loc.peaRegion || '-') + '</small>' +
             '</div>' +
             '<button class="btn btn-sm btn-outline-danger border-0 bg-white" onclick="removeRoute(' + idx + ')"><i class="fa-solid fa-xmark"></i></button>' +
           '</div>';
       });
 
+      const routablePoints = selectedRoute.filter(function (l) {
+        return l.lat != null && l.lng != null && !isNaN(l.lat) && !isNaN(l.lng) && !l.isCustomText;
+      });
+      let routeGeometry = null;
       let hasCustomText = selectedRoute.some(r => r.isCustomText);
-      if (selectedRoute.length > 1 && !hasCustomText) {
-        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณระยะทางรวม...</small></div>';
-        let coords = selectedRoute.map(l => l.lng + "," + l.lat).join(';');
+
+      if (routablePoints.length > 1 && !hasCustomText) {
+        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณเส้นทาง...</small></div>';
+        let coords = routablePoints.map(l => l.lng + "," + l.lat).join(';');
         try {
-          let res = await fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=false');
+          let res = await fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=full&geometries=geojson');
           let data = await res.json();
-          if(data.code === 'Ok') {
+          if (data.code === 'Ok') {
+            routeGeometry = data.routes[0].geometry;
             let distKm = (data.routes[0].distance / 1000).toFixed(1);
             let timeMin = Math.round(data.routes[0].duration / 60);
             let timeHr = Math.floor(timeMin / 60);
@@ -1798,9 +1820,89 @@
                 'ระยะทางขับรถ: <b>' + distKm + ' กม.</b> <br>' +
                 'เวลาเดินทางโดยประมาณ: <b>' + timeStr + '</b>' +
               '</div>';
-          } else { detailsDiv.innerHTML = '<small class="text-danger">ไม่สามารถคำนวณเส้นทางได้</small>'; }
-        } catch(e) { detailsDiv.innerHTML = '<small class="text-warning">คำนวณระยะทางขัดข้อง (ยังสามารถกดนำทางผ่าน Maps ได้ปกติ)</small>'; }
-      } else { detailsDiv.innerHTML = ''; }
+          } else {
+            detailsDiv.innerHTML = '<small class="text-danger">ไม่สามารถคำนวณเส้นทางได้ — แสดงเส้นตรงบนแผนที่</small>';
+          }
+        } catch (e) {
+          detailsDiv.innerHTML = '<small class="text-warning">คำนวณระยะทางขัดข้อง (ยังสามารถกดนำทางผ่าน Maps ได้ปกติ)</small>';
+        }
+      } else {
+        if (hasCustomText && routablePoints.length > 0) {
+          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> จุดที่พิมพ์เองไม่มีพิกัด — แสดงเฉพาะจุดที่มีพิกัดบนแผนที่</small>';
+        } else if (routablePoints.length === 1) {
+          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> เพิ่มจุดถัดไปเพื่อดูเส้นทาง</small>';
+        } else {
+          detailsDiv.innerHTML = '';
+        }
+      }
+
+      updateRouteMap(routeGeometry);
+    }
+
+    function initRouteMapIfNeeded() {
+      if (routeMap) return;
+      routeMap = L.map('routeMap', { center: [13.7563, 100.5018], zoom: 6 });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(routeMap);
+      routeMarkersLayer = L.layerGroup().addTo(routeMap);
+      routeLineLayer = L.layerGroup().addTo(routeMap);
+    }
+
+    function createRouteNumberIcon(num, isStart, isEnd) {
+      var color = isStart ? '#20c997' : (isEnd ? '#fa5252' : '#339af0');
+      return L.divIcon({
+        className: 'route-num-marker',
+        html: '<div style="background:' + color + ';color:#fff;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:13px;">' + num + '</div>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+    }
+
+    function updateRouteMap(routeGeometry) {
+      initRouteMapIfNeeded();
+      routeMarkersLayer.clearLayers();
+      routeLineLayer.clearLayers();
+      var hint = document.getElementById('routeMapHint');
+      var bounds = [];
+
+      if (selectedRoute.length === 0) {
+        if (hint) hint.textContent = 'เลือกจุดในรายการด้านบน — แผนที่จะแสดงลำดับและเส้นทางจากจุดหนึ่งไปอีกจุด';
+        routeMap.setView([13.7563, 100.5018], 6);
+        return;
+      }
+
+      selectedRoute.forEach(function (loc, idx) {
+        if (loc.lat == null || loc.lng == null || isNaN(loc.lat) || isNaN(loc.lng) || loc.isCustomText) return;
+        var isStart = idx === 0;
+        var isEnd = idx === selectedRoute.length - 1;
+        var marker = L.marker([loc.lat, loc.lng], { icon: createRouteNumberIcon(idx + 1, isStart, isEnd) });
+        var popupHtml = '<div class="small">';
+        if (isStart) popupHtml += '<b>จุดเริ่มต้น</b><br>';
+        else popupHtml += '<b>จุดที่ ' + (idx + 1) + '</b><br>จาก: ' + escapeHtml(selectedRoute[idx - 1].name || '-') + '<br>ถึง: ';
+        popupHtml += escapeHtml(loc.name || '-') + '</div>';
+        marker.bindPopup(popupHtml);
+        routeMarkersLayer.addLayer(marker);
+        bounds.push([loc.lat, loc.lng]);
+      });
+
+      if (routeGeometry && routeGeometry.coordinates && routeGeometry.coordinates.length) {
+        var latlngs = routeGeometry.coordinates.map(function (c) { return [c[1], c[0]]; });
+        L.polyline(latlngs, { color: '#1c7ed6', weight: 6, opacity: 0.85 }).addTo(routeLineLayer);
+        if (hint) hint.textContent = 'เส้นสีน้ำเงิน = เส้นทางขับรถตามลำดับที่เลือก (จุด ' + selectedRoute.length + ' จุด)';
+      } else {
+        var linePts = selectedRoute.filter(function (l) {
+          return l.lat != null && l.lng != null && !isNaN(l.lat) && !isNaN(l.lng) && !l.isCustomText;
+        }).map(function (l) { return [l.lat, l.lng]; });
+        if (linePts.length > 1) {
+          L.polyline(linePts, { color: '#868e96', weight: 4, opacity: 0.75, dashArray: '10,8' }).addTo(routeLineLayer);
+          if (hint) hint.textContent = 'เส้นประ = เชื่อมจุดตามลำดับ (ประมาณการ)';
+        } else if (linePts.length === 1) {
+          if (hint) hint.textContent = 'แสดงจุดเริ่มต้น — เพิ่มจุดถัดไปเพื่อดูเส้นทาง';
+        }
+      }
+
+      if (bounds.length > 1) routeMap.fitBounds(bounds, { padding: [48, 48] });
+      else if (bounds.length === 1) routeMap.setView(bounds[0], 13);
+      setTimeout(function () { routeMap.invalidateSize(); }, 100);
     }
 
     function removeRoute(idx) { selectedRoute.splice(idx, 1); renderRoute(); }
@@ -1935,6 +2037,14 @@
       if(menuId === 'map' && map) {
         setTimeout(() => map.invalidateSize(), 200);
         startMapGpsTracking();
+      }
+
+      if (menuId === 'route') {
+        setTimeout(function () {
+          initRouteMapIfNeeded();
+          routeMap.invalidateSize();
+          if (selectedRoute.length) renderRoute();
+        }, 200);
       }
       
       if(menuId === 'outage') {
