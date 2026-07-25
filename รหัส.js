@@ -83,15 +83,32 @@ function doPost(e) {
   var payload = {};
   try {
     payload = parsePostPayload_(e);
+    if (payload.jobId) setApiJob_(payload.jobId, { status: 'running' });
     const result = dispatchApi_(payload.action, payload.args || [], payload.sessionToken || null);
-    const out = { ok: true, result: result, requestId: payload.requestId || null };
+    if (payload.jobId) setApiJob_(payload.jobId, { status: 'done', result: result });
+    const out = { ok: true, result: result, requestId: payload.requestId || null, jobId: payload.jobId || null };
     if (payload.client === 'pages') return postMessageHtml_(out);
     return jsonOutput_(out);
   } catch (err) {
-    const out = { ok: false, error: err.message || String(err), requestId: payload.requestId || null };
-    if (payload.client === 'pages') return postMessageHtml_(out);
+    if (payload && payload.jobId) setApiJob_(payload.jobId, { status: 'error', error: err.message || String(err) });
+    const out = { ok: false, error: err.message || String(err), requestId: payload.requestId || null, jobId: payload.jobId || null };
+    if (payload && payload.client === 'pages') return postMessageHtml_(out);
     return jsonOutput_(out);
   }
+}
+
+function setApiJob_(jobId, obj) {
+  if (!jobId) return;
+  const key = 'job:' + String(jobId).substring(0, 80);
+  CacheService.getScriptCache().put(key, JSON.stringify(obj || {}), 1800);
+}
+
+function getApiJobStatus(jobId) {
+  const id = (jobId == null ? '' : String(jobId)).trim();
+  if (!id) return { status: 'missing' };
+  const raw = CacheService.getScriptCache().get('job:' + id.substring(0, 80));
+  if (!raw) return { status: 'pending' };
+  try { return JSON.parse(raw); } catch (e) { return { status: 'error', error: 'job parse failed' }; }
 }
 
 function jsonOutput_(obj) {
@@ -107,6 +124,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'revokeSession': return revokeSession(args[0] || tok);
     case 'getOutages': return getOutages();
     case 'refreshOutagesFromSource': return refreshOutagesFromSource(args[0]);
+    case 'debugOutageSourceSheets': return debugOutageSourceSheets_();
     case 'saveOutageData': return saveOutageData(args[0], args[1] || tok);
     case 'updateOutageStatus': return updateOutageStatus(args[0], args[1], args[2], args[3] || tok);
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
@@ -122,6 +140,10 @@ function dispatchApi_(action, args, sessionToken) {
     case 'getSiteDocs': return getSiteDocs(args[0]);
     case 'getDriveSiteFolders': return getDriveSiteFolders();
     case 'saveSiteDoc': return saveSiteDoc(args[0], args[1] || tok);
+    case 'beginSiteDocUpload': return beginSiteDocUpload(args[0], args[1] || tok);
+    case 'saveSiteDocChunk': return saveSiteDocChunk(args[0], args[1] || tok);
+    case 'finalizeSiteDocUpload': return finalizeSiteDocUpload(args[0], args[1] || tok);
+    case 'getApiJobStatus': return getApiJobStatus(args[0]);
     case 'deleteSiteDoc': return deleteSiteDoc(args[0], args[1] || tok);
     default: throw new Error('Unknown action: ' + action);
   }
@@ -696,6 +718,68 @@ function collectSourceOutageRows_() {
   return collected;
 }
 
+/** ตรวจแท็บชีทต้นทาง — ใช้หาว่าอ่านแท็บไหนอยู่ */
+function debugOutageSourceSheets_() {
+  const srcSs = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  const sheets = srcSs.getSheets();
+  const findNames = ['ชัยบาดาล', 'บ้านหมี่', 'ลพบุรี', 'กุดตาเพชร', 'เกาะขนุน', 'บ้านบอน', 'บ้านเล่า', 'เดชอุดม'];
+  const found = {};
+  findNames.forEach(function(n) { found[n] = []; });
+
+  const sheetInfos = sheets.map(function(s) {
+    const lastRow = s.getLastRow();
+    const lastCol = s.getLastColumn();
+    let matched = false;
+    let samples = [];
+    let dataRows = 0;
+    let rawHead = [];
+    if (lastRow >= 1 && lastCol >= 1) {
+      const width = Math.min(Math.max(lastCol, 3), 35);
+      const values = s.getRange(1, 1, lastRow, width).getValues();
+      matched = looksLikeOutageSourceSheet_(values);
+      for (let i = 0; i < Math.min(values.length, 12); i++) {
+        rawHead.push({
+          r: i + 1,
+          a: cellStr_(values[i][0]).slice(0, 40),
+          c: cellStr_(values[i][2]).slice(0, 40),
+          m: cellStr_(values[i][12]).slice(0, 30),
+          o: cellStr_(values[i][14]).slice(0, 30),
+          isData: isOutageSourceDataRow_(values[i])
+        });
+      }
+      values.forEach(function(row, idx) {
+        const place = cellStr_(row[2]);
+        findNames.forEach(function(n) {
+          if (place.indexOf(n) >= 0) {
+            found[n].push({ sheet: s.getName(), row: idx + 1, place: place, a: cellStr_(row[0]), m: cellStr_(row[12]), n: cellStr_(row[13]), o: cellStr_(row[14]) });
+          }
+        });
+        if (!isOutageSourceDataRow_(row)) return;
+        dataRows++;
+        if (samples.length < 5) samples.push(place);
+      });
+    }
+    return {
+      name: s.getName(),
+      sheetId: s.getSheetId(),
+      rows: lastRow,
+      cols: lastCol,
+      matched: matched,
+      dataRows: dataRows,
+      samples: samples,
+      rawHead: rawHead
+    };
+  });
+
+  return {
+    spreadsheetName: srcSs.getName(),
+    spreadsheetId: OUTAGE_SOURCE_SS_ID,
+    url: OUTAGE_SOURCE_URL,
+    found: found,
+    sheets: sheetInfos
+  };
+}
+
 /**
  * ซิงก์ชีทกำหนดการ → OutagePlan
  * ชีทชนะชื่อ/วัน/หมายเหตุ; คง FileURL + checkbox ของแอป
@@ -922,7 +1006,9 @@ function getOrCreateDriveSubFolder_(parentFolder, folderName) {
 function getDriveSiteFolders() {
   try {
     const parent = DriveApp.getFolderById(FOLDER_ID);
-    return listDriveSubFolders_(parent).map(f => f.name);
+    return listDriveSubFolders_(parent)
+      .map(f => f.name)
+      .filter(n => n && n !== '_upload_tmp');
   } catch (e) {
     throw new Error('โหลดโฟลเดอร์จาก Drive ไม่สำเร็จ: ' + e.message);
   }
@@ -984,12 +1070,113 @@ function saveSiteDoc(formObj, sessionToken) {
     throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
   }
 
+  return createSiteDocFile_({
+    siteKey: siteKey,
+    folderName: folderName,
+    fileName: fileName,
+    fileBase64: formObj.fileBase64,
+    uploadedBy: session.username || role
+  });
+}
+
+function getUploadTempFolder_() {
+  const parent = DriveApp.getFolderById(FOLDER_ID);
+  const it = parent.getFoldersByName('_upload_tmp');
+  if (it.hasNext()) return it.next();
+  return parent.createFolder('_upload_tmp');
+}
+
+function beginSiteDocUpload(meta, sessionToken) {
+  const role = assertEditorOrAdminFromSession_(sessionToken);
+  const session = validateSession_(sessionToken);
+  const uploadId = (meta && meta.uploadId != null ? meta.uploadId : '').toString().trim();
+  const siteKey = (meta && meta.siteKey != null ? meta.siteKey : '').toString().trim();
+  const folderName = (meta && meta.folderName != null ? meta.folderName : '').toString().trim();
+  const fileName = (meta && meta.fileName != null ? meta.fileName : '').toString().trim();
+  const chunkTotal = parseInt(meta && meta.chunkTotal, 10) || 0;
+
+  if (!uploadId) throw new Error('ไม่พบรหัสอัปโหลด');
+  if (!siteKey) throw new Error('ไม่พบรหัสสถานที่');
+  if (!folderName) throw new Error('กรุณาระบุชื่อโฟลเดอร์');
+  if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
+  if (chunkTotal < 1) throw new Error('จำนวนชิ้นไฟล์ไม่ถูกต้อง');
+
+  const info = {
+    uploadId: uploadId,
+    siteKey: siteKey,
+    folderName: folderName,
+    fileName: fileName,
+    chunkTotal: chunkTotal,
+    uploadedBy: session.username || role,
+    received: 0
+  };
+  CacheService.getScriptCache().put('sup:' + uploadId, JSON.stringify(info), 3600);
+  return { success: true, uploadId: uploadId, chunkTotal: chunkTotal };
+}
+
+function saveSiteDocChunk(formObj, sessionToken) {
+  assertEditorOrAdminFromSession_(sessionToken);
+  const uploadId = (formObj && formObj.uploadId != null ? formObj.uploadId : '').toString().trim();
+  const chunkIndex = parseInt(formObj && formObj.chunkIndex, 10);
+  const chunkData = (formObj && formObj.chunkData != null ? formObj.chunkData : '').toString();
+
+  if (!uploadId) throw new Error('ไม่พบรหัสอัปโหลด');
+  if (!isFinite(chunkIndex) || chunkIndex < 0) throw new Error('ลำดับชิ้นไม่ถูกต้อง');
+  if (!chunkData) throw new Error('ชิ้นข้อมูลว่าง');
+
+  const metaRaw = CacheService.getScriptCache().get('sup:' + uploadId);
+  if (!metaRaw) throw new Error('หมดเวลาอัปโหลด หรือยังไม่ได้เริ่มต้น — ลองใหม่');
+  const meta = JSON.parse(metaRaw);
+  if (chunkIndex >= meta.chunkTotal) throw new Error('ลำดับชิ้นเกินจำนวน');
+
+  const tmp = getUploadTempFolder_();
+  const partName = uploadId + '_' + ('00000' + chunkIndex).slice(-5) + '.part';
+  const existing = tmp.getFilesByName(partName);
+  while (existing.hasNext()) existing.next().setTrashed(true);
+  tmp.createFile(Utilities.newBlob(chunkData, 'text/plain', partName));
+
+  meta.received = (parseInt(meta.received, 10) || 0) + 1;
+  CacheService.getScriptCache().put('sup:' + uploadId, JSON.stringify(meta), 3600);
+  return { success: true, chunkIndex: chunkIndex, received: meta.received, chunkTotal: meta.chunkTotal };
+}
+
+function finalizeSiteDocUpload(uploadId, sessionToken) {
+  assertEditorOrAdminFromSession_(sessionToken);
+  const id = (uploadId == null ? '' : uploadId.toString()).trim();
+  if (!id) throw new Error('ไม่พบรหัสอัปโหลด');
+
+  const metaRaw = CacheService.getScriptCache().get('sup:' + id);
+  if (!metaRaw) throw new Error('หมดเวลาอัปโหลด หรือยังไม่ได้เริ่มต้น — ลองใหม่');
+  const meta = JSON.parse(metaRaw);
+  const tmp = getUploadTempFolder_();
+
+  let fileBase64 = '';
+  for (let i = 0; i < meta.chunkTotal; i++) {
+    const partName = id + '_' + ('00000' + i).slice(-5) + '.part';
+    const files = tmp.getFilesByName(partName);
+    if (!files.hasNext()) throw new Error('ชิ้นไฟล์ไม่ครบ (ขาดชิ้นที่ ' + (i + 1) + ')');
+    const partFile = files.next();
+    fileBase64 += partFile.getBlob().getDataAsString();
+    partFile.setTrashed(true);
+  }
+
+  CacheService.getScriptCache().remove('sup:' + id);
+  return createSiteDocFile_({
+    siteKey: meta.siteKey,
+    folderName: meta.folderName,
+    fileName: meta.fileName,
+    fileBase64: fileBase64,
+    uploadedBy: meta.uploadedBy
+  });
+}
+
+function createSiteDocFile_(opts) {
   let finalUrl = '';
   try {
     const parent = DriveApp.getFolderById(FOLDER_ID);
-    const targetFolder = getOrCreateDriveSubFolder_(parent, folderName);
-    const decodedFile = Utilities.base64Decode(formObj.fileBase64);
-    const driveName = fileName.toLowerCase().endsWith('.pdf') ? fileName : (fileName + '.pdf');
+    const targetFolder = getOrCreateDriveSubFolder_(parent, opts.folderName);
+    const decodedFile = Utilities.base64Decode(opts.fileBase64);
+    const driveName = opts.fileName.toLowerCase().endsWith('.pdf') ? opts.fileName : (opts.fileName + '.pdf');
     const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
     const file = targetFolder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -1002,8 +1189,8 @@ function saveSiteDoc(formObj, sessionToken) {
   const sheet = getOrCreateSheet_(ss, SITE_DOCS_SHEET, ['DocID', 'SiteKey', 'FolderName', 'FileName', 'URL', 'UploadedBy', 'Timestamp']);
   const newId = 'SDOC_' + new Date().getTime();
   sheet.appendRow([
-    newId, siteKey, folderName, fileName, finalUrl,
-    session.username || role, new Date()
+    newId, opts.siteKey, opts.folderName, opts.fileName, finalUrl,
+    opts.uploadedBy || '', new Date()
   ]);
   return { success: true, message: 'อัปโหลดไฟล์สำเร็จ', id: newId, url: finalUrl };
 }
