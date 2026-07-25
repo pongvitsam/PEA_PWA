@@ -2116,8 +2116,8 @@
       
       if(menuId === 'outage') {
         setTimeout(() => {
-          if (!calendar) renderCalendar();
-          else calendar.updateSize();
+          // วาดใหม่ทุกครั้งที่เปิดเมนู — กันกรณีสร้างตอนซ่อนแล้วอีเวนต์ไม่โชว์
+          renderCalendar();
           window.dispatchEvent(new Event('resize'));
         }, 200);
       }
@@ -2237,11 +2237,35 @@
       return filteredOutageData.filter(hasOutageDates).map(o => {
         const style = getOutageEventStyle(o);
         return {
-          id: o.id, title: o.projectName, start: o.start, end: o.end,
-          backgroundColor: style.bg, borderColor: style.border, textColor: '#fff',
+          id: String(o.id),
+          title: o.projectName,
+          start: o.start,
+          end: o.end,
+          backgroundColor: style.bg,
+          borderColor: style.border,
+          textColor: '#fff',
           extendedProps: { status: o.checkDone ? 'done' : (new Date(o.end) < new Date() ? 'past' : 'pending') }
         };
       });
+    }
+
+    /** งานที่จะถึงเร็วสุด ถ้าไม่มีใช้เดือนของงานล่าสุดที่มีวัน */
+    function getOutageCalendarFocusDate() {
+      const now = Date.now();
+      let soon = null;
+      let latest = null;
+      filteredOutageData.forEach(o => {
+        if (!hasOutageDates(o)) return;
+        const t = new Date(o.start).getTime();
+        if (isNaN(t)) return;
+        if (t >= now - 6 * 3600000) {
+          if (soon == null || t < soon) soon = t;
+        }
+        if (latest == null || t > latest) latest = t;
+      });
+      if (soon != null) return new Date(soon);
+      if (latest != null) return new Date(latest);
+      return new Date();
     }
 
     function applyOutageCalendarLayout(events) {
@@ -2263,10 +2287,12 @@
     function refreshOutageCalendar() {
       const events = buildOutageCalendarEvents();
       const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
+      const focusDate = getOutageCalendarFocusDate();
       if (calendar) {
         calendar.setOption('height', calHeight);
         calendar.removeAllEvents();
         events.forEach(ev => calendar.addEvent(ev));
+        calendar.gotoDate(focusDate);
         calendar.updateSize();
         setTimeout(function() {
           document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
@@ -2281,15 +2307,20 @@
 
     function renderCalendar() {
       let calendarEl = document.getElementById('calendar');
+      if (!calendarEl) return;
       let events = buildOutageCalendarEvents();
       const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
+      const focusDate = getOutageCalendarFocusDate();
       if(calendar) calendar.destroy();
       calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
+        initialDate: focusDate,
+        timeZone: 'Asia/Bangkok',
         locale: 'th',
         height: calHeight,
         dayMaxEvents: false,
         eventDisplay: 'block',
+        displayEventEnd: true,
         eventOrder: 'start',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
