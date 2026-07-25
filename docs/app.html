@@ -532,23 +532,24 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="siteDocSiteKey">
-        <div class="mb-3">
-          <label class="fw-bold small text-muted">ชื่อโฟลเดอร์ (จาก Google Drive)</label>
+        <div class="mb-3" id="siteDocFileSection">
+          <label class="fw-bold small text-muted">1) เลือกไฟล์ PDF</label>
+          <input class="form-control" type="file" id="siteDocFile" accept="application/pdf,.pdf" onchange="onSiteDocFilePicked()">
+          <small class="text-muted" id="siteDocFileHint">เลือกไฟล์ก่อน ระบบจะดึงชื่อไฟล์มาให้แก้ได้</small>
+        </div>
+        <div class="mb-3" id="siteDocNameSection">
+          <label class="fw-bold small text-muted">2) ชื่อไฟล์ที่แสดง</label>
+          <input type="text" id="siteDocFileName" class="form-control" placeholder="จะเติมจากชื่อไฟล์ที่เลือก">
+          <small class="text-muted">ดึงมาจากชื่อไฟล์เดิม — แก้ได้ตามต้องการ</small>
+        </div>
+        <div class="mb-1">
+          <label class="fw-bold small text-muted">3) ชื่อโฟลเดอร์ (จาก Google Drive)</label>
           <select id="siteDocFolderSelect" class="form-select mb-2" onchange="onSiteDocFolderSelectChange()">
             <option value="">กำลังโหลดโฟลเดอร์...</option>
           </select>
           <input type="text" id="siteDocFolderNew" class="form-control" style="display:none;" placeholder="พิมพ์ชื่อโฟลเดอร์ใหม่" list="siteDocFolderList">
           <datalist id="siteDocFolderList"></datalist>
           <small class="text-muted">เลือกโฟลเดอร์ที่มีอยู่แล้ว หรือสร้างโฟลเดอร์ใหม่</small>
-        </div>
-        <div class="mb-3">
-          <label class="fw-bold small text-muted">ชื่อไฟล์ที่แสดง</label>
-          <input type="text" id="siteDocFileName" class="form-control" placeholder="เช่น SLD PEA Approved">
-        </div>
-        <div class="mb-1" id="siteDocFileSection">
-          <label class="fw-bold small text-muted">เลือกไฟล์ PDF</label>
-          <input class="form-control" type="file" id="siteDocFile" accept="application/pdf,.pdf">
-          <small class="text-muted" id="siteDocFileHint">ถ้าเปิดผ่าน GitHub Pages จะเลือกไฟล์ในหน้าต่างถัดไป</small>
         </div>
       </div>
       <div class="modal-footer border-0">
@@ -2844,12 +2845,15 @@ function openSiteDocModal(index) {
   document.getElementById('siteDocFolderNew').value = '';
   document.getElementById('siteDocFolderNew').style.display = 'none';
   const fileSec = document.getElementById('siteDocFileSection');
+  const nameSec = document.getElementById('siteDocNameSection');
   const fileHint = document.getElementById('siteDocFileHint');
   if (window.pwaGasCall) {
     if (fileSec) fileSec.style.display = 'none';
+    if (nameSec) nameSec.style.display = 'none';
   } else {
     if (fileSec) fileSec.style.display = 'block';
-    if (fileHint) fileHint.style.display = 'none';
+    if (nameSec) nameSec.style.display = 'block';
+    if (fileHint) fileHint.style.display = 'inline';
   }
 
   const sel = document.getElementById('siteDocFolderSelect');
@@ -2913,6 +2917,22 @@ function onSiteDocFolderSelectChange() {
   }
 }
 
+function onSiteDocFilePicked() {
+  const fileInput = document.getElementById('siteDocFile');
+  const nameInput = document.getElementById('siteDocFileName');
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return;
+  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+  if (!isPdf) {
+    fileInput.value = '';
+    Swal.fire({ icon: 'warning', title: 'อัปโหลดได้เฉพาะไฟล์ PDF' });
+    return;
+  }
+  nameInput.value = file.name;
+  nameInput.focus();
+  nameInput.select();
+}
+
 function submitSiteDoc() {
   if (!canEditSiteDocs()) return;
 
@@ -2926,7 +2946,6 @@ function submitSiteDoc() {
 
   if (!siteKey) { Swal.fire({ icon: 'warning', title: 'ไม่พบสถานที่' }); return; }
   if (!folderName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อโฟลเดอร์' }); return; }
-  if (!fileName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อไฟล์' }); return; }
 
   let auth;
   try { auth = gasAuthArgs(); } catch (e) {
@@ -2944,10 +2963,9 @@ function submitSiteDoc() {
       + '?page=siteUpload'
       + '&siteKey=' + encodeURIComponent(siteKey)
       + '&folder=' + encodeURIComponent(folderName)
-      + '&fileName=' + encodeURIComponent(fileName)
       + '&token=' + encodeURIComponent(auth)
       + '&_=' + Date.now();
-    const popup = window.open(url, 'peaSiteUpload', 'width=460,height=420,menubar=no,toolbar=no,location=yes,status=no');
+    const popup = window.open(url, 'peaSiteUpload', 'width=460,height=480,menubar=no,toolbar=no,location=yes,status=no');
     if (!popup) {
       Swal.fire({ icon: 'warning', title: 'อนุญาตป๊อปอัป', text: 'เบราว์เซอร์บล็อกหน้าต่างอัปโหลด — อนุญาตป๊อปอัปแล้วลองใหม่' });
       return;
@@ -2955,7 +2973,7 @@ function submitSiteDoc() {
     btn.disabled = true;
     Swal.fire({
       title: 'เลือกไฟล์ในหน้าต่างที่เปิดขึ้น',
-      text: 'เลือก PDF แล้วระบบจะอัปโหลดทันที',
+      text: 'เลือก PDF แล้วตรวจชื่อไฟล์ก่อนอัปโหลด',
       allowOutsideClick: false,
       showConfirmButton: false,
       didOpen: () => { Swal.showLoading(); }
@@ -2975,7 +2993,11 @@ function submitSiteDoc() {
   }
 
   if (!fileInput.files || fileInput.files.length === 0) {
-    Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' });
+    Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF ก่อน' });
+    return;
+  }
+  if (!fileName) {
+    Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อไฟล์ที่แสดง' });
     return;
   }
   const file = fileInput.files[0];

@@ -33,7 +33,6 @@ function doGet(e) {
     const t = HtmlService.createTemplateFromFile('SiteUpload');
     t.siteKey = (e.parameter.siteKey || '').toString();
     t.folderName = (e.parameter.folder || '').toString();
-    t.fileName = (e.parameter.fileName || '').toString();
     t.token = (e.parameter.token || '').toString();
     return t.evaluate()
       .setTitle('อัปโหลด PDF')
