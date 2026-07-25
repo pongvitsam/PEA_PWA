@@ -15,7 +15,7 @@
   <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=8"></script>
+  <script src="js/pwa-gas-api.js?v=9"></script>
   <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
   <style>
     /* สไตล์แผนดับไฟ */
@@ -2891,7 +2891,7 @@ function submitSiteDoc() {
     return;
   }
 
-  Swal.fire({ title: 'กำลังอ่านไฟล์...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+  Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
   const reader = new FileReader();
   reader.onload = function(e) {
@@ -2905,69 +2905,25 @@ function submitSiteDoc() {
     };
     const btn = document.getElementById('btnSaveSiteDoc');
     btn.disabled = true;
-    uploadSiteDocSmart(formData, auth, function(cur, total) {
-      Swal.update({ title: 'กำลังอัปโหลด... ' + cur + '/' + total });
-    }).then(function() {
-      btn.disabled = false;
-      siteDocModalObj.hide();
-      Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
-      if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
-    }).catch(function(err) {
-      btn.disabled = false;
-      if (!handleOutageAuthError(err)) {
-        Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
-      }
-    });
+    google.script.run
+      .withSuccessHandler(() => {
+        btn.disabled = false;
+        siteDocModalObj.hide();
+        Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
+        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+        }
+      })
+      .saveSiteDoc(formData, auth);
   };
   reader.onerror = function() {
     Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' });
   };
   reader.readAsDataURL(file);
-}
-
-function gasRunPromise(fnName, args) {
-  return new Promise(function(resolve, reject) {
-    const runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-    runner[fnName].apply(runner, args);
-  });
-}
-
-/** GitHub Pages ส่งทีละชิ้น (POST+poll) — Apps Script ส่งไฟล์เดียวได้เลย */
-function uploadSiteDocSmart(formData, auth, onProgress) {
-  if (!window.pwaGasCall) {
-    return gasRunPromise('saveSiteDoc', [formData, auth]);
-  }
-  const b64 = formData.fileBase64 || '';
-  const chunkSize = 70000;
-  const total = Math.max(1, Math.ceil(b64.length / chunkSize));
-  const uploadId = 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-
-  return gasRunPromise('beginSiteDocUpload', [{
-    uploadId: uploadId,
-    siteKey: formData.siteKey,
-    folderName: formData.folderName,
-    fileName: formData.fileName,
-    chunkTotal: total,
-    mimeType: formData.mimeType
-  }, auth]).then(function() {
-    let chain = Promise.resolve();
-    for (let i = 0; i < total; i++) {
-      (function(idx) {
-        chain = chain.then(function() {
-          if (onProgress) onProgress(idx + 1, total);
-          return gasRunPromise('saveSiteDocChunk', [{
-            uploadId: uploadId,
-            chunkIndex: idx,
-            chunkData: b64.slice(idx * chunkSize, (idx + 1) * chunkSize)
-          }, auth]);
-        });
-      })(i);
-    }
-    return chain;
-  }).then(function() {
-    if (onProgress) onProgress(total, total);
-    return gasRunPromise('finalizeSiteDocUpload', [uploadId, auth]);
-  });
 }
 
 function deleteSiteDocItem(id) {
