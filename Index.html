@@ -73,6 +73,14 @@
     }
     .fc-event:hover { transform: scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,0.18); z-index: 5; }
     .fc .fc-daygrid-event-dot { display: none; }
+    .outage-cal-legend { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; align-items: center; }
+    .outage-cal-legend .lg { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: #475569; font-weight: 600; }
+    .outage-cal-legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+    /* สีปฏิทินแผนดับไฟเท่านั้น — ไม่กระทบหน้าอื่น */
+    .calendar-container .fc-event.outage-sec-nc { background-color: #e03131 !important; border-color: #c92a2a !important; }
+    .calendar-container .fc-event.outage-sec-south { background-color: #fd7e14 !important; border-color: #e8590c !important; }
+    .calendar-container .fc-event.outage-sec-ne { background-color: #2f9e44 !important; border-color: #2b8a3e !important; }
+    .calendar-container .fc-event.outage-sec-unknown { background-color: #868e96 !important; border-color: #495057 !important; }
     .outage-list-panel {
       background: #fff; border-radius: 20px; padding: 1.25rem;
       box-shadow: 0 8px 32px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
@@ -441,6 +449,11 @@
       <div class="row g-4">
         <div class="col-lg-7">
           <div class="calendar-container"><div id="calendar"></div></div>
+          <div class="outage-cal-legend">
+            <span class="lg"><span class="swatch" style="background:#e03131;"></span>เหนือ / กลาง</span>
+            <span class="lg"><span class="swatch" style="background:#fd7e14;"></span>ใต้</span>
+            <span class="lg"><span class="swatch" style="background:#2f9e44;"></span>อีสาน</span>
+          </div>
         </div>
         <div class="col-lg-5">
           <div class="outage-list-panel">
@@ -2256,15 +2269,23 @@
       set('statOutagePast', past);
     }
 
+    function getOutagePeaSector(o) {
+      const pea = (o && o.peaRegion) || (typeof getOutageRegion === 'function' ? getOutageRegion(o.projectName) : '') || '';
+      const s = pea.toString().trim().toLowerCase().replace(/\s+/g, '');
+      if (/กฟน|เหนือ|^n\d|north/.test(s)) return 'north_central';
+      if (/กฟก|กลาง|central/.test(s)) return 'north_central';
+      if (/กฟต|ใต้|south/.test(s)) return 'south';
+      if (/กฟฉ|อีสาน|ตะวันออกเฉียงเหนือ|northeast|^ne/.test(s)) return 'northeast';
+      return 'unknown';
+    }
+
+    /** สีปฏิทินแผนดับไฟเท่านั้น — 3 ภาค (ไม่ใช้ hash สีสุ่ม) */
     function getOutageEventStyle(o) {
-      if (o.checkDone) return { bg: '#10b981', border: '#059669' };
-      if (hasOutageDates(o) && new Date(o.end) < new Date()) return { bg: '#94a3b8', border: '#64748b' };
-      const hues = ['#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1'];
-      let hash = 0;
-      const name = (o.projectName || '').toString();
-      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-      const bg = hues[Math.abs(hash) % hues.length];
-      return { bg, border: bg };
+      const sector = getOutagePeaSector(o);
+      if (sector === 'north_central') return { bg: '#e03131', border: '#c92a2a', cls: 'outage-sec-nc' };
+      if (sector === 'south') return { bg: '#fd7e14', border: '#e8590c', cls: 'outage-sec-south' };
+      if (sector === 'northeast') return { bg: '#2f9e44', border: '#2b8a3e', cls: 'outage-sec-ne' };
+      return { bg: '#868e96', border: '#495057', cls: 'outage-sec-unknown' };
     }
 
     function calcMaxEventsPerDay(events) {
@@ -2303,7 +2324,13 @@
           backgroundColor: style.bg,
           borderColor: style.border,
           textColor: '#fff',
-          extendedProps: { status: o.checkDone ? 'done' : (new Date(o.end) < new Date() ? 'past' : 'pending') }
+          classNames: [style.cls],
+          extendedProps: {
+            status: o.checkDone ? 'done' : (new Date(o.end) < new Date() ? 'past' : 'pending'),
+            sectorCls: style.cls,
+            sectorBg: style.bg,
+            sectorBorder: style.border
+          }
         };
       });
     }
@@ -2386,6 +2413,12 @@
         events: events,
         eventClick: function(info) { editOutage(info.event.id); },
         eventDidMount: function(info) {
+          const p = info.event.extendedProps || {};
+          if (p.sectorBg) {
+            info.el.style.setProperty('background-color', p.sectorBg, 'important');
+            info.el.style.setProperty('border-color', p.sectorBorder || p.sectorBg, 'important');
+            info.el.style.color = '#fff';
+          }
           info.el.style.borderLeft = '4px solid rgba(255,255,255,0.85)';
           info.el.title = info.event.title;
         },
