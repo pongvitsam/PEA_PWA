@@ -2483,7 +2483,7 @@
         let dateHtml = formatOutageDateRange(o);
         
         let disabledStr = canEditOutage() ? '' : 'disabled';
-        let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="${o.fromSheet ? 'ดู/ลิงก์หนังสือ' : 'แก้ไข/ลบ'}"><i class="fa-solid fa-pen"></i></button>` : '';
+        let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>` : '';
         let locHint = findLocationForOutage(o.projectName) ? `<button class="btn btn-sm btn-outline-info rounded-pill mt-1" onclick="viewOutageLocation('${safeId}')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>` : '';
 
         container.innerHTML += `
@@ -2580,12 +2580,12 @@
       const remark = document.getElementById('o_remark');
       const start = document.getElementById('o_start');
       const end = document.getElementById('o_end');
-      project.readOnly = !!fromSheet || project.readOnly;
-      remark.readOnly = !!fromSheet;
-      if (start && start._flatpickr) start._flatpickr.set('clickOpens', !fromSheet);
-      if (end && end._flatpickr) end._flatpickr.set('clickOpens', !fromSheet);
-      start.disabled = !!fromSheet;
-      end.disabled = !!fromSheet;
+      project.readOnly = false;
+      remark.readOnly = false;
+      if (start && start._flatpickr) start._flatpickr.set('clickOpens', true);
+      if (end && end._flatpickr) end._flatpickr.set('clickOpens', true);
+      start.disabled = false;
+      end.disabled = false;
     }
 
     function openOutageModal() {
@@ -2623,7 +2623,7 @@
       const fromSheet = !!(o.fromSheet || String(o.id).indexOf('ext-') === 0);
       document.getElementById('o_id').value = o.id;
       document.getElementById('o_project').value = o.projectName;
-      document.getElementById('o_project').readOnly = true;
+      document.getElementById('o_project').readOnly = false;
       document.getElementById('o_remark').value = o.remark || '';
       document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
       if (hasOutageDates(o)) {
@@ -2647,12 +2647,10 @@
       let start = document.getElementById('o_start')._flatpickr.selectedDates[0];
       let end = document.getElementById('o_end')._flatpickr.selectedDates[0];
 
-      if (fromSheet) {
-        if (!project) { Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ' }); return; }
-      } else {
-        if(!project || !start || !end) { Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ' }); return; }
-        if (end < start) { Swal.fire({ icon: 'warning', title: 'วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น' }); return; }
-      }
+      if (!project) { Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ' }); return; }
+      if (!fromSheet && (!start || !end)) { Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ' }); return; }
+      if (start && end && end < start) { Swal.fire({ icon: 'warning', title: 'วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น' }); return; }
+      if ((start && !end) || (!start && end)) { Swal.fire({ icon: 'warning', title: 'กรอกวันเริ่มและวันสิ้นสุดให้ครบ' }); return; }
 
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
