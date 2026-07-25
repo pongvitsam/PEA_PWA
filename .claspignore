@@ -2,3 +2,6 @@ docs/**
 .github/**
 README.md
 .cursor/**
+scripts/**
+tmp-*.js
+tmp-*.html

@@ -15,10 +15,16 @@
     return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
   }
 
-  /** JSONP — หลีกเลี่ยง CORS สำหรับคำขอขนาดเล็ก */
-  function gasCallJsonp(action, args) {
+  /**
+   * JSONP เท่านั้น — iframe POST ไป googleusercontent/macros/echo มักได้ 403
+   * ไฟล์ใหญ่เกิน ~6KB ต้องใช้ลิงก์ Apps Script เดิม (google.script.run จริง)
+   */
+  function gasCall(action, args) {
     const requestId = newRequestId();
     const argsJson = JSON.stringify(args || []);
+    if (argsJson.length > 6000) {
+      return Promise.reject(new Error('ข้อมูลใหญ่เกินไปสำหรับ GitHub Pages — เปิดผ่านลิงก์ Apps Script เพื่ออัปโหลดไฟล์'));
+    }
 
     return new Promise(function (resolve, reject) {
       const cbName = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
@@ -56,74 +62,10 @@
       script.src = window.GAS_API_URL + '?' + params.toString();
       script.onerror = function () {
         cleanup();
-        reject(new Error('API script load failed (403?)'));
+        reject(new Error('API script load failed (403?) — ลองรีเฟรชหน้า หรือเปิดผ่านลิงก์ Apps Script'));
       };
       document.head.appendChild(script);
     });
-  }
-
-  /** iframe POST + postMessage — สำหรับอัปโหลดไฟล์/payload ใหญ่ */
-  function gasCallPost(action, args) {
-    const requestId = newRequestId();
-    const payload = {
-      action: action,
-      args: args || [],
-      sessionToken: getStoredSessionToken(),
-      requestId: requestId,
-      client: 'pages'
-    };
-
-    return new Promise(function (resolve, reject) {
-      const iframeName = '_gasFrame_' + requestId.replace(/[^\w]/g, '');
-      const iframe = document.createElement('iframe');
-      iframe.name = iframeName;
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = window.GAS_API_URL;
-      form.target = iframeName;
-      form.style.display = 'none';
-
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'payload';
-      input.value = JSON.stringify(payload);
-      form.appendChild(input);
-      document.body.appendChild(form);
-
-      const timeout = setTimeout(function () {
-        cleanup();
-        reject(new Error('API timeout'));
-      }, 120000);
-
-      function onMessage(ev) {
-        const data = ev && ev.data;
-        if (!data || data.requestId !== requestId) return;
-        cleanup();
-        if (data.ok) resolve(data.result);
-        else reject(new Error(data.error || 'API error'));
-      }
-
-      function cleanup() {
-        clearTimeout(timeout);
-        window.removeEventListener('message', onMessage);
-        if (form.parentNode) form.parentNode.removeChild(form);
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      }
-
-      window.addEventListener('message', onMessage);
-      form.submit();
-    });
-  }
-
-  function gasCall(action, args) {
-    const argsJson = JSON.stringify(args || []);
-    if (argsJson.length > 6000) {
-      return gasCallPost(action, args);
-    }
-    return gasCallJsonp(action, args);
   }
 
   function createGasRunner() {
