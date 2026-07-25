@@ -7,7 +7,7 @@ const OUTAGE_SOURCE_TITLE = 'กำหนดการดับกระแสไ
 const OUTAGE_SOURCE_URL = 'https://docs.google.com/spreadsheets/d/' + OUTAGE_SOURCE_SS_ID + '/edit';
 const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
-const FOLDER_ID = '1lMjZFbPQGc6r077IoNHmI77oGHGFg2RI';
+const FOLDER_ID = '1_SRxF0_obGuzFCo9NDcA3QPiZDn7or-P';
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
 function getSpreadsheet_() {
@@ -1171,7 +1171,11 @@ function getDriveSiteFolders() {
       .map(f => f.name)
       .filter(n => n && n !== '_upload_tmp');
   } catch (e) {
-    throw new Error('โหลดโฟลเดอร์จาก Drive ไม่สำเร็จ: ' + e.message);
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/Access denied|permission|Authorization/i.test(msg)) {
+      throw new Error('โหลดโฟลเดอร์ไม่สำเร็จ: แชร์โฟลเดอร์ Drive ให้บัญชีเจ้าของ Apps Script เป็น Editor');
+    }
+    throw new Error('โหลดโฟลเดอร์จาก Drive ไม่สำเร็จ: ' + msg);
   }
 }
 
@@ -1340,10 +1344,18 @@ function createSiteDocFile_(opts) {
     const driveName = opts.fileName.toLowerCase().endsWith('.pdf') ? opts.fileName : (opts.fileName + '.pdf');
     const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
     const file = targetFolder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {
+      // โฟลเดอร์องค์กรบางอันห้ามเปลี่ยน sharing — ยังใช้ลิงก์ไฟล์ได้ถ้ามีสิทธิ์อยู่แล้ว
+    }
     finalUrl = file.getUrl();
   } catch (e) {
-    throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + e.message);
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/Access denied|permission|ไม่มีสิทธิ์|Authorization/i.test(msg)) {
+      throw new Error('อัปโหลดไม่สำเร็จ: ไม่มีสิทธิ์เขียนโฟลเดอร์ Drive — แชร์โฟลเดอร์ให้บัญชีเจ้าของ Apps Script เป็น Editor (แก้ไขได้)');
+    }
+    throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + msg);
   }
 
   const ss = getSpreadsheet_();
