@@ -6,35 +6,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>อัปโหลด PDF</title>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 24px; background: #f8f9fa; color: #212529; }
-    .box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,.06); }
-    h1 { font-size: 1.1rem; margin: 0 0 8px; }
-    p { margin: 0; color: #6c757d; font-size: .9rem; line-height: 1.4; }
-    .spin { display: inline-block; width: 18px; height: 18px; border: 2px solid #20c997; border-top-color: transparent; border-radius: 50%; animation: r 0.8s linear infinite; vertical-align: -3px; margin-right: 8px; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 20px; background: #f1f3f5; color: #212529; }
+    .box { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 6px 20px rgba(0,0,0,.07); max-width: 420px; margin: 0 auto; }
+    h1 { font-size: 1.15rem; margin: 0 0 12px; color: #0f766e; }
+    label { display: block; font-size: .78rem; font-weight: 700; color: #868e96; margin: 10px 0 4px; }
+    .meta { font-size: .85rem; color: #495057; background: #f8f9fa; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; word-break: break-word; }
+    input[type=file] { width: 100%; font-size: .85rem; }
+    button { margin-top: 14px; width: 100%; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; background: #20c997; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .65; cursor: not-allowed; }
+    .status { margin-top: 12px; font-size: .85rem; color: #868e96; min-height: 1.2em; }
+    .err { color: #c92a2a; }
+    .ok { color: #087f5b; }
+    .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #20c997; border-top-color: transparent; border-radius: 50%; animation: r .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
     @keyframes r { to { transform: rotate(360deg); } }
-    .err { color: #c92a2a; margin-top: 12px; }
-    .ok { color: #087f5b; margin-top: 12px; }
   </style>
 </head>
 <body>
   <div class="box">
-    <h1 id="title"><span class="spin"></span>กำลังอัปโหลด PDF</h1>
-    <p id="status">รอรับไฟล์จากหน้าหลัก...</p>
-    <p id="detail" class="err" style="display:none;"></p>
+    <h1>อัปโหลดไฟล์ PDF</h1>
+    <div class="meta" id="metaBox">กำลังโหลด...</div>
+    <label>เลือกไฟล์ PDF</label>
+    <input type="file" id="file" accept="application/pdf,.pdf">
+    <button type="button" id="btn">อัปโหลดทันที</button>
+    <div class="status" id="status"></div>
   </div>
   <script>
     (function () {
-      var started = false;
-      function setStatus(t, detail, isErr) {
-        document.getElementById('status').textContent = t;
-        var d = document.getElementById('detail');
-        if (detail) {
-          d.style.display = 'block';
-          d.className = isErr ? 'err' : 'ok';
-          d.textContent = detail;
-        }
+      function qs(name) {
+        var m = new URLSearchParams(window.location.search).get(name);
+        return m == null ? '' : m;
       }
-      function done(ok, payload) {
+      var siteKey = qs('siteKey');
+      var folderName = qs('folder');
+      var fileName = qs('fileName');
+      var token = qs('token');
+      var meta = document.getElementById('metaBox');
+      var statusEl = document.getElementById('status');
+      var btn = document.getElementById('btn');
+      var fileInput = document.getElementById('file');
+
+      if (!siteKey || !folderName || !fileName || !token) {
+        meta.textContent = 'ข้อมูลไม่ครบ — ปิดแล้วเปิดใหม่จากหน้าหลัก';
+        btn.disabled = true;
+        return;
+      }
+      meta.innerHTML = '<b>โฟลเดอร์:</b> ' + escapeHtml(folderName) + '<br><b>ชื่อไฟล์:</b> ' + escapeHtml(fileName);
+
+      function escapeHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+      function setStatus(t, cls) {
+        statusEl.className = 'status' + (cls ? ' ' + cls : '');
+        statusEl.innerHTML = t;
+      }
+      function notifyParent(ok, payload) {
         try {
           if (window.opener && !window.opener.closed) {
             window.opener.postMessage({
@@ -45,35 +70,55 @@
             }, '*');
           }
         } catch (e) {}
-        if (ok) {
-          document.getElementById('title').innerHTML = 'อัปโหลดสำเร็จ';
-          setStatus('ปิดหน้าต่างนี้ได้เลย', null, false);
-          setTimeout(function () { try { window.close(); } catch (e) {} }, 600);
-        } else {
-          document.getElementById('title').innerHTML = 'อัปโหลดไม่สำเร็จ';
-          setStatus('เกิดข้อผิดพลาด', (payload && payload.error) || 'unknown', true);
-        }
       }
-      window.addEventListener('message', function (ev) {
-        var d = ev && ev.data;
-        if (!d || d.type !== 'SITE_DOC_UPLOAD' || started) return;
-        started = true;
-        setStatus('กำลังบันทึกลง Google Drive...', null, false);
-        google.script.run
-          .withSuccessHandler(function (res) { done(true, { result: res }); })
-          .withFailureHandler(function (err) { done(false, { error: (err && err.message) ? err.message : String(err) }); })
-          .saveSiteDoc(d.formData, d.sessionToken);
+
+      function upload() {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) { setStatus('กรุณาเลือกไฟล์ PDF', 'err'); return; }
+        var isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+        if (!isPdf) { setStatus('อัปโหลดได้เฉพาะไฟล์ PDF', 'err'); return; }
+
+        btn.disabled = true;
+        fileInput.disabled = true;
+        setStatus('<span class="spin"></span>กำลังอัปโหลดไป Drive...', '');
+
+        var reader = new FileReader();
+        reader.onload = function (e) {
+          var formData = {
+            siteKey: siteKey,
+            folderName: folderName,
+            fileName: fileName,
+            fileBase64: String(e.target.result).split(',')[1],
+            mimeType: file.type || 'application/pdf',
+            originalName: file.name
+          };
+          google.script.run
+            .withSuccessHandler(function (res) {
+              setStatus('อัปโหลดสำเร็จ — กำลังปิดหน้าต่าง...', 'ok');
+              notifyParent(true, { result: res });
+              setTimeout(function () { try { window.close(); } catch (err) {} }, 400);
+            })
+            .withFailureHandler(function (err) {
+              btn.disabled = false;
+              fileInput.disabled = false;
+              var msg = (err && err.message) ? err.message : String(err);
+              setStatus(msg, 'err');
+              notifyParent(false, { error: msg });
+            })
+            .saveSiteDoc(formData, token);
+        };
+        reader.onerror = function () {
+          btn.disabled = false;
+          fileInput.disabled = false;
+          setStatus('อ่านไฟล์ไม่สำเร็จ', 'err');
+        };
+        reader.readAsDataURL(file);
+      }
+
+      btn.addEventListener('click', upload);
+      fileInput.addEventListener('change', function () {
+        if (fileInput.files && fileInput.files[0]) upload();
       });
-      function pingReady() {
-        try {
-          if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({ type: 'SITE_UPLOAD_READY' }, '*');
-          }
-        } catch (e) {}
-      }
-      pingReady();
-      setTimeout(pingReady, 300);
-      setTimeout(pingReady, 1000);
     })();
   </script>
 </body>

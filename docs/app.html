@@ -545,9 +545,10 @@
           <label class="fw-bold small text-muted">ชื่อไฟล์ที่แสดง</label>
           <input type="text" id="siteDocFileName" class="form-control" placeholder="เช่น SLD PEA Approved">
         </div>
-        <div class="mb-1">
+        <div class="mb-1" id="siteDocFileSection">
           <label class="fw-bold small text-muted">เลือกไฟล์ PDF</label>
           <input class="form-control" type="file" id="siteDocFile" accept="application/pdf,.pdf">
+          <small class="text-muted" id="siteDocFileHint">ถ้าเปิดผ่าน GitHub Pages จะเลือกไฟล์ในหน้าต่างถัดไป</small>
         </div>
       </div>
       <div class="modal-footer border-0">
@@ -2842,6 +2843,14 @@ function openSiteDocModal(index) {
   document.getElementById('siteDocFile').value = '';
   document.getElementById('siteDocFolderNew').value = '';
   document.getElementById('siteDocFolderNew').style.display = 'none';
+  const fileSec = document.getElementById('siteDocFileSection');
+  const fileHint = document.getElementById('siteDocFileHint');
+  if (window.pwaGasCall) {
+    if (fileSec) fileSec.style.display = 'none';
+  } else {
+    if (fileSec) fileSec.style.display = 'block';
+    if (fileHint) fileHint.style.display = 'none';
+  }
 
   const sel = document.getElementById('siteDocFolderSelect');
   const list = document.getElementById('siteDocFolderList');
@@ -2918,11 +2927,6 @@ function submitSiteDoc() {
   if (!siteKey) { Swal.fire({ icon: 'warning', title: 'ไม่พบสถานที่' }); return; }
   if (!folderName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อโฟลเดอร์' }); return; }
   if (!fileName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อไฟล์' }); return; }
-  if (!fileInput.files || fileInput.files.length === 0) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' }); return; }
-
-  const file = fileInput.files[0];
-  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
-  if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะไฟล์ PDF' }); return; }
 
   let auth;
   try { auth = gasAuthArgs(); } catch (e) {
@@ -2932,21 +2936,58 @@ function submitSiteDoc() {
 
   const btn = document.getElementById('btnSaveSiteDoc');
   const usePopup = !!window.pwaGasCall && !!window.GAS_API_URL;
-  let popup = null;
+
   if (usePopup) {
-    popup = window.open(
-      window.GAS_API_URL + '?page=siteUpload&_=' + Date.now(),
-      'peaSiteUpload',
-      'width=440,height=300,menubar=no,toolbar=no,location=yes,status=no'
-    );
+    const active = document.activeElement;
+    if (active && active.blur) active.blur();
+    const url = window.GAS_API_URL
+      + '?page=siteUpload'
+      + '&siteKey=' + encodeURIComponent(siteKey)
+      + '&folder=' + encodeURIComponent(folderName)
+      + '&fileName=' + encodeURIComponent(fileName)
+      + '&token=' + encodeURIComponent(auth)
+      + '&_=' + Date.now();
+    const popup = window.open(url, 'peaSiteUpload', 'width=460,height=420,menubar=no,toolbar=no,location=yes,status=no');
     if (!popup) {
       Swal.fire({ icon: 'warning', title: 'อนุญาตป๊อปอัป', text: 'เบราว์เซอร์บล็อกหน้าต่างอัปโหลด — อนุญาตป๊อปอัปแล้วลองใหม่' });
       return;
     }
+    btn.disabled = true;
+    Swal.fire({
+      title: 'เลือกไฟล์ในหน้าต่างที่เปิดขึ้น',
+      text: 'เลือก PDF แล้วระบบจะอัปโหลดทันที',
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      didOpen: () => { Swal.showLoading(); }
+    });
+    waitSiteUploadPopup(popup).then(function () {
+      btn.disabled = false;
+      try { siteDocModalObj.hide(); } catch (e) {}
+      Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
+      if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+    }).catch(function (err) {
+      btn.disabled = false;
+      if (String(err && err.message || err).indexOf('ปิดหน้าต่าง') >= 0) {
+        Swal.close();
+        return;
+      }
+      if (!handleOutageAuthError(err)) {
+        Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
+      }
+    });
+    return;
   }
 
-  const active = document.activeElement;
-  if (active && active.blur) active.blur();
+  if (!fileInput.files || fileInput.files.length === 0) {
+    Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' });
+    return;
+  }
+  const file = fileInput.files[0];
+  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+  if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะไฟล์ PDF' }); return; }
+
+  const active2 = document.activeElement;
+  if (active2 && active2.blur) active2.blur();
   Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
   const reader = new FileReader();
@@ -2960,104 +3001,57 @@ function submitSiteDoc() {
       originalName: file.name
     };
     btn.disabled = true;
-
-    function onOk() {
-      btn.disabled = false;
-      try { siteDocModalObj.hide(); } catch (err) {}
-      Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
-      if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
-    }
-    function onFail(err) {
-      btn.disabled = false;
-      if (!handleOutageAuthError(err)) {
-        Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
-      }
-    }
-
-    if (usePopup && popup) {
-      uploadSiteDocViaPopup(popup, formData, auth).then(onOk).catch(onFail);
-      return;
-    }
-
     google.script.run
-      .withSuccessHandler(onOk)
-      .withFailureHandler(onFail)
+      .withSuccessHandler(() => {
+        btn.disabled = false;
+        try { siteDocModalObj.hide(); } catch (err) {}
+        Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
+        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+        }
+      })
       .saveSiteDoc(formData, auth);
   };
   reader.onerror = function() {
-    btn.disabled = false;
-    try { if (popup && !popup.closed) popup.close(); } catch (e) {}
     Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' });
   };
   reader.readAsDataURL(file);
 }
 
-function uploadSiteDocViaPopup(popup, formData, sessionToken) {
+function waitSiteUploadPopup(popup) {
   return new Promise(function (resolve, reject) {
     let settled = false;
-    const started = Date.now();
-
     function cleanup() {
       window.removeEventListener('message', onMessage);
       clearInterval(watch);
-      clearTimeout(hardTimeout);
     }
     function finishOk(res) {
       if (settled) return;
       settled = true;
       cleanup();
-      try { if (popup && !popup.closed) popup.close(); } catch (e) {}
       resolve(res);
     }
     function finishErr(err) {
       if (settled) return;
       settled = true;
       cleanup();
-      try { if (popup && !popup.closed) popup.close(); } catch (e) {}
       reject(err instanceof Error ? err : new Error(String(err || 'อัปโหลดไม่สำเร็จ')));
     }
-
-    function sendPayload() {
-      try {
-        popup.postMessage({
-          type: 'SITE_DOC_UPLOAD',
-          formData: formData,
-          sessionToken: sessionToken
-        }, '*');
-      } catch (e) {
-        finishErr(e);
-      }
-    }
-
     function onMessage(ev) {
       const d = ev && ev.data;
-      if (!d || typeof d !== 'object') return;
-      if (d.type === 'SITE_UPLOAD_READY') {
-        sendPayload();
-        return;
-      }
-      if (d.type === 'SITE_UPLOAD_DONE') {
-        if (d.ok) finishOk(d.result);
-        else finishErr(d.error || 'อัปโหลดไม่สำเร็จ');
-      }
+      if (!d || d.type !== 'SITE_UPLOAD_DONE') return;
+      if (d.ok) finishOk(d.result);
+      else finishErr(d.error || 'อัปโหลดไม่สำเร็จ');
     }
-
     window.addEventListener('message', onMessage);
-    let tries = 0;
     const watch = setInterval(function () {
       if (settled) return;
-      if (popup.closed) {
-        finishErr(new Error('ปิดหน้าต่างอัปโหลดก่อนเสร็จ'));
-        return;
-      }
-      tries++;
-      if (tries <= 8) sendPayload();
-      if (Date.now() - started > 180000) finishErr(new Error('หมดเวลาอัปโหลด'));
-    }, 700);
-
-    const hardTimeout = setTimeout(function () {
-      finishErr(new Error('หมดเวลาอัปโหลด'));
-    }, 180000);
+      if (popup.closed) finishErr(new Error('ปิดหน้าต่างอัปโหลดก่อนเสร็จ'));
+    }, 500);
   });
 }
 
