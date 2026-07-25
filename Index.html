@@ -3015,10 +3015,6 @@ function submitSiteDoc() {
       if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
     }).catch(function (err) {
       btn.disabled = false;
-      if (String(err && err.message || err).indexOf('ปิดหน้าต่าง') >= 0) {
-        Swal.close();
-        return;
-      }
       if (!handleOutageAuthError(err)) {
         Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
       }
@@ -3099,8 +3095,9 @@ function waitSiteUploadPopup(popup) {
     window.addEventListener('message', onMessage);
     const watch = setInterval(function () {
       if (settled) return;
-      if (popup.closed) finishErr(new Error('ปิดหน้าต่างอัปโหลดก่อนเสร็จ'));
-    }, 500);
+      // ปิดหน้าต่างหลังอัปโหลดสำเร็จบ่อยครั้งที่ postMessage ไม่ถึง — ถือว่าสำเร็จแล้วรีเฟรชรายการ
+      if (popup.closed) finishOk({ closed: true });
+    }, 400);
   });
 }
 

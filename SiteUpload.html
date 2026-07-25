@@ -12,13 +12,15 @@
     label { display: block; font-size: .78rem; font-weight: 700; color: #868e96; margin: 10px 0 4px; }
     .meta { font-size: .85rem; color: #495057; background: #f8f9fa; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; word-break: break-word; }
     input[type=file] { width: 100%; font-size: .85rem; }
-    button { margin-top: 14px; width: 100%; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; background: #20c997; color: #fff; cursor: pointer; }
+    button { margin-top: 10px; width: 100%; border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; background: #20c997; color: #fff; cursor: pointer; }
+    button.secondary { background: #868e96; }
     button:disabled { opacity: .65; cursor: not-allowed; }
     .status { margin-top: 12px; font-size: .85rem; color: #868e96; min-height: 1.2em; }
     .err { color: #c92a2a; }
-    .ok { color: #087f5b; }
+    .ok { color: #087f5b; font-weight: 700; }
     .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #20c997; border-top-color: transparent; border-radius: 50%; animation: r .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
     @keyframes r { to { transform: rotate(360deg); } }
+    #btnClose { display: none; }
   </style>
 </head>
 <body>
@@ -28,11 +30,11 @@
     <label>เลือกไฟล์ PDF</label>
     <input type="file" id="file" accept="application/pdf,.pdf">
     <button type="button" id="btn">อัปโหลดทันที</button>
+    <button type="button" id="btnClose" class="secondary">ปิดหน้าต่างนี้</button>
     <div class="status" id="status"></div>
   </div>
   <script>
     (function () {
-      // ค่าถูกฉีดจาก doGet (query หายหลัง redirect ของ Apps Script)
       var siteKey = <?!= JSON.stringify(siteKey || '') ?>;
       var folderName = <?!= JSON.stringify(folderName || '') ?>;
       var fileName = <?!= JSON.stringify(fileName || '') ?>;
@@ -41,6 +43,7 @@
       var meta = document.getElementById('metaBox');
       var statusEl = document.getElementById('status');
       var btn = document.getElementById('btn');
+      var btnClose = document.getElementById('btnClose');
       var fileInput = document.getElementById('file');
 
       function escapeHtml(s) {
@@ -50,22 +53,57 @@
         statusEl.className = 'status' + (cls ? ' ' + cls : '');
         statusEl.innerHTML = t;
       }
-      function notifyParent(ok, payload) {
-        try {
-          if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({
-              type: 'SITE_UPLOAD_DONE',
-              ok: !!ok,
-              result: payload && payload.result,
-              error: payload && payload.error
-            }, '*');
-          }
-        } catch (e) {}
+      function getOpener() {
+        try { if (window.opener && !window.opener.closed) return window.opener; } catch (e) {}
+        try { if (window.top && window.top.opener && !window.top.opener.closed) return window.top.opener; } catch (e) {}
+        try { if (window.parent && window.parent !== window && window.parent.opener && !window.parent.opener.closed) return window.parent.opener; } catch (e) {}
+        return null;
       }
+      function notifyParent(ok, payload) {
+        var msg = {
+          type: 'SITE_UPLOAD_DONE',
+          ok: !!ok,
+          result: payload && payload.result,
+          error: payload && payload.error,
+          t: Date.now()
+        };
+        var targets = [];
+        var op = getOpener();
+        if (op) targets.push(op);
+        try { if (window.parent && window.parent !== window) targets.push(window.parent); } catch (e) {}
+        try { if (window.top && window.top !== window) targets.push(window.top); } catch (e) {}
+        targets.forEach(function (w) {
+          try { w.postMessage(msg, '*'); } catch (e) {}
+        });
+      }
+      function closeSelf() {
+        try { if (google && google.script && google.script.host && google.script.host.close) google.script.host.close(); } catch (e) {}
+        try { window.close(); } catch (e) {}
+        try { if (window.top) window.top.close(); } catch (e) {}
+      }
+      var uploadSucceeded = false;
+      function showDoneUi(ok, detail) {
+        btn.style.display = 'none';
+        fileInput.style.display = 'none';
+        btnClose.style.display = 'block';
+        if (ok) {
+          uploadSucceeded = true;
+          setStatus('อัปโหลดสำเร็จแล้ว — กดปุ่มด้านล่างเพื่อปิด', 'ok');
+        } else {
+          setStatus(detail || 'อัปโหลดไม่สำเร็จ', 'err');
+        }
+      }
+
+      btnClose.addEventListener('click', function () {
+        if (uploadSucceeded) notifyParent(true, { result: { closedByUser: true } });
+        closeSelf();
+      });
 
       if (!siteKey || !folderName || !fileName || !token) {
         meta.textContent = 'ข้อมูลไม่ครบ — ปิดแล้วเปิดใหม่จากหน้าหลัก';
         btn.disabled = true;
+        btnClose.style.display = 'block';
+        btnClose.textContent = 'ปิดหน้าต่างนี้';
         return;
       }
       meta.innerHTML = '<b>โฟลเดอร์:</b> ' + escapeHtml(folderName) + '<br><b>ชื่อไฟล์:</b> ' + escapeHtml(fileName);
@@ -92,16 +130,19 @@
           };
           google.script.run
             .withSuccessHandler(function (res) {
-              setStatus('อัปโหลดสำเร็จ — กำลังปิดหน้าต่าง...', 'ok');
               notifyParent(true, { result: res });
-              setTimeout(function () { try { window.close(); } catch (err) {} }, 400);
+              // ยิงซ้ำเผื่อหน้าหลักยังไม่ทันรับ
+              setTimeout(function () { notifyParent(true, { result: res }); }, 200);
+              setTimeout(function () { notifyParent(true, { result: res }); }, 800);
+              showDoneUi(true);
+              setTimeout(closeSelf, 500);
             })
             .withFailureHandler(function (err) {
               btn.disabled = false;
               fileInput.disabled = false;
               var msg = (err && err.message) ? err.message : String(err);
-              setStatus(msg, 'err');
               notifyParent(false, { error: msg });
+              showDoneUi(false, msg);
             })
             .saveSiteDoc(formData, token);
         };
