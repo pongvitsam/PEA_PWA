@@ -114,6 +114,9 @@ function dispatchApi_(action, args, sessionToken) {
     case 'saveProjectDoc': return saveProjectDoc(args[0], args[1] || tok);
     case 'deleteDoc': return deleteDoc(args[0], args[1] || tok);
     case 'editProjectDoc': return editProjectDoc(args[0], args[1], args[2], args[3] || tok);
+    case 'getSiteDocs': return getSiteDocs(args[0]);
+    case 'saveSiteDoc': return saveSiteDoc(args[0], args[1] || tok);
+    case 'deleteSiteDoc': return deleteSiteDoc(args[0], args[1] || tok);
     default: throw new Error('Unknown action: ' + action);
   }
 }
@@ -240,6 +243,14 @@ function assertOutageFromSession_(sessionToken) {
   if (role !== 'admin' && role !== 'editor') {
     throw new Error('คุณไม่มีสิทธิ์แก้ไขแผนดับไฟ');
   }
+}
+
+function assertEditorOrAdminFromSession_(sessionToken) {
+  const role = getRoleFromSession_(sessionToken);
+  if (role !== 'admin' && role !== 'editor') {
+    throw new Error('คุณไม่มีสิทธิ์เพิ่มหรือจัดการไฟล์โครงการ');
+  }
+  return role;
 }
 
 function revokeSession(sessionToken) {
@@ -575,6 +586,108 @@ function forceAuth() {
 }
 
 // ==========================================
+// ส่วนไฟล์ PDF ต่อสถานที่ (แยกตามโฟลเดอร์) — แอดมินหลัก + แอดมินรอง
+// ==========================================
+const SITE_DOCS_SHEET = 'SiteDocs';
+
+function getSiteDocs(siteKey) {
+  const key = (siteKey == null ? '' : siteKey.toString()).trim();
+  if (!key) return [];
+
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(SITE_DOCS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SITE_DOCS_SHEET);
+    sheet.appendRow(['DocID', 'SiteKey', 'FolderName', 'FileName', 'URL', 'UploadedBy', 'Timestamp']);
+    sheet.getRange('A1:G1').setFontWeight('bold').setBackground('#e6fcf5');
+    return [];
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  data.shift();
+
+  return data.filter(row => (row[1] || '').toString().trim() === key).map(row => {
+    let timestampStr = '';
+    if (row[6]) {
+      timestampStr = (row[6] instanceof Date) ? row[6].toLocaleString('th-TH') : row[6].toString();
+    }
+    return {
+      id: row[0],
+      siteKey: (row[1] || '').toString(),
+      folderName: (row[2] || '').toString().trim() || 'ทั่วไป',
+      fileName: (row[3] || '').toString(),
+      url: row[4] || '',
+      uploadedBy: row[5] || '',
+      timestamp: timestampStr
+    };
+  }).sort((a, b) => {
+    const f = a.folderName.localeCompare(b.folderName, 'th');
+    if (f !== 0) return f;
+    return a.fileName.localeCompare(b.fileName, 'th');
+  });
+}
+
+function saveSiteDoc(formObj, sessionToken) {
+  const role = assertEditorOrAdminFromSession_(sessionToken);
+  const session = validateSession_(sessionToken);
+
+  const siteKey = (formObj && formObj.siteKey != null ? formObj.siteKey : '').toString().trim();
+  const folderName = (formObj && formObj.folderName != null ? formObj.folderName : '').toString().trim();
+  const fileName = (formObj && formObj.fileName != null ? formObj.fileName : '').toString().trim();
+
+  if (!siteKey) throw new Error('ไม่พบรหัสสถานที่');
+  if (!folderName) throw new Error('กรุณาระบุชื่อโฟลเดอร์');
+  if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
+  if (!formObj.fileBase64) throw new Error('กรุณาเลือกไฟล์ PDF');
+
+  const mime = (formObj.mimeType || '').toString().toLowerCase();
+  if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf') {
+    throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
+  }
+
+  let finalUrl = '';
+  try {
+    const folder = DriveApp.getFolderById(FOLDER_ID);
+    const decodedFile = Utilities.base64Decode(formObj.fileBase64);
+    const driveName = fileName.toLowerCase().endsWith('.pdf') ? fileName : (fileName + '.pdf');
+    const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    finalUrl = file.getUrl();
+  } catch (e) {
+    throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + e.message);
+  }
+
+  const ss = getSpreadsheet_();
+  const sheet = getOrCreateSheet_(ss, SITE_DOCS_SHEET, ['DocID', 'SiteKey', 'FolderName', 'FileName', 'URL', 'UploadedBy', 'Timestamp']);
+  const newId = 'SDOC_' + new Date().getTime();
+  sheet.appendRow([
+    newId, siteKey, folderName, fileName, finalUrl,
+    session.username || role, new Date()
+  ]);
+  return { success: true, message: 'อัปโหลดไฟล์สำเร็จ', id: newId, url: finalUrl };
+}
+
+function deleteSiteDoc(id, sessionToken) {
+  assertEditorOrAdminFromSession_(sessionToken);
+  const docId = (id == null ? '' : id.toString()).trim();
+  if (!docId) return { success: false, message: 'ไม่พบรหัสไฟล์' };
+
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(SITE_DOCS_SHEET);
+  if (!sheet) return { success: false, message: 'ไม่พบข้อมูลที่ต้องการลบ' };
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if ((data[i][0] || '').toString() === docId) {
+      sheet.deleteRow(i + 1);
+      return { success: true, message: 'ลบไฟล์สำเร็จ' };
+    }
+  }
+  return { success: false, message: 'ไม่พบข้อมูลที่ต้องการลบ' };
+}
+
 // ส่วนระบบจัดการข้อมูลโครงการ (Project Docs)
 // ==========================================
 const DOCS_SHEET = 'ProjectDocs';

@@ -126,6 +126,14 @@
     .form-control:focus, .form-select:focus { border-color: #20c997; box-shadow: 0 0 0 0.25rem rgba(32, 201, 151, 0.25); }
     .info-card { background: #f8f9fa; border-radius: 10px; padding: 15px; margin-bottom: 15px; border-left: 4px solid #20c997; }
     .info-card h6 { color: #495057; font-weight: 600; font-size: 0.95rem; }
+    .site-docs-wrap { margin-top: 10px; }
+    .site-docs-folder { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #e9ecef; border-radius: 8px; }
+    .site-docs-folder-title { font-size: 0.8rem; font-weight: 700; color: #495057; margin-bottom: 6px; }
+    .site-docs-folder-title i { color: #fcc419; margin-right: 4px; }
+    .site-docs-file { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .site-docs-file:last-child { margin-bottom: 0; }
+    .site-docs-file .btn { flex-shrink: 0; }
+    .site-docs-file-name { flex: 1; min-width: 0; font-size: 0.8rem; color: #495057; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .table-custom { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
     .table-custom thead { background-color: #f8f9fa; }
     
@@ -509,6 +517,40 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="siteDocModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border-radius: 16px; border: none;">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-file-pdf text-danger"></i> เพิ่มไฟล์ PDF</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="siteDocSiteKey">
+        <div class="mb-3">
+          <label class="fw-bold small text-muted">ชื่อโฟลเดอร์</label>
+          <select id="siteDocFolderSelect" class="form-select mb-2" onchange="onSiteDocFolderSelectChange()">
+            <option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>
+          </select>
+          <input type="text" id="siteDocFolderNew" class="form-control" placeholder="พิมพ์ชื่อโฟลเดอร์ เช่น SLD, หนังสือ PEA" list="siteDocFolderList">
+          <datalist id="siteDocFolderList"></datalist>
+        </div>
+        <div class="mb-3">
+          <label class="fw-bold small text-muted">ชื่อไฟล์ที่แสดง</label>
+          <input type="text" id="siteDocFileName" class="form-control" placeholder="เช่น SLD PEA Approved">
+        </div>
+        <div class="mb-1">
+          <label class="fw-bold small text-muted">เลือกไฟล์ PDF (ไม่เกิน 50MB)</label>
+          <input class="form-control" type="file" id="siteDocFile" accept="application/pdf,.pdf">
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-custom-primary px-4" id="btnSaveSiteDoc" onclick="submitSiteDoc()"><i class="fa-solid fa-cloud-arrow-up"></i> อัปโหลด</button>
+      </div>
+    </div>
+  </div>
+</div>
   <div class="modal fade" id="editModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content" style="border-radius: 16px; border: none;">
@@ -625,7 +667,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted mb-3">แอดมินรองสามารถแก้ไขหน้าแผนดับไฟได้เท่านั้น ไม่สามารถแก้ไขข้อมูลอื่นในระบบ</p>
+        <p class="small text-muted mb-3">แอดมินรองสามารถแก้ไขหน้าแผนดับไฟ และอัปโหลดไฟล์ PDF ในข้อมูลโครงการได้</p>
         <div class="border rounded-3 p-3 mb-3 bg-light">
           <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างแอดมินรองใหม่</h6>
           <input type="text" id="newDeputyUser" class="form-control form-control-sm mb-2" placeholder="ชื่อผู้ใช้">
@@ -1165,6 +1207,7 @@
       outageModalEl.addEventListener('hidden.bs.modal', focusOutageModalReturn_);
       docModalObj = new bootstrap.Modal(document.getElementById('docModal'));
       editDocModalObj = new bootstrap.Modal(document.getElementById('editDocModal'));
+      siteDocModalObj = new bootstrap.Modal(document.getElementById('siteDocModal'));
       
       flatpickr(".datepicker", {
         enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
@@ -1258,6 +1301,7 @@
 
     function canEditOutage() { return userRole === 'admin' || userRole === 'editor'; }
     function canEditAll() { return userRole === 'admin'; }
+    function canEditSiteDocs() { return userRole === 'admin' || userRole === 'editor'; }
 
     function updateUIByRole() {
   const statusEl = document.getElementById('userStatus');
@@ -1628,12 +1672,16 @@
     function showDetailsPanel(index) {
       let loc = allData[index];
       let panel = document.getElementById('detailsPanel');
+      currentSiteDocIndex = index;
       
       let linkAsbuilt = loc.link ? '<a href="' + loc.link + '" target="_blank" class="btn btn-sm btn-outline-primary mb-2 me-2"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>' : '';
       let linkPEA = loc.linkPEA ? '<a href="' + loc.linkPEA + '" target="_blank" class="btn btn-sm btn-outline-success mb-2"><i class="fa-solid fa-file-signature"></i> SLD PEA Approved</a>' : '';
       let combinedLinks = (linkAsbuilt || linkPEA) ? '<div class="mt-2">' + linkAsbuilt + linkPEA + '</div>' : '';
 
       let editBtn = userRole === 'admin' ? '<button class="btn btn-custom-secondary w-100 mt-3" onclick="openEdit(' + index + ')"><i class="fa-solid fa-pen"></i> แก้ไขข้อมูลนี้</button>' : '';
+      let uploadBtn = canEditSiteDocs()
+        ? '<button type="button" class="btn btn-success w-100 mt-2 fw-bold" onclick="openSiteDocModal(' + index + ')"><i class="fa-solid fa-file-arrow-up"></i> เพิ่มไฟล์ PDF</button>'
+        : '';
 
       panel.innerHTML = 
         '<h5 class="fw-bold" style="color:#20c997;">' + (loc.name || 'ไม่มีชื่อ') + '</h5>' +
@@ -1646,6 +1694,8 @@
           '<small class="text-muted d-block"><b>kWp:</b> ' + (loc.kwp || '-') + ' | <b>CA:</b> ' + (loc.caNum || '-') + '</small>' +
           '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + (loc.meterNum || '-') + '</small>' +
           combinedLinks +
+          '<div id="siteDocsContainer" class="site-docs-wrap"><div class="text-muted small"><i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดไฟล์...</div></div>' +
+          uploadBtn +
         '</div>' +
         '<div class="info-card" style="border-left-color: #4dabf7;">' +
           '<h6><i class="fa-solid fa-user-tie"></i> กฟภ. ผู้ดูแล</h6>' +
@@ -1664,6 +1714,8 @@
           '<button class="btn btn-custom-primary flex-grow-1" onclick="navTo(' + index + ')"><i class="fa-brands fa-google"></i> เริ่มนำทางจากจุดที่ฉันอยู่</button>' +
         '</div>' +
         '<div id="distMeResult" class="mt-3 text-primary small"></div>' + editBtn;
+
+      loadSiteDocsForPanel(loc.row);
 
       if(loc && loc.lat && loc.lng) {
         calcDistanceMyLoc(loc.lat, loc.lng);
@@ -2581,6 +2633,201 @@
     // ==========================================
 // ระบบ Project Docs ฝั่ง Frontend
 // ==========================================
+// ไฟล์ PDF ต่อสถานที่ (แยกตามโฟลเดอร์)
+// ==========================================
+let siteDocModalObj;
+let currentSiteDocIndex = -1;
+let currentSiteDocsCache = [];
+
+function getSiteKeyForLoc(loc) {
+  return loc && loc.row != null ? String(loc.row) : '';
+}
+
+function loadSiteDocsForPanel(siteRow) {
+  const container = document.getElementById('siteDocsContainer');
+  if (!container) return;
+  const siteKey = String(siteRow);
+  google.script.run
+    .withSuccessHandler(docs => {
+      currentSiteDocsCache = docs || [];
+      renderSiteDocsList(currentSiteDocsCache);
+    })
+    .withFailureHandler(() => {
+      container.innerHTML = '<div class="text-muted small">โหลดไฟล์ไม่สำเร็จ</div>';
+    })
+    .getSiteDocs(siteKey);
+}
+
+function renderSiteDocsList(docs) {
+  const container = document.getElementById('siteDocsContainer');
+  if (!container) return;
+  if (!docs || docs.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const byFolder = {};
+  docs.forEach(d => {
+    const folder = (d.folderName || 'ทั่วไป').trim() || 'ทั่วไป';
+    if (!byFolder[folder]) byFolder[folder] = [];
+    byFolder[folder].push(d);
+  });
+
+  const canManage = canEditSiteDocs();
+  let html = '';
+  Object.keys(byFolder).sort((a, b) => a.localeCompare(b, 'th')).forEach(folder => {
+    html += '<div class="site-docs-folder"><div class="site-docs-folder-title"><i class="fa-solid fa-folder"></i>' + escHtml(folder) + '</div>';
+    byFolder[folder].forEach(f => {
+      const safeId = String(f.id).replace(/'/g, "\\'");
+      const delBtn = canManage
+        ? '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" title="ลบ" onclick="deleteSiteDocItem(\'' + safeId + '\')"><i class="fa-solid fa-trash"></i></button>'
+        : '';
+      html += '<div class="site-docs-file">' +
+        '<a href="' + escHtml(f.url) + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-2"><i class="fa-solid fa-file-pdf"></i></a>' +
+        '<span class="site-docs-file-name" title="' + escHtml(f.fileName) + '">' + escHtml(f.fileName) + '</span>' +
+        delBtn +
+        '</div>';
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function openSiteDocModal(index) {
+  if (!canEditSiteDocs()) {
+    Swal.fire({ icon: 'warning', title: 'ต้องเข้าสู่ระบบ', text: 'แอดมินหลักหรือแอดมินรองเท่านั้นที่เพิ่มไฟล์ได้' });
+    return;
+  }
+  const loc = allData[index];
+  if (!loc) return;
+  currentSiteDocIndex = index;
+  document.getElementById('siteDocSiteKey').value = getSiteKeyForLoc(loc);
+  document.getElementById('siteDocFileName').value = '';
+  document.getElementById('siteDocFile').value = '';
+  document.getElementById('siteDocFolderNew').value = '';
+
+  const folders = [...new Set((currentSiteDocsCache || []).map(d => (d.folderName || '').trim()).filter(Boolean))];
+  const sel = document.getElementById('siteDocFolderSelect');
+  const list = document.getElementById('siteDocFolderList');
+  sel.innerHTML = '';
+  list.innerHTML = '';
+  folders.sort((a, b) => a.localeCompare(b, 'th')).forEach(f => {
+    sel.innerHTML += '<option value="' + escHtml(f) + '">' + escHtml(f) + '</option>';
+    list.innerHTML += '<option value="' + escHtml(f) + '">';
+  });
+  sel.innerHTML += '<option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>';
+
+  if (folders.length > 0) {
+    sel.value = folders[0];
+    document.getElementById('siteDocFolderNew').style.display = 'none';
+  } else {
+    sel.value = '__new__';
+    document.getElementById('siteDocFolderNew').style.display = 'block';
+  }
+  siteDocModalObj.show();
+}
+
+function onSiteDocFolderSelectChange() {
+  const sel = document.getElementById('siteDocFolderSelect');
+  const inp = document.getElementById('siteDocFolderNew');
+  if (sel.value === '__new__') {
+    inp.style.display = 'block';
+    inp.focus();
+  } else {
+    inp.style.display = 'none';
+    inp.value = '';
+  }
+}
+
+function submitSiteDoc() {
+  if (!canEditSiteDocs()) return;
+
+  const siteKey = document.getElementById('siteDocSiteKey').value.trim();
+  const sel = document.getElementById('siteDocFolderSelect');
+  let folderName = sel.value === '__new__'
+    ? document.getElementById('siteDocFolderNew').value.trim()
+    : sel.value.trim();
+  const fileName = document.getElementById('siteDocFileName').value.trim();
+  const fileInput = document.getElementById('siteDocFile');
+
+  if (!siteKey) { Swal.fire({ icon: 'warning', title: 'ไม่พบสถานที่' }); return; }
+  if (!folderName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อโฟลเดอร์' }); return; }
+  if (!fileName) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุชื่อไฟล์' }); return; }
+  if (!fileInput.files || fileInput.files.length === 0) { Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF' }); return; }
+
+  const file = fileInput.files[0];
+  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+  if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะไฟล์ PDF' }); return; }
+  if (file.size > 50 * 1024 * 1024) {
+    Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB' });
+    return;
+  }
+
+  let auth;
+  try { auth = gasAuthArgs(); } catch (e) {
+    Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+    return;
+  }
+
+  Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const formData = {
+      siteKey: siteKey,
+      folderName: folderName,
+      fileName: fileName,
+      fileBase64: e.target.result.split(',')[1],
+      mimeType: file.type || 'application/pdf',
+      originalName: file.name
+    };
+    const btn = document.getElementById('btnSaveSiteDoc');
+    btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(() => {
+        btn.disabled = false;
+        siteDocModalObj.hide();
+        Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
+        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+      })
+      .withFailureHandler(err => {
+        btn.disabled = false;
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+        }
+      })
+      .saveSiteDoc(formData, auth);
+  };
+  reader.onerror = function() {
+    Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' });
+  };
+  reader.readAsDataURL(file);
+}
+
+function deleteSiteDocItem(id) {
+  if (!canEditSiteDocs()) return;
+  let auth;
+  try { auth = gasAuthArgs(); } catch (e) {
+    Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+    return;
+  }
+  Swal.fire({ title: 'ลบไฟล์นี้?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
+    if (!res.isConfirmed) return;
+    Toast.fire({ icon: 'info', title: 'กำลังลบ...' });
+    google.script.run
+      .withSuccessHandler(() => {
+        Toast.fire({ icon: 'success', title: 'ลบแล้ว' });
+        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+      })
+      .withFailureHandler(err => {
+        if (!handleOutageAuthError(err)) {
+          Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+        }
+      })
+      .deleteSiteDoc(id, auth);
+  });
+}
+
 let projectDocs = [];
 let docModalObj;
 let editDocModalObj;
