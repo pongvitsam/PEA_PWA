@@ -30,7 +30,12 @@ function doGet(e) {
     return handleApiGet_(e.parameter);
   }
   if (e && e.parameter && e.parameter.page === 'siteUpload') {
-    return HtmlService.createHtmlOutputFromFile('SiteUpload')
+    const t = HtmlService.createTemplateFromFile('SiteUpload');
+    t.siteKey = (e.parameter.siteKey || '').toString();
+    t.folderName = (e.parameter.folder || '').toString();
+    t.fileName = (e.parameter.fileName || '').toString();
+    t.token = (e.parameter.token || '').toString();
+    return t.evaluate()
       .setTitle('อัปโหลด PDF')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -714,6 +719,14 @@ function normalizePlaceKey_(name) {
     .toLowerCase();
 }
 
+/** ปี พ.ศ. 2568 (= ค.ศ. 2025) และเก่ากว่า — ไม่ดึง/ไม่แสดงในแผนดับไฟ */
+function isOutageYear2568OrOlder_(startVal) {
+  if (startVal == null || startVal === '') return false;
+  const d = startVal instanceof Date ? startVal : new Date(startVal);
+  if (isNaN(d.getTime())) return false;
+  return d.getFullYear() <= 2025;
+}
+
 /** ID คงที่ต่อแถวในชีท — ไม่ใช้เลขลำดับเพราะในชีทมีหลายบล็อกลำดับซ้ำกัน */
 function buildSyncedOutageId_(sheetId, rowIndex1Based) {
   return 'ext-' + sheetId + '-r' + rowIndex1Based;
@@ -743,17 +756,21 @@ function collectSourceOutageRows_() {
       const placeKey = normalizePlaceKey_(place);
       const id = buildSyncedOutageId_(sheetId, r + 1);
       if (seenIds[id]) continue;
-      // ชื่อซ้ำในชีทเดียวกัน: เก็บแถวล่างสุด (ชุดใหม่กว่ามักอยู่ล่าง)
-      if (placeKey && seenPlaces[sheetId + ':' + placeKey] != null) {
-        const prevIdx = seenPlaces[sheetId + ':' + placeKey];
-        collected[prevIdx] = null;
-      }
 
       const range = buildOutageStartEnd_(
         map.dateNew != null ? row[map.dateNew] : '',
         map.date != null ? row[map.date] : '',
         map.time != null ? row[map.time] : ''
       );
+      // ข้ามชุดเก่าปี 68 (และก่อนหน้านั้น)
+      if (range.start && isOutageYear2568OrOlder_(range.start)) continue;
+
+      // ชื่อซ้ำในชีทเดียวกัน: เก็บแถวล่างสุด (ชุดใหม่กว่ามักอยู่ล่าง)
+      if (placeKey && seenPlaces[sheetId + ':' + placeKey] != null) {
+        const prevIdx = seenPlaces[sheetId + ':' + placeKey];
+        collected[prevIdx] = null;
+      }
+
       const remark = map.remark != null ? cellStr_(row[map.remark]) : '';
       const entry = {
         id: id,
@@ -906,7 +923,10 @@ function readOutagesMapped_(sheet) {
   if (data.length <= 1) return [];
   data.shift();
   return data.map(mapOutageRow_).filter(function(o) {
-    return o.id != null && o.id !== '' && cellStr_(o.projectName);
+    if (o.id == null || o.id === '' || !cellStr_(o.projectName)) return false;
+    // ไม่แสดงงานปี 68 และเก่ากว่า
+    if (isOutageYear2568OrOlder_(o.start)) return false;
+    return true;
   });
 }
 

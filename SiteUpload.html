@@ -32,25 +32,16 @@
   </div>
   <script>
     (function () {
-      function qs(name) {
-        var m = new URLSearchParams(window.location.search).get(name);
-        return m == null ? '' : m;
-      }
-      var siteKey = qs('siteKey');
-      var folderName = qs('folder');
-      var fileName = qs('fileName');
-      var token = qs('token');
+      // ค่าถูกฉีดจาก doGet (query หายหลัง redirect ของ Apps Script)
+      var siteKey = <?!= JSON.stringify(siteKey || '') ?>;
+      var folderName = <?!= JSON.stringify(folderName || '') ?>;
+      var fileName = <?!= JSON.stringify(fileName || '') ?>;
+      var token = <?!= JSON.stringify(token || '') ?>;
+
       var meta = document.getElementById('metaBox');
       var statusEl = document.getElementById('status');
       var btn = document.getElementById('btn');
       var fileInput = document.getElementById('file');
-
-      if (!siteKey || !folderName || !fileName || !token) {
-        meta.textContent = 'ข้อมูลไม่ครบ — ปิดแล้วเปิดใหม่จากหน้าหลัก';
-        btn.disabled = true;
-        return;
-      }
-      meta.innerHTML = '<b>โฟลเดอร์:</b> ' + escapeHtml(folderName) + '<br><b>ชื่อไฟล์:</b> ' + escapeHtml(fileName);
 
       function escapeHtml(s) {
         return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -71,6 +62,13 @@
           }
         } catch (e) {}
       }
+
+      if (!siteKey || !folderName || !fileName || !token) {
+        meta.textContent = 'ข้อมูลไม่ครบ — ปิดแล้วเปิดใหม่จากหน้าหลัก';
+        btn.disabled = true;
+        return;
+      }
+      meta.innerHTML = '<b>โฟลเดอร์:</b> ' + escapeHtml(folderName) + '<br><b>ชื่อไฟล์:</b> ' + escapeHtml(fileName);
 
       function upload() {
         var file = fileInput.files && fileInput.files[0];
