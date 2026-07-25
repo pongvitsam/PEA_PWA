@@ -1,6 +1,8 @@
 const SHEET_ID = '1AivfnmIxjPaY-bidje61q0IkFUd5nZx9OiNVhw5WrZs';
 const SHEET_NAME = 'Sheet1';
 const OUTAGE_SHEET = 'OutagePlan';
+/** ชีทต้นทาง "กำหนดการดับกระแสไฟฟ้า" — ต้องแชร์ให้บัญชีเจ้าของ Apps Script อ่านได้ */
+const OUTAGE_SOURCE_SS_ID = '12oKHsTOG9FpPE9F80ACAjYox3s_WxVgl_2gTovEyx_I';
 const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1lMjZFbPQGc6r077IoNHmI77oGHGFg2RI';
@@ -115,6 +117,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'deleteDoc': return deleteDoc(args[0], args[1] || tok);
     case 'editProjectDoc': return editProjectDoc(args[0], args[1], args[2], args[3] || tok);
     case 'getSiteDocs': return getSiteDocs(args[0]);
+    case 'getDriveSiteFolders': return getDriveSiteFolders();
     case 'saveSiteDoc': return saveSiteDoc(args[0], args[1] || tok);
     case 'deleteSiteDoc': return deleteSiteDoc(args[0], args[1] || tok);
     default: throw new Error('Unknown action: ' + action);
@@ -496,10 +499,15 @@ function ensureOutageSheet_(ss) {
   return sheet;
 }
 
+function isSyncedOutageId_(id) {
+  return id != null && id.toString().indexOf('ext-') === 0;
+}
+
 function mapOutageRow_(row) {
   const migrated = row.length > 10;
+  const id = row[0];
   return {
-    id: row[0],
+    id: id,
     projectName: row[1],
     start: normalizeOutageDate_(row[2]),
     end: normalizeOutageDate_(row[3]),
@@ -509,17 +517,230 @@ function mapOutageRow_(row) {
     checkPEAPwa: parseCheckbox_(row[7]),
     checkPEASite: migrated ? parseCheckbox_(row[8]) : false,
     checkPEAPhone: migrated ? parseCheckbox_(row[9]) : false,
-    checkDone: parseCheckbox_(migrated ? row[10] : row[8])
+    checkDone: parseCheckbox_(migrated ? row[10] : row[8]),
+    fromSheet: isSyncedOutageId_(id)
   };
 }
 
+function cellStr_(val) {
+  if (val == null || val === '') return '';
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return Utilities.formatDate(val, Session.getScriptTimeZone() || 'Asia/Bangkok', 'd MMM yyyy');
+  }
+  return val.toString().replace(/\u00a0/g, ' ').trim();
+}
+
+const THAI_MONTH_MAP_ = {
+  'ม.ค.': 0, 'มกราคม': 0,
+  'ก.พ.': 1, 'กุมภาพันธ์': 1,
+  'มี.ค.': 2, 'มีนาคม': 2,
+  'เม.ย.': 3, 'เมษายน': 3,
+  'พ.ค.': 4, 'พฤษภาคม': 4,
+  'มิ.ย.': 5, 'มิถุนายน': 5,
+  'ก.ค.': 6, 'กรกฎาคม': 6,
+  'ส.ค.': 7, 'สิงหาคม': 7,
+  'ก.ย.': 8, 'กันยายน': 8,
+  'ต.ค.': 9, 'ตุลาคม': 9,
+  'พ.ย.': 10, 'พฤศจิกายน': 10,
+  'ธ.ค.': 11, 'ธันวาคม': 11
+};
+
+/** แปลงวันที่ไทย เช่น "4 ส.ค. 2569", "23 ก.ค. 69" → Date (local) หรือ null */
+function parseThaiDate_(raw) {
+  if (raw == null || raw === '') return null;
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+  }
+  if (typeof raw === 'number' && isFinite(raw)) {
+    const ms = Math.round((raw - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  const s = cellStr_(raw);
+  if (!s) return null;
+  const m = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
+  if (!m) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return null;
+  }
+  const day = parseInt(m[1], 10);
+  let monthKey = m[2].replace(/\s+/g, '');
+  if (monthKey.charAt(monthKey.length - 1) !== '.' && monthKey.length <= 4) {
+    // keep as-is for full month names
+  }
+  let month = THAI_MONTH_MAP_[monthKey];
+  if (month == null) {
+    const withDot = monthKey.indexOf('.') >= 0 ? monthKey : (monthKey + '.');
+    month = THAI_MONTH_MAP_[withDot];
+  }
+  if (month == null) return null;
+  let year = parseInt(m[3], 10);
+  if (year < 100) year += 2500;
+  if (year > 2400) year -= 543;
+  const dt = new Date(year, month, day);
+  if (isNaN(dt.getTime()) || dt.getDate() !== day) return null;
+  return dt;
+}
+
+/** แปลงช่วงเวลา เช่น "22.30 น. – 02.00", "23.00 - 03.30" */
+function parseTimeRange_(raw) {
+  const s = cellStr_(raw);
+  if (!s) return null;
+  const parts = s.split(/\s*[-–—]\s*/);
+  if (parts.length < 2) return null;
+  const parseOne = function(t) {
+    const m = t.replace(/น\.?/g, '').trim().match(/(\d{1,2})[.:](\d{2})/);
+    if (!m) return null;
+    return { h: parseInt(m[1], 10), m: parseInt(m[2], 10) };
+  };
+  const a = parseOne(parts[0]);
+  const b = parseOne(parts[1]);
+  if (!a || !b) return null;
+  return { startH: a.h, startM: a.m, endH: b.h, endM: b.m };
+}
+
+/**
+ * วันดับไฟใหม่ (N) ถ้ามี ไม่เช่นนั้น วันที่ดับไฟ (M) + ช่วงเวลา (O)
+ * คืน { start: Date|'', end: Date|'' } — ว่างได้ถ้าไม่มีวัน
+ */
+function buildOutageStartEnd_(dateNewVal, dateVal, timeVal) {
+  const base = parseThaiDate_(dateNewVal) || parseThaiDate_(dateVal);
+  if (!base) return { start: '', end: '' };
+  const tr = parseTimeRange_(timeVal);
+  if (!tr) {
+    const start = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 0, 0, 0);
+    const end = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 0);
+    return { start: start, end: end };
+  }
+  const start = new Date(base.getFullYear(), base.getMonth(), base.getDate(), tr.startH, tr.startM, 0);
+  let end = new Date(base.getFullYear(), base.getMonth(), base.getDate(), tr.endH, tr.endM, 0);
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return { start: start, end: end };
+}
+
+function looksLikeOutageSourceSheet_(values) {
+  if (!values || values.length < 2) return false;
+  const maxScan = Math.min(values.length, 8);
+  for (let r = 0; r < maxScan; r++) {
+    const row = values[r];
+    for (let c = 0; c < Math.min(row.length, 20); c++) {
+      const t = cellStr_(row[c]);
+      if (t === 'สถานที่' || t.indexOf('วันที่ดับไฟ') >= 0 || t.indexOf('วันดับไฟใหม่') >= 0) return true;
+    }
+  }
+  // fallback: มีแถวที่คอลัมน์ C เป็นชื่อสถานที่และ A เป็นเลขลำดับ
+  for (let r = 0; r < Math.min(values.length, 15); r++) {
+    const seq = values[r][0];
+    const place = cellStr_(values[r][2]);
+    if (place && place !== 'สถานที่' && (typeof seq === 'number' || /^\d+$/.test(cellStr_(seq)))) return true;
+  }
+  return false;
+}
+
+function isOutageSourceDataRow_(row) {
+  if (!row || row.length < 3) return false;
+  const place = cellStr_(row[2]);
+  if (!place || place === 'สถานที่' || place.indexOf('แผนดับ') === 0) return false;
+  const seq = row[0];
+  if (seq === '' || seq == null) return false;
+  if (typeof seq === 'number' && isFinite(seq)) return true;
+  const seqStr = cellStr_(seq);
+  return /^\d+(\.\d+)?$/.test(seqStr);
+}
+
+function buildSyncedOutageId_(sheetId, seq) {
+  const seqStr = (typeof seq === 'number') ? String(Math.floor(seq)) : cellStr_(seq).replace(/\s+/g, '');
+  return 'ext-' + sheetId + '-' + seqStr;
+}
+
+function collectSourceOutageRows_() {
+  const srcSs = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  const sheets = srcSs.getSheets();
+  const collected = [];
+  const seenIds = {};
+
+  sheets.forEach(function(srcSheet) {
+    const lastRow = srcSheet.getLastRow();
+    const lastCol = srcSheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 3) return;
+    const values = srcSheet.getRange(1, 1, lastRow, Math.max(lastCol, 30)).getValues();
+    if (!looksLikeOutageSourceSheet_(values)) return;
+
+    const sheetId = srcSheet.getSheetId();
+    values.forEach(function(row) {
+      if (!isOutageSourceDataRow_(row)) return;
+      const place = cellStr_(row[2]);
+      const id = buildSyncedOutageId_(sheetId, row[0]);
+      if (seenIds[id]) return;
+      seenIds[id] = true;
+
+      const range = buildOutageStartEnd_(row[13], row[12], row[14]);
+      const remark = cellStr_(row[29]);
+      collected.push({
+        id: id,
+        projectName: place,
+        start: range.start === '' ? '' : range.start,
+        end: range.end === '' ? '' : range.end,
+        remark: remark
+      });
+    });
+  });
+  return collected;
+}
+
+/** ซิงก์ชีทกำหนดการ → OutagePlan (ชีทชนะชื่อ/วัน/หมายเหตุ; checkbox ของแอปไม่ถูกทับ) */
+function syncOutagesFromSource_(destSheet) {
+  const sourceRows = collectSourceOutageRows_();
+  const data = destSheet.getDataRange().getValues();
+  const idToRow = {};
+  for (let i = 1; i < data.length; i++) {
+    idToRow[data[i][0].toString()] = i + 1;
+  }
+
+  const sourceIds = {};
+  sourceRows.forEach(function(src) {
+    sourceIds[src.id] = true;
+    const rowNum = idToRow[src.id];
+    if (rowNum) {
+      destSheet.getRange(rowNum, 2, 1, 4).setValues([[src.projectName, src.start, src.end, src.remark]]);
+    } else {
+      destSheet.appendRow([src.id, src.projectName, src.start, src.end, src.remark, '', false, false, false, false, false]);
+    }
+  });
+
+  // ลบแถว ext-* ที่หายจากชีทต้นทาง (จากล่างขึ้นบน)
+  const fresh = destSheet.getDataRange().getValues();
+  for (let i = fresh.length - 1; i >= 1; i--) {
+    const id = fresh[i][0] != null ? fresh[i][0].toString() : '';
+    if (isSyncedOutageId_(id) && !sourceIds[id]) {
+      destSheet.deleteRow(i + 1);
+    }
+  }
+  return sourceRows.length;
+}
+
 function getOutages() {
-  const ss = getSpreadsheet_();
-  const sheet = ensureOutageSheet_(ss);
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
-  data.shift();
-  return data.map(mapOutageRow_).filter(o => o.start && o.end);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = getSpreadsheet_();
+    const sheet = ensureOutageSheet_(ss);
+    try {
+      syncOutagesFromSource_(sheet);
+    } catch (e) {
+      Logger.log('outage sync failed: ' + e.message);
+      try { logAction('ซิงก์แผนดับไฟล้มเหลว: ' + e.message); } catch (ignore) {}
+    }
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    data.shift();
+    return data.map(mapOutageRow_).filter(function(o) {
+      return o.id != null && o.id !== '' && cellStr_(o.projectName);
+    });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function saveOutageData(formObj, sessionToken) {
@@ -527,6 +748,20 @@ function saveOutageData(formObj, sessionToken) {
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
   const fileUrl = validateHttpUrl_(formObj.fileUrl || formObj.existingFileUrl || '');
+
+  // แถวจากชีท: แก้ได้เฉพาะลิงก์หนังสือ (ชื่อ/วัน/หมายเหตุมาจากชีท)
+  if (formObj.id && isSyncedOutageId_(formObj.id)) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0].toString() === formObj.id.toString()) {
+        sheet.getRange(i + 1, 6).setValue(fileUrl);
+        logAction('อัปเดตลิงก์แผนดับไฟ (จากชีท): ' + (data[i][1] || formObj.id));
+        return { success: true, message: 'อัปเดตลิงก์สำเร็จ (ข้อมูลหลักมาจากชีทกำหนดการ)' };
+      }
+    }
+    throw new Error('ไม่พบรายการที่ต้องการแก้ไข');
+  }
+
   const startDate = parseOutageDateForSheet_(formObj.start);
   const endDate = parseOutageDateForSheet_(formObj.end);
   if (endDate < startDate) throw new Error('วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น');
@@ -568,6 +803,9 @@ function updateOutageStatus(id, field, isChecked, sessionToken) {
 
 function deleteOutage(id, sessionToken) {
   assertOutageFromSession_(sessionToken);
+  if (isSyncedOutageId_(id)) {
+    throw new Error('รายการจากชีทกำหนดการลบไม่ได้ — แก้หรือลบที่ชีทต้นทาง');
+  }
   const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(OUTAGE_SHEET);
   if (!sheet) throw new Error('ไม่พบตารางแผนดับไฟ');
@@ -589,6 +827,35 @@ function forceAuth() {
 // ส่วนไฟล์ PDF ต่อสถานที่ (แยกตามโฟลเดอร์) — แอดมินหลัก + แอดมินรอง
 // ==========================================
 const SITE_DOCS_SHEET = 'SiteDocs';
+
+function listDriveSubFolders_(parentFolder) {
+  const folders = [];
+  const it = parentFolder.getFolders();
+  while (it.hasNext()) {
+    const f = it.next();
+    folders.push({ id: f.getId(), name: f.getName() });
+  }
+  folders.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  return folders;
+}
+
+function getOrCreateDriveSubFolder_(parentFolder, folderName) {
+  const name = (folderName || '').toString().trim();
+  if (!name) throw new Error('กรุณาระบุชื่อโฟลเดอร์');
+  const it = parentFolder.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parentFolder.createFolder(name);
+}
+
+/** รายชื่อโฟลเดอร์ย่อยใน Drive (FOLDER_ID) ให้เลือกตอนอัปโหลด */
+function getDriveSiteFolders() {
+  try {
+    const parent = DriveApp.getFolderById(FOLDER_ID);
+    return listDriveSubFolders_(parent).map(f => f.name);
+  } catch (e) {
+    throw new Error('โหลดโฟลเดอร์จาก Drive ไม่สำเร็จ: ' + e.message);
+  }
+}
 
 function getSiteDocs(siteKey) {
   const key = (siteKey == null ? '' : siteKey.toString()).trim();
@@ -648,11 +915,12 @@ function saveSiteDoc(formObj, sessionToken) {
 
   let finalUrl = '';
   try {
-    const folder = DriveApp.getFolderById(FOLDER_ID);
+    const parent = DriveApp.getFolderById(FOLDER_ID);
+    const targetFolder = getOrCreateDriveSubFolder_(parent, folderName);
     const decodedFile = Utilities.base64Decode(formObj.fileBase64);
     const driveName = fileName.toLowerCase().endsWith('.pdf') ? fileName : (fileName + '.pdf');
     const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
-    const file = folder.createFile(blob);
+    const file = targetFolder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     finalUrl = file.getUrl();
   } catch (e) {
@@ -815,6 +1083,18 @@ function runOutageSelfTest() {
   try { validateHttpUrl_('javascript:alert(1)'); } catch (e) { urlErr = true; }
   assert('validateHttpUrl block js', urlErr);
   assert('ALLOWED fields concept', ['checkVendor', 'checkPEAPwa', 'checkPEASite', 'checkPEAPhone', 'checkDone'].length === 5);
+  const d1 = parseThaiDate_('4 ส.ค. 2569');
+  assert('parseThaiDate ส.ค. 2569', d1 && d1.getFullYear() === 2026 && d1.getMonth() === 7 && d1.getDate() === 4);
+  const d2 = parseThaiDate_('23 ก.ค. 69');
+  assert('parseThaiDate ก.ค. 69', d2 && d2.getFullYear() === 2026 && d2.getMonth() === 6 && d2.getDate() === 23);
+  const tr = parseTimeRange_('22.30 น. – 02.00');
+  assert('parseTimeRange overnight', tr && tr.startH === 22 && tr.endH === 2);
+  const se = buildOutageStartEnd_('', '4 ส.ค. 2569', '22.30 น. – 02.00');
+  assert('buildStartEnd overnight +1 day', se.start && se.end && se.end.getDate() === 5);
+  const seEmpty = buildOutageStartEnd_('', '', '');
+  assert('buildStartEnd empty stays empty', seEmpty.start === '' && seEmpty.end === '');
+  assert('synced id detect', isSyncedOutageId_('ext-0-3') === true);
+  assert('app id not synced', isSyncedOutageId_('171000') === false);
 
   const failed = results.filter(r => !r.ok);
   return {

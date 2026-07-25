@@ -528,12 +528,13 @@
       <div class="modal-body">
         <input type="hidden" id="siteDocSiteKey">
         <div class="mb-3">
-          <label class="fw-bold small text-muted">ชื่อโฟลเดอร์</label>
+          <label class="fw-bold small text-muted">ชื่อโฟลเดอร์ (จาก Google Drive)</label>
           <select id="siteDocFolderSelect" class="form-select mb-2" onchange="onSiteDocFolderSelectChange()">
-            <option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>
+            <option value="">กำลังโหลดโฟลเดอร์...</option>
           </select>
-          <input type="text" id="siteDocFolderNew" class="form-control" placeholder="พิมพ์ชื่อโฟลเดอร์ เช่น SLD, หนังสือ PEA" list="siteDocFolderList">
+          <input type="text" id="siteDocFolderNew" class="form-control" style="display:none;" placeholder="พิมพ์ชื่อโฟลเดอร์ใหม่" list="siteDocFolderList">
           <datalist id="siteDocFolderList"></datalist>
+          <small class="text-muted">เลือกโฟลเดอร์ที่มีอยู่แล้ว หรือสร้างโฟลเดอร์ใหม่</small>
         </div>
         <div class="mb-3">
           <label class="fw-bold small text-muted">ชื่อไฟล์ที่แสดง</label>
@@ -2705,26 +2706,55 @@ function openSiteDocModal(index) {
   document.getElementById('siteDocFileName').value = '';
   document.getElementById('siteDocFile').value = '';
   document.getElementById('siteDocFolderNew').value = '';
+  document.getElementById('siteDocFolderNew').style.display = 'none';
 
-  const folders = [...new Set((currentSiteDocsCache || []).map(d => (d.folderName || '').trim()).filter(Boolean))];
   const sel = document.getElementById('siteDocFolderSelect');
   const list = document.getElementById('siteDocFolderList');
+  sel.innerHTML = '<option value="">กำลังโหลดโฟลเดอร์จาก Drive...</option>';
+  list.innerHTML = '';
+  siteDocModalObj.show();
+
+  const siteFolders = [...new Set((currentSiteDocsCache || []).map(d => (d.folderName || '').trim()).filter(Boolean))];
+
+  google.script.run
+    .withSuccessHandler(driveFolders => {
+      fillSiteDocFolderSelect(driveFolders || [], siteFolders);
+    })
+    .withFailureHandler(err => {
+      fillSiteDocFolderSelect([], siteFolders);
+      Toast.fire({ icon: 'warning', title: 'โหลดโฟลเดอร์ Drive ไม่ได้ — ใช้รายการที่มีในระบบแทน' });
+      console.warn(err);
+    })
+    .getDriveSiteFolders();
+}
+
+function fillSiteDocFolderSelect(driveFolders, siteFolders) {
+  const sel = document.getElementById('siteDocFolderSelect');
+  const list = document.getElementById('siteDocFolderList');
+  const merged = [];
+  const seen = {};
+  (driveFolders || []).concat(siteFolders || []).forEach(name => {
+    const n = (name || '').toString().trim();
+    if (!n || seen[n]) return;
+    seen[n] = true;
+    merged.push(n);
+  });
+  merged.sort((a, b) => a.localeCompare(b, 'th'));
+
   sel.innerHTML = '';
   list.innerHTML = '';
-  folders.sort((a, b) => a.localeCompare(b, 'th')).forEach(f => {
-    sel.innerHTML += '<option value="' + escHtml(f) + '">' + escHtml(f) + '</option>';
-    list.innerHTML += '<option value="' + escHtml(f) + '">';
-  });
-  sel.innerHTML += '<option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>';
-
-  if (folders.length > 0) {
-    sel.value = folders[0];
-    document.getElementById('siteDocFolderNew').style.display = 'none';
-  } else {
-    sel.value = '__new__';
+  if (merged.length === 0) {
+    sel.innerHTML = '<option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>';
     document.getElementById('siteDocFolderNew').style.display = 'block';
+  } else {
+    merged.forEach(f => {
+      sel.innerHTML += '<option value="' + escHtml(f) + '">' + escHtml(f) + '</option>';
+      list.innerHTML += '<option value="' + escHtml(f) + '">';
+    });
+    sel.innerHTML += '<option value="__new__">+ สร้างโฟลเดอร์ใหม่</option>';
+    sel.value = merged[0];
+    document.getElementById('siteDocFolderNew').style.display = 'none';
   }
-  siteDocModalObj.show();
 }
 
 function onSiteDocFolderSelectChange() {
