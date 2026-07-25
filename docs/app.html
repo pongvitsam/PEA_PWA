@@ -2119,9 +2119,15 @@
     }
 
     function initOutageSystem() {
+      // โหลดจาก OutagePlan ก่อน (เร็ว) แล้วค่อยซิงก์ชีทพื้นหลัง
       google.script.run.withSuccessHandler(res => {
         outageData = res || [];
         filterOutages();
+        google.script.run.withSuccessHandler(pack => {
+          if (!pack || !pack.synced || !pack.outages) return;
+          outageData = pack.outages;
+          filterOutages();
+        }).withFailureHandler(() => {}).refreshOutagesFromSource(false);
       }).withFailureHandler(err => {
         outageData = [];
         filterOutages();

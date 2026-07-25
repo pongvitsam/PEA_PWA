@@ -104,6 +104,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'validateClientSession': return validateClientSession(args[0] || tok);
     case 'revokeSession': return revokeSession(args[0] || tok);
     case 'getOutages': return getOutages();
+    case 'refreshOutagesFromSource': return refreshOutagesFromSource(args[0]);
     case 'saveOutageData': return saveOutageData(args[0], args[1] || tok);
     case 'updateOutageStatus': return updateOutageStatus(args[0], args[1], args[2], args[3] || tok);
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
@@ -689,55 +690,107 @@ function collectSourceOutageRows_() {
   return collected;
 }
 
-/** ซิงก์ชีทกำหนดการ → OutagePlan (ชีทชนะชื่อ/วัน/หมายเหตุ; checkbox ของแอปไม่ถูกทับ) */
+/**
+ * ซิงก์ชีทกำหนดการ → OutagePlan
+ * ชีทชนะชื่อ/วัน/หมายเหตุ; คง FileURL + checkbox ของแอป
+ * เขียนชีทครั้งเดียว (เร็วกว่า setValues/append/delete ทีละแถว)
+ */
 function syncOutagesFromSource_(destSheet) {
   const sourceRows = collectSourceOutageRows_();
   const data = destSheet.getDataRange().getValues();
-  const idToRow = {};
+  const byId = {};
   for (let i = 1; i < data.length; i++) {
-    idToRow[data[i][0].toString()] = i + 1;
+    const id = data[i][0] != null ? data[i][0].toString() : '';
+    if (id) byId[id] = data[i];
   }
 
-  const sourceIds = {};
+  const newData = [OUTAGE_HEADERS];
+  const used = {};
   sourceRows.forEach(function(src) {
-    sourceIds[src.id] = true;
-    const rowNum = idToRow[src.id];
-    if (rowNum) {
-      destSheet.getRange(rowNum, 2, 1, 4).setValues([[src.projectName, src.start, src.end, src.remark]]);
-    } else {
-      destSheet.appendRow([src.id, src.projectName, src.start, src.end, src.remark, '', false, false, false, false, false]);
-    }
+    used[src.id] = true;
+    const old = byId[src.id];
+    newData.push([
+      src.id,
+      src.projectName,
+      src.start === '' ? '' : src.start,
+      src.end === '' ? '' : src.end,
+      src.remark || '',
+      old ? (old[5] || '') : '',
+      old ? parseCheckbox_(old[6]) : false,
+      old ? parseCheckbox_(old[7]) : false,
+      old ? parseCheckbox_(old[8]) : false,
+      old ? parseCheckbox_(old[9]) : false,
+      old ? parseCheckbox_(old[10]) : false
+    ]);
   });
 
-  // ลบแถว ext-* ที่หายจากชีทต้นทาง (จากล่างขึ้นบน)
-  const fresh = destSheet.getDataRange().getValues();
-  for (let i = fresh.length - 1; i >= 1; i--) {
-    const id = fresh[i][0] != null ? fresh[i][0].toString() : '';
-    if (isSyncedOutageId_(id) && !sourceIds[id]) {
-      destSheet.deleteRow(i + 1);
-    }
-  }
+  // คงแถวที่สร้างจากแอป (ไม่ใช่ ext-*)
+  Object.keys(byId).forEach(function(id) {
+    if (used[id] || isSyncedOutageId_(id)) return;
+    const row = byId[id];
+    newData.push([
+      row[0], row[1], row[2], row[3], row[4] || '', row[5] || '',
+      parseCheckbox_(row[6]), parseCheckbox_(row[7]), parseCheckbox_(row[8]),
+      parseCheckbox_(row[9]), parseCheckbox_(row[10])
+    ]);
+  });
+
+  const lastRow = Math.max(destSheet.getLastRow(), 1);
+  const lastCol = Math.max(destSheet.getLastColumn(), OUTAGE_HEADERS.length);
+  if (lastRow >= 1) destSheet.getRange(1, 1, lastRow, lastCol).clearContent();
+  destSheet.getRange(1, 1, newData.length, OUTAGE_HEADERS.length).setValues(newData);
   return sourceRows.length;
 }
 
+function readOutagesMapped_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  data.shift();
+  return data.map(mapOutageRow_).filter(function(o) {
+    return o.id != null && o.id !== '' && cellStr_(o.projectName);
+  });
+}
+
+/** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
 function getOutages() {
+  const ss = getSpreadsheet_();
+  const sheet = ensureOutageSheet_(ss);
+  return readOutagesMapped_(sheet);
+}
+
+const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
+const OUTAGE_SYNC_TTL_SEC = 300; // 5 นาที
+
+/**
+ * ซิงก์จากชีทกำหนดการแล้วคืนรายการ
+ * force=true บังคับซิงก์; ถ้าไม่บังคับและเพิ่งซิงก์ภายใน 5 นาที จะข้าม
+ */
+function refreshOutagesFromSource(force) {
+  const wantForce = !!force;
+  const cache = CacheService.getScriptCache();
+  if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
+    return { synced: false, outages: getOutages() };
+  }
+
   const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  if (!lock.tryLock(8000)) {
+    return { synced: false, outages: getOutages() };
+  }
   try {
+    if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
+      return { synced: false, outages: getOutages() };
+    }
     const ss = getSpreadsheet_();
     const sheet = ensureOutageSheet_(ss);
     try {
       syncOutagesFromSource_(sheet);
+      cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
+      return { synced: true, outages: readOutagesMapped_(sheet) };
     } catch (e) {
       Logger.log('outage sync failed: ' + e.message);
       try { logAction('ซิงก์แผนดับไฟล้มเหลว: ' + e.message); } catch (ignore) {}
+      return { synced: false, error: e.message, outages: readOutagesMapped_(sheet) };
     }
-    const data = sheet.getDataRange().getValues();
-    if (data.length <= 1) return [];
-    data.shift();
-    return data.map(mapOutageRow_).filter(function(o) {
-      return o.id != null && o.id !== '' && cellStr_(o.projectName);
-    });
   } finally {
     lock.releaseLock();
   }
