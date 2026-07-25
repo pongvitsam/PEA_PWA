@@ -3,6 +3,8 @@ const SHEET_NAME = 'Sheet1';
 const OUTAGE_SHEET = 'OutagePlan';
 /** ชีทต้นทาง "กำหนดการดับกระแสไฟฟ้า" — ต้องแชร์ให้บัญชีเจ้าของ Apps Script อ่านได้ */
 const OUTAGE_SOURCE_SS_ID = '12oKHsTOG9FpPE9F80ACAjYox3s_WxVgl_2gTovEyx_I';
+const OUTAGE_SOURCE_TITLE = 'กำหนดการดับกระแสไฟฟ้า ระยะที่ 3-4';
+const OUTAGE_SOURCE_URL = 'https://docs.google.com/spreadsheets/d/' + OUTAGE_SOURCE_SS_ID + '/edit';
 const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1lMjZFbPQGc6r077IoNHmI77oGHGFg2RI';
@@ -507,19 +509,23 @@ function isSyncedOutageId_(id) {
 function mapOutageRow_(row) {
   const migrated = row.length > 10;
   const id = row[0];
+  const fromSheet = isSyncedOutageId_(id);
+  const fileUrl = row[5] || '';
   return {
     id: id,
     projectName: row[1],
     start: normalizeOutageDate_(row[2]),
     end: normalizeOutageDate_(row[3]),
     remark: row[4] || '',
-    fileUrl: row[5] || '',
+    fileUrl: fileUrl,
     checkVendor: parseCheckbox_(row[6]),
     checkPEAPwa: parseCheckbox_(row[7]),
     checkPEASite: migrated ? parseCheckbox_(row[8]) : false,
     checkPEAPhone: migrated ? parseCheckbox_(row[9]) : false,
     checkDone: parseCheckbox_(migrated ? row[10] : row[8]),
-    fromSheet: isSyncedOutageId_(id)
+    fromSheet: fromSheet,
+    sourceTitle: fromSheet ? OUTAGE_SOURCE_TITLE : '',
+    sourceUrl: fromSheet ? OUTAGE_SOURCE_URL : ''
   };
 }
 
@@ -759,37 +765,49 @@ function getOutages() {
 }
 
 const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
-const OUTAGE_SYNC_TTL_SEC = 300; // 5 นาที
+const OUTAGE_SYNC_TTL_SEC = 60; // 1 นาที — แก้ใน Excel แล้วเปิดเมนูใหม่จะดึงเร็วขึ้น
 
 /**
  * ซิงก์จากชีทกำหนดการแล้วคืนรายการ
- * force=true บังคับซิงก์; ถ้าไม่บังคับและเพิ่งซิงก์ภายใน 5 นาที จะข้าม
+ * force=true บังคับซิงก์; ถ้าไม่บังคับและเพิ่งซิงก์ภายใน TTL จะข้าม
  */
 function refreshOutagesFromSource(force) {
   const wantForce = !!force;
   const cache = CacheService.getScriptCache();
   if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
-    return { synced: false, outages: getOutages() };
+    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
   }
 
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(8000)) {
-    return { synced: false, outages: getOutages() };
+  if (!lock.tryLock(15000)) {
+    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL, error: 'ระบบกำลังซิงก์อยู่ ลองใหม่ในอีกสักครู่' };
   }
   try {
     if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
-      return { synced: false, outages: getOutages() };
+      return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
     }
     const ss = getSpreadsheet_();
     const sheet = ensureOutageSheet_(ss);
     try {
-      syncOutagesFromSource_(sheet);
+      const n = syncOutagesFromSource_(sheet);
       cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
-      return { synced: true, outages: readOutagesMapped_(sheet) };
+      return {
+        synced: true,
+        count: n,
+        outages: readOutagesMapped_(sheet),
+        sourceTitle: OUTAGE_SOURCE_TITLE,
+        sourceUrl: OUTAGE_SOURCE_URL
+      };
     } catch (e) {
       Logger.log('outage sync failed: ' + e.message);
       try { logAction('ซิงก์แผนดับไฟล้มเหลว: ' + e.message); } catch (ignore) {}
-      return { synced: false, error: e.message, outages: readOutagesMapped_(sheet) };
+      return {
+        synced: false,
+        error: e.message,
+        outages: readOutagesMapped_(sheet),
+        sourceTitle: OUTAGE_SOURCE_TITLE,
+        sourceUrl: OUTAGE_SOURCE_URL
+      };
     }
   } finally {
     lock.releaseLock();

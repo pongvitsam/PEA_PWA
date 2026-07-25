@@ -421,11 +421,16 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
           <div>
             <h4 class="fw-bold mb-1"><i class="fa-solid fa-calendar-days"></i> แผนดับไฟ</h4>
-            <small class="opacity-90">ติดตามกำหนดการดับไฟทุกสถานที่ — ปฏิทินขยายตามจำนวนงานอัตโนมัติ</small>
+            <small class="opacity-90">ดึงจากชีทกำหนดการอัตโนมัติเมื่อเปิดเมนู — แก้ใน Excel แล้วเปิดใหม่หรือกดรีเฟรช</small>
           </div>
-          <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openOutageModal()" id="btnAddOutageTop" disabled>
-            <i class="fa-solid fa-plus text-success"></i> เพิ่มงานดับไฟ
-          </button>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm" onclick="refreshOutageFromSheet()" id="btnRefreshOutageSheet" title="ดึงข้อมูลล่าสุดจาก Excel/ชีท">
+              <i class="fa-solid fa-file-excel"></i> รีเฟรชจากชีท
+            </button>
+            <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openOutageModal()" id="btnAddOutageTop" disabled>
+              <i class="fa-solid fa-plus text-success"></i> เพิ่มงานดับไฟ
+            </button>
+          </div>
         </div>
         <div class="row g-2" id="outageStatsRow">
           <div class="col-6 col-md-3"><div class="outage-stat-card"><h4 id="statOutageTotal">0</h4><small>ทั้งหมด</small></div></div>
@@ -2118,21 +2123,49 @@
       }
     }
 
+    const OUTAGE_SOURCE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/12oKHsTOG9FpPE9F80ACAjYox3s_WxVgl_2gTovEyx_I/edit';
+    const OUTAGE_SOURCE_SHEET_TITLE = 'กำหนดการดับกระแสไฟฟ้า ระยะที่ 3-4';
+
+    function applyOutagePack(pack, opts) {
+      opts = opts || {};
+      if (!pack || !pack.outages) return;
+      outageData = pack.outages;
+      filterOutages();
+      if (pack.error && opts.showError) {
+        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่านได้' });
+      } else if (pack.synced && opts.toast) {
+        Toast.fire({ icon: 'success', title: 'อัปเดตจากชีทแล้ว (' + (pack.count != null ? pack.count : pack.outages.length) + ' รายการ)' });
+      }
+    }
+
     function initOutageSystem() {
-      // โหลดจาก OutagePlan ก่อน (เร็ว) แล้วค่อยซิงก์ชีทพื้นหลัง
+      // โหลดเร็วก่อน แล้วบังคับซิงก์จาก Excel พื้นหลังทุกครั้งที่เปิดเมนู
       google.script.run.withSuccessHandler(res => {
         outageData = res || [];
         filterOutages();
         google.script.run.withSuccessHandler(pack => {
-          if (!pack || !pack.synced || !pack.outages) return;
-          outageData = pack.outages;
-          filterOutages();
-        }).withFailureHandler(() => {}).refreshOutagesFromSource(false);
+          applyOutagePack(pack, { showError: true });
+        }).withFailureHandler(err => {
+          Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทไม่สำเร็จ', text: err.message });
+        }).refreshOutagesFromSource(true);
       }).withFailureHandler(err => {
         outageData = [];
         filterOutages();
         Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
       }).getOutages();
+    }
+
+    function refreshOutageFromSheet() {
+      const btn = document.getElementById('btnRefreshOutageSheet');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังดึง...'; }
+      Toast.fire({ icon: 'info', title: 'กำลังดึงจาก Excel...' });
+      google.script.run.withSuccessHandler(pack => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-file-excel"></i> รีเฟรชจากชีท'; }
+        applyOutagePack(pack, { showError: true, toast: true });
+      }).withFailureHandler(err => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-file-excel"></i> รีเฟรชจากชีท'; }
+        Swal.fire({ icon: 'error', title: 'รีเฟรชไม่สำเร็จ', text: err.message });
+      }).refreshOutagesFromSource(true);
     }
 
     function hasOutageDates(o) {
@@ -2350,8 +2383,14 @@
                           '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-spinner fa-spin"></i> รอดำเนินการ</span>');
         if (o.fromSheet) statusBadge += ' <span class="badge bg-info text-dark mb-2"><i class="fa-solid fa-file-excel"></i> จากชีท</span>';
 
-        let fileBtn = (o.fileUrl && /^https?:\/\//i.test(o.fileUrl))
-          ? `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> กำหนดการดับกระแสไฟฟ้า ระยะที่ 3-4</a>` : '';
+        let fileBtn = '';
+        if (o.fromSheet) {
+          const href = (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) ? o.fileUrl : (o.sourceUrl || OUTAGE_SOURCE_SHEET_URL);
+          const title = o.sourceTitle || OUTAGE_SOURCE_SHEET_TITLE;
+          fileBtn = `<a href="${escHtml(href)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-file-excel"></i> ${escHtml(title)}</a>`;
+        } else if (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) {
+          fileBtn = `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> ${escHtml(OUTAGE_SOURCE_SHEET_TITLE)}</a>`;
+        }
         
         let dateHtml = formatOutageDateRange(o);
         
@@ -2498,7 +2537,7 @@
       document.getElementById('o_project').value = o.projectName;
       document.getElementById('o_project').readOnly = true;
       document.getElementById('o_remark').value = o.remark || '';
-      document.getElementById('o_peaUrl').value = o.fileUrl || '';
+      document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
       if (hasOutageDates(o)) {
         document.getElementById('o_start')._flatpickr.setDate(o.start);
         document.getElementById('o_end')._flatpickr.setDate(o.end);
