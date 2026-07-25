@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>อัปโหลด PDF</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; padding: 24px; background: #f8f9fa; color: #212529; }
+    .box { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,.06); }
+    h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    p { margin: 0; color: #6c757d; font-size: .9rem; line-height: 1.4; }
+    .spin { display: inline-block; width: 18px; height: 18px; border: 2px solid #20c997; border-top-color: transparent; border-radius: 50%; animation: r 0.8s linear infinite; vertical-align: -3px; margin-right: 8px; }
+    @keyframes r { to { transform: rotate(360deg); } }
+    .err { color: #c92a2a; margin-top: 12px; }
+    .ok { color: #087f5b; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1 id="title"><span class="spin"></span>กำลังอัปโหลด PDF</h1>
+    <p id="status">รอรับไฟล์จากหน้าหลัก...</p>
+    <p id="detail" class="err" style="display:none;"></p>
+  </div>
+  <script>
+    (function () {
+      var started = false;
+      function setStatus(t, detail, isErr) {
+        document.getElementById('status').textContent = t;
+        var d = document.getElementById('detail');
+        if (detail) {
+          d.style.display = 'block';
+          d.className = isErr ? 'err' : 'ok';
+          d.textContent = detail;
+        }
+      }
+      function done(ok, payload) {
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({
+              type: 'SITE_UPLOAD_DONE',
+              ok: !!ok,
+              result: payload && payload.result,
+              error: payload && payload.error
+            }, '*');
+          }
+        } catch (e) {}
+        if (ok) {
+          document.getElementById('title').innerHTML = 'อัปโหลดสำเร็จ';
+          setStatus('ปิดหน้าต่างนี้ได้เลย', null, false);
+          setTimeout(function () { try { window.close(); } catch (e) {} }, 600);
+        } else {
+          document.getElementById('title').innerHTML = 'อัปโหลดไม่สำเร็จ';
+          setStatus('เกิดข้อผิดพลาด', (payload && payload.error) || 'unknown', true);
+        }
+      }
+      window.addEventListener('message', function (ev) {
+        var d = ev && ev.data;
+        if (!d || d.type !== 'SITE_DOC_UPLOAD' || started) return;
+        started = true;
+        setStatus('กำลังบันทึกลง Google Drive...', null, false);
+        google.script.run
+          .withSuccessHandler(function (res) { done(true, { result: res }); })
+          .withFailureHandler(function (err) { done(false, { error: (err && err.message) ? err.message : String(err) }); })
+          .saveSiteDoc(d.formData, d.sessionToken);
+      });
+      function pingReady() {
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'SITE_UPLOAD_READY' }, '*');
+          }
+        } catch (e) {}
+      }
+      pingReady();
+      setTimeout(pingReady, 300);
+      setTimeout(pingReady, 1000);
+    })();
+  </script>
+</body>
+</html>

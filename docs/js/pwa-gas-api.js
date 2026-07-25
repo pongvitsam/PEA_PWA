@@ -15,9 +15,16 @@
     return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
   }
 
-  function gasCallJsonp(action, args) {
+  /**
+   * JSONP เท่านั้น — หลีกเลี่ยง 403 จาก iframe → googleusercontent/macros/echo
+   * อัปโหลดไฟล์ใหญ่ใช้หน้าต่าง Apps Script (SiteUpload) แทน
+   */
+  function gasCall(action, args) {
     const requestId = newRequestId();
     const argsJson = JSON.stringify(args || []);
+    if (argsJson.length > 6000) {
+      return Promise.reject(new Error('คำขอนี้ใหญ่เกินไป — ระบบจะเปิดหน้าต่างอัปโหลดแทน'));
+    }
 
     return new Promise(function (resolve, reject) {
       const cbName = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
@@ -59,114 +66,6 @@
       };
       document.head.appendChild(script);
     });
-  }
-
-  /**
-   * Form POST ครั้งเดียว + poll สถานะ (เร็วกว่าหั่นชิ้นหลายรอบ)
-   * postMessage ถ้าใช้ได้จะจบทันที — poll เป็นสำรองเมื่อ iframe โดน 403
-   */
-  function gasCallPostJob(action, args) {
-    const jobId = newRequestId();
-    const payload = {
-      action: action,
-      args: args || [],
-      sessionToken: getStoredSessionToken(),
-      requestId: jobId,
-      jobId: jobId,
-      client: 'pages'
-    };
-
-    return new Promise(function (resolve, reject) {
-      const iframeName = '_gasFrame_' + jobId.replace(/[^\w]/g, '');
-      const iframe = document.createElement('iframe');
-      iframe.name = iframeName;
-      iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;left:-9999px;';
-      document.body.appendChild(iframe);
-
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = window.GAS_API_URL;
-      form.target = iframeName;
-      form.style.display = 'none';
-
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'payload';
-      input.value = JSON.stringify(payload);
-      form.appendChild(input);
-      document.body.appendChild(form);
-
-      let done = false;
-      const started = Date.now();
-      const maxMs = 180000;
-      let pollDelay = 600;
-
-      function finishOk(result) {
-        if (done) return;
-        done = true;
-        cleanup();
-        resolve(result);
-      }
-      function finishErr(err) {
-        if (done) return;
-        done = true;
-        cleanup();
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-      function cleanup() {
-        if (timer) clearTimeout(timer);
-        window.removeEventListener('message', onMessage);
-        try { if (form.parentNode) form.parentNode.removeChild(form); } catch (e) {}
-        try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (e) {}
-      }
-
-      function onMessage(ev) {
-        const data = ev && ev.data;
-        if (!data || (data.jobId !== jobId && data.requestId !== jobId)) return;
-        if (data.ok) finishOk(data.result);
-        else finishErr(data.error || 'API error');
-      }
-
-      function schedulePoll() {
-        if (done) return;
-        timer = setTimeout(function () {
-          if (done) return;
-          if (Date.now() - started > maxMs) {
-            finishErr(new Error('API timeout'));
-            return;
-          }
-          gasCallJsonp('getApiJobStatus', [jobId]).then(function (st) {
-            if (done) return;
-            if (st && st.status === 'done') finishOk(st.result);
-            else if (st && st.status === 'error') finishErr(st.error || 'API error');
-            else if (st && st.status === 'running') {
-              pollDelay = 500;
-              schedulePoll();
-            } else {
-              pollDelay = Math.min(1500, pollDelay + 200);
-              schedulePoll();
-            }
-          }).catch(function () {
-            schedulePoll();
-          });
-        }, pollDelay);
-      }
-
-      let timer = null;
-      window.addEventListener('message', onMessage);
-      form.submit();
-      // เริ่ม poll หลังส่งแล้วเล็กน้อย — ให้เซิร์ฟเวอร์มีเวลาทำงาน
-      pollDelay = 800;
-      schedulePoll();
-    });
-  }
-
-  function gasCall(action, args) {
-    const argsJson = JSON.stringify(args || []);
-    if (argsJson.length > 4500) {
-      return gasCallPostJob(action, args);
-    }
-    return gasCallJsonp(action, args);
   }
 
   function createGasRunner() {
