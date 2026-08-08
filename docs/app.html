@@ -1281,8 +1281,7 @@
         enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
         onChange: function(selectedDates, dateStr, instance) {
           if(selectedDates[0]) {
-            let d = selectedDates[0];
-            instance.input.value = `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()+543} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+            instance.input.value = formatOutagePickerDisplay_(selectedDates[0]);
           }
         }
       });
@@ -2299,10 +2298,57 @@
     const OUTAGE_SOURCE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/12oKHsTOG9FpPE9F80ACAjYox3s_WxVgl_2gTovEyx_I/edit';
     const OUTAGE_SOURCE_SHEET_TITLE = 'กำหนดการดับกระแสไฟฟ้า ระยะที่ 3-4';
 
+    function normalizeGregorianDate_(input) {
+      if (input == null || input === '') return null;
+      const d = input instanceof Date ? new Date(input.getTime()) : new Date(input);
+      if (isNaN(d.getTime())) return null;
+      if (d.getFullYear() > 2400) {
+        return new Date(
+          d.getFullYear() - 543, d.getMonth(), d.getDate(),
+          d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()
+        );
+      }
+      return d;
+    }
+
+    function toBuddhistYearForDisplay_(year) {
+      year = Number(year);
+      if (!isFinite(year)) return '';
+      return year > 2400 ? year : year + 543;
+    }
+
+    function formatOutagePickerDisplay_(input) {
+      const d = normalizeGregorianDate_(input);
+      if (!d) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + toBuddhistYearForDisplay_(d.getFullYear()) +
+        ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function normalizeOutageRecord_(o) {
+      if (!o) return o;
+      const start = normalizeGregorianDate_(o.start);
+      const end = normalizeGregorianDate_(o.end);
+      return Object.assign({}, o, {
+        start: start ? start.toISOString() : o.start,
+        end: end ? end.toISOString() : o.end
+      });
+    }
+
+    function normalizeOutageList_(rows) {
+      return (rows || []).map(normalizeOutageRecord_);
+    }
+
+    function formatCalendarTitleTh_(input) {
+      const d = normalizeGregorianDate_(input) || new Date();
+      const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+      return months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
+    }
+
     function applyOutagePack(pack, opts) {
       opts = opts || {};
       if (!pack || !pack.outages) return;
-      outageData = pack.outages;
+      outageData = normalizeOutageList_(pack.outages);
       filterOutages();
       if (pack.error && opts.showError) {
         Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่านได้' });
@@ -2314,7 +2360,7 @@
     function initOutageSystem() {
       // โหลดเร็วก่อน แล้วบังคับซิงก์จาก Excel พื้นหลังทุกครั้งที่เปิดเมนู
       google.script.run.withSuccessHandler(res => {
-        outageData = res || [];
+        outageData = normalizeOutageList_(res || []);
         filterOutages();
         google.script.run.withSuccessHandler(pack => {
           applyOutagePack(pack, { showError: true });
@@ -2343,14 +2389,16 @@
 
     function hasOutageDates(o) {
       if (!o || !o.start || !o.end) return false;
-      const s = new Date(o.start), e = new Date(o.end);
-      return !isNaN(s.getTime()) && !isNaN(e.getTime());
+      const s = normalizeGregorianDate_(o.start), e = normalizeGregorianDate_(o.end);
+      return !!(s && e);
     }
 
     function formatOutageDateRange(o) {
       if (!hasOutageDates(o)) return '<span class="text-muted">ยังไม่มีกำหนดวัน</span>';
-      const fStart = new Date(o.start).toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + new Date(o.start).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
-      const fEnd = new Date(o.end).toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + new Date(o.end).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+      const s = normalizeGregorianDate_(o.start);
+      const e = normalizeGregorianDate_(o.end);
+      const fStart = s.toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + s.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+      const fEnd = e.toLocaleDateString('th-TH', {year:'numeric',month:'short',day:'numeric'}) + ' ' + e.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
       return fStart + ' <i class="fa-solid fa-arrow-right mx-1"></i> ' + fEnd;
     }
 
@@ -2360,7 +2408,7 @@
       let pending = 0, done = 0, past = 0;
       source.forEach(o => {
         if (o.checkDone) done++;
-        else if (hasOutageDates(o) && new Date(o.end) < now) past++;
+        else if (hasOutageDates(o) && normalizeGregorianDate_(o.end) < now) past++;
         else pending++;
       });
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -2420,14 +2468,14 @@
         return {
           id: String(o.id),
           title: o.projectName,
-          start: o.start,
-          end: o.end,
+          start: normalizeGregorianDate_(o.start) || o.start,
+          end: normalizeGregorianDate_(o.end) || o.end,
           backgroundColor: style.bg,
           borderColor: style.border,
           textColor: '#fff',
           classNames: [style.cls],
           extendedProps: {
-            status: o.checkDone ? 'done' : (new Date(o.end) < new Date() ? 'past' : 'pending'),
+            status: o.checkDone ? 'done' : (normalizeGregorianDate_(o.end) < new Date() ? 'past' : 'pending'),
             sectorCls: style.cls,
             sectorBg: style.bg,
             sectorBorder: style.border
@@ -2443,7 +2491,7 @@
       let latest = null;
       filteredOutageData.forEach(o => {
         if (!hasOutageDates(o)) return;
-        const t = new Date(o.start).getTime();
+        const t = normalizeGregorianDate_(o.start).getTime();
         if (isNaN(t)) return;
         if (t >= now - 6 * 3600000) {
           if (soon == null || t < soon) soon = t;
@@ -2510,6 +2558,10 @@
         displayEventEnd: true,
         eventOrder: 'start',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
+        titleFormat: function(arg) {
+          const d = arg && arg.date ? arg.date : (arg && arg.start ? arg.start : new Date());
+          return formatCalendarTitleTh_(d);
+        },
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
         events: events,
         eventClick: function(info) { editOutage(info.event.id); },
@@ -2591,13 +2643,13 @@
         const aHas = hasOutageDates(a), bHas = hasOutageDates(b);
         if (!aHas && bHas) return 1; if (aHas && !bHas) return -1;
         if (!aHas && !bHas) return (a.projectName || '').localeCompare(b.projectName || '', 'th');
-        let now = new Date(); let isAPast = new Date(a.end) < now; let isBPast = new Date(b.end) < now;
+        let now = new Date(); let isAPast = normalizeGregorianDate_(a.end) < now; let isBPast = normalizeGregorianDate_(b.end) < now;
         if(isAPast && !isBPast) return 1; if(!isAPast && isBPast) return -1;
-        return new Date(a.start) - new Date(b.start);
+        return normalizeGregorianDate_(a.start) - normalizeGregorianDate_(b.start);
       });
 
       sortedData.forEach(o => {
-        let isPast = hasOutageDates(o) && new Date(o.end) < new Date();
+        let isPast = hasOutageDates(o) && normalizeGregorianDate_(o.end) < new Date();
         const safeId = String(o.id).replace(/'/g, "\\'");
         let cardStyle = o.checkDone ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;' : 
                         (isPast ? 'border-left: 5px solid #ced4da; opacity: 0.7;' : 'border-left: 5px solid #60a5fa;');
@@ -2746,7 +2798,7 @@
       if(!o) return;
       if (!canEditOutage()) {
         const dateText = hasOutageDates(o)
-          ? `<p><b>เริ่ม:</b> ${escHtml(new Date(o.start).toLocaleString('th-TH'))}</p><p><b>สิ้นสุด:</b> ${escHtml(new Date(o.end).toLocaleString('th-TH'))}</p>`
+          ? `<p><b>เริ่ม:</b> ${escHtml(normalizeGregorianDate_(o.start).toLocaleString('th-TH'))}</p><p><b>สิ้นสุด:</b> ${escHtml(normalizeGregorianDate_(o.end).toLocaleString('th-TH'))}</p>`
           : '<p class="text-muted">ยังไม่มีกำหนดวัน</p>';
         Swal.fire({
           title: o.projectName,
@@ -2763,8 +2815,8 @@
       document.getElementById('o_remark').value = o.remark || '';
       document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
       if (hasOutageDates(o)) {
-        document.getElementById('o_start')._flatpickr.setDate(o.start);
-        document.getElementById('o_end')._flatpickr.setDate(o.end);
+        document.getElementById('o_start')._flatpickr.setDate(normalizeGregorianDate_(o.start));
+        document.getElementById('o_end')._flatpickr.setDate(normalizeGregorianDate_(o.end));
       } else {
         document.getElementById('o_start')._flatpickr.clear();
         document.getElementById('o_end')._flatpickr.clear();
@@ -2797,8 +2849,8 @@
       let formData = {
         id: id,
         projectName: project,
-        start: start ? start.toISOString() : '',
-        end: end ? end.toISOString() : '',
+        start: start ? normalizeGregorianDate_(start).toISOString() : '',
+        end: end ? normalizeGregorianDate_(end).toISOString() : '',
         remark: document.getElementById('o_remark').value,
         fileUrl: document.getElementById('o_peaUrl').value.trim()
       };

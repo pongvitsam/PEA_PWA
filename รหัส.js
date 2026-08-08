@@ -326,18 +326,31 @@ function parseCheckbox_(val) {
   return s === 'true' || s === 'yes' || s === 'y' || s === '1' || s === '✓' || s === 'checked';
 }
 
+function fixGregorianDate_(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return d;
+  if (d.getFullYear() > 2400) {
+    return new Date(
+      d.getFullYear() - 543, d.getMonth(), d.getDate(),
+      d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()
+    );
+  }
+  return d;
+}
+
 function normalizeOutageDate_(val) {
   if (val == null || val === '') return null;
   if (val instanceof Date && !isNaN(val.getTime())) {
-    return val.toISOString();
+    return fixGregorianDate_(val).toISOString();
   }
   if (typeof val === 'number') {
     const ms = Math.round((val - 25569) * 86400 * 1000);
     const d = new Date(ms);
-    if (!isNaN(d.getTime())) return d.toISOString();
+    if (!isNaN(d.getTime())) return fixGregorianDate_(d).toISOString();
   }
+  const th = parseThaiDate_(val);
+  if (th) return fixGregorianDate_(th).toISOString();
   const d = new Date(val);
-  if (!isNaN(d.getTime())) return d.toISOString();
+  if (!isNaN(d.getTime())) return fixGregorianDate_(d).toISOString();
   return null;
 }
 
