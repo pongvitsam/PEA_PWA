@@ -1880,6 +1880,52 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
   throw new Error('ไม่พบรายการตรวจรับ');
 }
 
+function extractDriveFileIdFromUrl_(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  return '';
+}
+
+function isFolderUnderInspectionRoot_(folder) {
+  if (!folder) return false;
+  if (folder.getId() === INSPECTION_FILE_FOLDER_ID) return true;
+  const parents = folder.getParents();
+  while (parents.hasNext()) {
+    if (isFolderUnderInspectionRoot_(parents.next())) return true;
+  }
+  return false;
+}
+
+function isInspectionDriveFile_(file) {
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    if (isFolderUnderInspectionRoot_(parents.next())) return true;
+  }
+  return false;
+}
+
+function deleteInspectionDriveFileByUrl_(fileUrl) {
+  const fileId = extractDriveFileIdFromUrl_(fileUrl);
+  if (!fileId) return { deleted: false, reason: 'no_id' };
+  try {
+    const file = DriveApp.getFileById(fileId);
+    if (!isInspectionDriveFile_(file)) {
+      logAction('ลบ Drive ข้าม: ไฟล์ไม่อยู่ในโฟลเดอร์ตรวจรับ ' + fileId);
+      return { deleted: false, reason: 'wrong_folder' };
+    }
+    file.setTrashed(true);
+    return { deleted: true, fileId: fileId };
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/not found|Unable to find|Invalid argument/i.test(msg)) return { deleted: false, reason: 'not_found' };
+    throw new Error('ลบไฟล์ใน Drive ไม่สำเร็จ: ' + msg);
+  }
+}
+
 function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
   const targetUrl = (fileUrl || '').toString().trim();
   if (!targetUrl) throw new Error('ไม่พบ URL ไฟล์');
@@ -1941,9 +1987,10 @@ function deleteInspectionFileComment(formObj, sessionToken) {
   const fileUrl = (formObj && formObj.fileUrl != null ? formObj.fileUrl : '').toString().trim();
   if (!inspectionId) throw new Error('ไม่พบรหัสรายการ');
   if (!fileUrl) throw new Error('ไม่พบ URL ไฟล์');
+  const driveResult = deleteInspectionDriveFileByUrl_(fileUrl);
   const fileComment = removeInspectionFileCommentEntry_(inspectionId, fileUrl);
-  logAction('ลบ File comment: ' + inspectionId);
-  return { success: true, fileComment: fileComment };
+  logAction('ลบ File comment: ' + inspectionId + (driveResult.deleted ? ' (+ Drive)' : ''));
+  return { success: true, fileComment: fileComment, driveDeleted: !!driveResult.deleted };
 }
 
 function saveInspectionFileComment(formObj, sessionToken) {
