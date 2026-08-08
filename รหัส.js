@@ -517,7 +517,7 @@ function deleteUserAccount(username, sessionToken) {
 }
 
 // --- ระบบแผนดับไฟ ---
-const OUTAGE_HEADERS = ['ID', 'ProjectName', 'Start', 'End', 'Remark', 'FileURL', 'CheckVendor', 'CheckPEAPwa', 'CheckPEASite', 'CheckPEAPhone', 'CheckDone'];
+const OUTAGE_HEADERS = ['ID', 'ProjectName', 'Start', 'End', 'Remark', 'FileURL', 'CheckVendor', 'CheckPEAPwa', 'CheckPEASite', 'CheckPEAPhone', 'CheckDone', 'SheetDetails'];
 
 function ensureOutageSheet_(ss) {
   let sheet = ss.getSheetByName(OUTAGE_SHEET);
@@ -544,6 +544,12 @@ function ensureOutageSheet_(ss) {
       if (headers[i] !== name) sheet.getRange(1, i + 1).setValue(name);
     });
   }
+  if (headers.length < OUTAGE_HEADERS.length || headers[11] !== 'SheetDetails') {
+    if (sheet.getLastColumn() < OUTAGE_HEADERS.length) {
+      sheet.insertColumnsAfter(sheet.getLastColumn(), OUTAGE_HEADERS.length - sheet.getLastColumn());
+    }
+    sheet.getRange(1, 12).setValue('SheetDetails');
+  }
   return sheet;
 }
 
@@ -556,6 +562,15 @@ function mapOutageRow_(row) {
   const id = row[0];
   const fromSheet = isSyncedOutageId_(id);
   const fileUrl = row[5] || '';
+  let sheetDetails = {};
+  const rawDetails = row[11];
+  if (rawDetails) {
+    try {
+      sheetDetails = typeof rawDetails === 'string' ? JSON.parse(rawDetails) : rawDetails;
+    } catch (ignore) {
+      sheetDetails = {};
+    }
+  }
   return {
     id: id,
     projectName: row[1],
@@ -568,6 +583,7 @@ function mapOutageRow_(row) {
     checkPEASite: migrated ? parseCheckbox_(row[8]) : false,
     checkPEAPhone: migrated ? parseCheckbox_(row[9]) : false,
     checkDone: parseCheckbox_(migrated ? row[10] : row[8]),
+    sheetDetails: sheetDetails,
     fromSheet: fromSheet,
     sourceTitle: fromSheet ? OUTAGE_SOURCE_TITLE : '',
     sourceUrl: fromSheet ? OUTAGE_SOURCE_URL : ''
@@ -685,21 +701,141 @@ function looksLikeOutageSourceSheet_(values) {
 }
 
 /** หาแถวหัวตารางแล้วคืน index คอลัมน์ตามชื่อ (แท็บ NC/NE/S โครงไม่เหมือนกัน) */
+function normOutageHeader_(t) {
+  return cellStr_(t).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function assignOutageDetailCol_(map, key, col) {
+  if (!map.detailCols) map.detailCols = {};
+  if (map.detailCols[key] == null) map.detailCols[key] = col;
+}
+
+function mapOutageDetailColumns_(map, h, c) {
+  if (h.indexOf('เลขที่หนังสือ') >= 0 && h.indexOf('tc') >= 0 && h.indexOf('ขอชื่อ') < 0 && h.indexOf('pea-pwa') < 0 && h.indexOf('pea-pea') < 0) {
+    assignOutageDetailCol_(map, 'tcDocNo', c);
+  } else if (h.indexOf('pea') >= 0 && h.indexOf('ได้รับหนังสือ') >= 0 && h.indexOf('tc') >= 0) {
+    assignOutageDetailCol_(map, 'peaTcReceivedDate', c);
+  } else if (h.indexOf('สถานะดับกระแส') >= 0) {
+    assignOutageDetailCol_(map, 'powerStatus', c);
+  } else if ((h.indexOf('หนังสือ pea-pwa') >= 0 || h.indexOf('หนังสือpea-pwa') >= 0) && h.indexOf('หมายเลข') < 0 && h.indexOf('ได้รับ') < 0) {
+    assignOutageDetailCol_(map, 'peaPwaDoc', c);
+  } else if (h.indexOf('หมายเลขหนังสือ') >= 0 && h.indexOf('pea-pwa') >= 0) {
+    assignOutageDetailCol_(map, 'peaPwaDocNo', c);
+  } else if (h.indexOf('pea-pwa') >= 0 && h.indexOf('ได้รับหนังสือ') >= 0) {
+    assignOutageDetailCol_(map, 'peaPwaReceivedDate', c);
+  } else if (h.indexOf('หนังสือ pea-pea') >= 0 && h.indexOf('หน้างาน') >= 0 && h.indexOf('หมายเลข') < 0 && h.indexOf('ได้รับ') < 0) {
+    assignOutageDetailCol_(map, 'peaPeaSiteDoc', c);
+  } else if (h.indexOf('หมายเลขหนังสือ') >= 0 && h.indexOf('pea-pea') >= 0 && h.indexOf('หน้างาน') >= 0) {
+    assignOutageDetailCol_(map, 'peaPeaSiteDocNo', c);
+  } else if (h.indexOf('pea-pea') >= 0 && h.indexOf('หน้างาน') >= 0 && h.indexOf('ได้รับหนังสือ') >= 0) {
+    assignOutageDetailCol_(map, 'peaPeaSiteReceivedDate', c);
+  } else if (h.indexOf('ผู้ประสานงาน pea') >= 0) {
+    assignOutageDetailCol_(map, 'peaCoordinator', c);
+  } else if (h.indexOf('ตำแหน่ง pea') >= 0) {
+    assignOutageDetailCol_(map, 'peaPosition', c);
+  } else if (h.indexOf('สังกัด pea') >= 0) {
+    assignOutageDetailCol_(map, 'peaDept', c);
+  } else if (h.indexOf('โทรประสาน') >= 0 && h.indexOf('กฟภ') >= 0) {
+    assignOutageDetailCol_(map, 'peaPhoneEgat', c);
+  } else if (h.indexOf('เบอร์ติดต่อ pea') >= 0) {
+    assignOutageDetailCol_(map, 'peaContact', c);
+  } else if (h.indexOf('ผู้ประสานงาน tc') >= 0) {
+    assignOutageDetailCol_(map, 'tcCoordinator', c);
+  } else if (h.indexOf('เบอร์ติดต่อ tc') >= 0) {
+    assignOutageDetailCol_(map, 'tcContact', c);
+  } else if (h.indexOf('หมายเลขหนังสือขอชื่อ') >= 0 || h.indexOf('ขอชื่อผู้ประสานงาน') >= 0) {
+    assignOutageDetailCol_(map, 'coordRequestDocNo', c);
+  } else if (h.indexOf('หน่วยงานที่แจ้งรายชื่อ') >= 0) {
+    assignOutageDetailCol_(map, 'notifyAgency', c);
+  }
+}
+
+function extractOutageSheetDetails_(row, map) {
+  const details = {};
+  const knownCols = new Set();
+  if (map.seq != null) knownCols.add(map.seq);
+  if (map.place != null) knownCols.add(map.place);
+  if (map.date != null) knownCols.add(map.date);
+  if (map.dateNew != null) knownCols.add(map.dateNew);
+  if (map.time != null) knownCols.add(map.time);
+  if (map.timeNew != null) knownCols.add(map.timeNew);
+
+  const detailKeys = ['tcDocNo', 'peaTcReceivedDate', 'outageDate', 'outageTime', 'outageDateNew', 'outageTimeNew',
+    'powerStatus', 'peaPwaDoc', 'peaPwaDocNo', 'peaPwaReceivedDate', 'peaPeaSiteDoc', 'peaPeaSiteDocNo',
+    'peaPeaSiteReceivedDate', 'peaCoordinator', 'peaPosition', 'peaDept', 'peaPhoneEgat', 'peaContact',
+    'tcCoordinator', 'tcContact', 'remark', 'coordRequestDocNo', 'notifyAgency'];
+
+  if (map.date != null) {
+    knownCols.add(map.date);
+    const v = cellStr_(row[map.date]);
+    if (v) details.outageDate = v;
+  }
+  if (map.time != null) {
+    knownCols.add(map.time);
+    const v = cellStr_(row[map.time]);
+    if (v) details.outageTime = v;
+  }
+  if (map.dateNew != null) {
+    knownCols.add(map.dateNew);
+    const v = cellStr_(row[map.dateNew]);
+    if (v) details.outageDateNew = v;
+  }
+  if (map.timeNew != null) {
+    knownCols.add(map.timeNew);
+    const v = cellStr_(row[map.timeNew]);
+    if (v) details.outageTimeNew = v;
+  }
+  if (map.remark != null) {
+    knownCols.add(map.remark);
+    const v = cellStr_(row[map.remark]);
+    if (v) details.remark = v;
+  }
+
+  const dc = map.detailCols || {};
+  detailKeys.forEach(function(key) {
+    if (details[key] != null) return;
+    const col = dc[key];
+    if (col == null) return;
+    knownCols.add(col);
+    const val = cellStr_(row[col]);
+    if (val) details[key] = val;
+  });
+
+  const extras = [];
+  const headers = map.headerLabels || [];
+  for (let c = 0; c < headers.length; c++) {
+    if (knownCols.has(c)) continue;
+    const label = cellStr_(headers[c]);
+    const val = cellStr_(row[c]);
+    if (!label || !val) continue;
+    if (label === 'สถานที่') continue;
+    if (label.indexOf('ลำดับ') === 0) continue;
+    extras.push({ label: label.replace(/\s+/g, ' ').trim(), value: val });
+  }
+  if (extras.length) details._extras = extras;
+  return details;
+}
+
 function findOutageHeaderMap_(values) {
-  const fallback = { headerRow: 1, seq: 0, place: 2, date: 12, dateNew: 13, time: 14, remark: 29 };
+  const fallback = { headerRow: 1, seq: 0, place: 2, date: 12, dateNew: 13, time: 14, timeNew: null, remark: 29, detailCols: {}, headerLabels: [] };
   if (!values || !values.length) return fallback;
   for (let r = 0; r < Math.min(values.length, 12); r++) {
-    const map = { headerRow: r };
+    const map = { headerRow: r, detailCols: {} };
     const row = values[r];
+    map.headerLabels = row.map(function(cell) { return cellStr_(cell); });
     for (let c = 0; c < row.length; c++) {
       const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
       if (!t) continue;
+      const h = normOutageHeader_(t);
       if (t === 'สถานที่') map.place = c;
-      else if (t.indexOf('วันดับไฟใหม่') >= 0) map.dateNew = c;
-      else if (t.indexOf('วันที่ดับไฟ') >= 0) map.date = c;
-      else if (t.indexOf('ช่วงเวลา') >= 0 && map.time == null) map.time = c;
-      else if (t.indexOf('หมายเหตุ') === 0) map.remark = c;
-      else if ((t.indexOf('ลำดับ') >= 0 || t.indexOf('ดับไฟ') >= 0) && map.seq == null && c < 3) map.seq = c;
+      else if (h.indexOf('วันดับไฟใหม่') >= 0) map.dateNew = c;
+      else if (h.indexOf('วันที่ดับไฟ') >= 0) map.date = c;
+      else if (h.indexOf('ช่วงเวล') >= 0 && h.indexOf('ใหม่') >= 0) map.timeNew = c;
+      else if ((h.indexOf('ช่วงเวลที่ดับไฟ') >= 0 || h.indexOf('ช่วงเวลาที่ดับไฟ') >= 0) && h.indexOf('ใหม่') < 0) map.time = c;
+      else if (h.indexOf('ช่วงเวล') >= 0 && map.time == null && h.indexOf('ใหม่') < 0) map.time = c;
+      else if (h.indexOf('หมายเหตุ') === 0) map.remark = c;
+      else if ((h.indexOf('ลำดับ') >= 0 || h.indexOf('ดับไฟ') >= 0) && map.seq == null && c < 3) map.seq = c;
+      mapOutageDetailColumns_(map, h, c);
     }
     if (map.place != null) {
       if (map.seq == null) map.seq = 0;
@@ -784,13 +920,15 @@ function collectSourceOutageRows_() {
       }
 
       const remark = map.remark != null ? cellStr_(row[map.remark]) : '';
+      const sheetDetails = extractOutageSheetDetails_(row, map);
       const entry = {
         id: id,
         projectName: place,
         placeKey: placeKey,
         start: range.start === '' ? '' : range.start,
         end: range.end === '' ? '' : range.end,
-        remark: remark
+        remark: remark,
+        sheetDetails: sheetDetails
       };
       seenIds[id] = true;
       if (placeKey) seenPlaces[sheetId + ':' + placeKey] = collected.length;
@@ -907,7 +1045,8 @@ function syncOutagesFromSource_(destSheet) {
       old ? parseCheckbox_(old[7]) : false,
       old ? parseCheckbox_(old[8]) : false,
       old ? parseCheckbox_(old[9]) : false,
-      old ? parseCheckbox_(old[10]) : false
+      old ? parseCheckbox_(old[10]) : false,
+      JSON.stringify(src.sheetDetails || {})
     ]);
   });
 
@@ -919,7 +1058,8 @@ function syncOutagesFromSource_(destSheet) {
     newData.push([
       row[0], row[1], row[2], row[3], row[4] || '', row[5] || '',
       parseCheckbox_(row[6]), parseCheckbox_(row[7]), parseCheckbox_(row[8]),
-      parseCheckbox_(row[9]), parseCheckbox_(row[10])
+      parseCheckbox_(row[9]), parseCheckbox_(row[10]),
+      row[11] || ''
     ]);
   });
 
@@ -1045,7 +1185,7 @@ function saveOutageData(formObj, sessionToken) {
   }
 
   if (!hasDates) throw new Error('กรุณาระบุวันเริ่มและวันสิ้นสุด');
-  sheet.appendRow([new Date().getTime().toString(), formObj.projectName, startDate, endDate, formObj.remark || '', fileUrl, false, false, false, false, false]);
+  sheet.appendRow([new Date().getTime().toString(), formObj.projectName, startDate, endDate, formObj.remark || '', fileUrl, false, false, false, false, false, '']);
   logAction('เพิ่มแผนดับไฟ: ' + formObj.projectName);
   return { success: true, message: 'บันทึกข้อมูลสำเร็จ' };
 }

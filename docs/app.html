@@ -111,6 +111,12 @@
     }
     .outage-loc-panel .loc-row { font-size: 0.85rem; color: #475569; margin-bottom: 0.35rem; }
     .outage-loc-panel .loc-row b { color: #1e40af; min-width: 110px; display: inline-block; }
+    .outage-sheet-details {
+      background: linear-gradient(180deg, #f8fbff, #f1f5f9);
+      border: 1px solid #dbeafe; border-radius: 10px; padding: 0.75rem 0.9rem;
+    }
+    .outage-sheet-details .det-row { font-size: 0.82rem; color: #334155; margin-bottom: 0.3rem; line-height: 1.45; }
+    .outage-sheet-details .det-label { color: #64748b; font-weight: 600; display: inline-block; min-width: 9.5rem; vertical-align: top; }
     .form-switch .form-check-input:checked { background-color: #2563eb; border-color: #2563eb; }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
@@ -2608,6 +2614,51 @@
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    const OUTAGE_SHEET_DETAIL_LABELS_ = [
+      ['tcDocNo', 'เลขที่หนังสือ TC'],
+      ['peaTcReceivedDate', 'PEA ได้รับหนังสือ TC วันที่'],
+      ['outageDate', 'วันที่ดับไฟ'],
+      ['outageTime', 'ช่วงเวลาที่ดับไฟ'],
+      ['outageDateNew', 'วันดับไฟใหม่'],
+      ['outageTimeNew', 'ช่วงเวลาที่ดับไฟใหม่'],
+      ['powerStatus', 'สถานะดับกระแสไฟฟ้า'],
+      ['peaPwaDoc', 'หนังสือ PEA-PWA'],
+      ['peaPwaDocNo', 'หมายเลขหนังสือ PEA-PWA'],
+      ['peaPwaReceivedDate', 'PEA-PWA ได้รับหนังสือวันที่'],
+      ['peaPeaSiteDoc', 'หนังสือ PEA-PEA หน้างาน'],
+      ['peaPeaSiteDocNo', 'หมายเลขหนังสือ PEA-PEA หน้างาน'],
+      ['peaPeaSiteReceivedDate', 'PEA-PEA หน้างาน ได้รับหนังสือวันที่'],
+      ['peaCoordinator', 'ผู้ประสานงาน PEA'],
+      ['peaPosition', 'ตำแหน่ง PEA'],
+      ['peaDept', 'สังกัด PEA'],
+      ['peaPhoneEgat', 'โทรประสาน กฟภ.'],
+      ['peaContact', 'เบอร์ติดต่อ PEA'],
+      ['tcCoordinator', 'ผู้ประสานงาน TC'],
+      ['tcContact', 'เบอร์ติดต่อ TC'],
+      ['remark', 'หมายเหตุ'],
+      ['coordRequestDocNo', 'หมายเลขหนังสือขอชื่อผู้ประสานงาน/ ลงวันที่'],
+      ['notifyAgency', 'หน่วยงานที่แจ้งรายชื่อ']
+    ];
+
+    function renderOutageSheetDetailsHtml_(o, opts) {
+      opts = opts || {};
+      const d = o && o.sheetDetails;
+      if (!d || typeof d !== 'object') return '';
+      let rows = '';
+      OUTAGE_SHEET_DETAIL_LABELS_.forEach(function(pair) {
+        const val = d[pair[0]];
+        if (val == null || val === '') return;
+        rows += '<div class="det-row"><span class="det-label">' + escHtml(pair[1]) + ':</span> ' + escHtml(String(val)) + '</div>';
+      });
+      (d._extras || []).forEach(function(ex) {
+        if (!ex || !ex.label || ex.value == null || ex.value === '') return;
+        rows += '<div class="det-row"><span class="det-label">' + escHtml(ex.label) + ':</span> ' + escHtml(String(ex.value)) + '</div>';
+      });
+      if (!rows) return '';
+      const title = opts.title === false ? '' : '<div class="small fw-bold text-primary mb-2"><i class="fa-solid fa-table-list"></i> รายละเอียดจากชีท</div>';
+      return '<div class="outage-sheet-details mt-2 mb-2">' + title + rows + '</div>';
+    }
+
     function renderOutageLocReadonly(loc) {
       const esc = (s) => (s == null || s === '') ? '-' : escHtml(s);
       let links = '';
@@ -2669,6 +2720,12 @@
         }
         
         let dateHtml = formatOutageDateRange(o);
+        let detailsHtml = renderOutageSheetDetailsHtml_(o);
+        let remarkHtml = (!o.fromSheet && o.remark)
+          ? `<div class="alert alert-danger py-1 px-2 small mb-2 border-0"><i class="fa-solid fa-circle-exclamation"></i> <b>หมายเหตุ:</b> ${escHtml(o.remark)}</div>`
+          : (o.fromSheet && !detailsHtml && o.remark
+            ? `<div class="alert alert-danger py-1 px-2 small mb-2 border-0"><i class="fa-solid fa-circle-exclamation"></i> <b>หมายเหตุ:</b> ${escHtml(o.remark)}</div>`
+            : '');
         
         let disabledStr = canEditOutage() ? '' : 'disabled';
         let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>` : '';
@@ -2682,7 +2739,8 @@
                   ${statusBadge}
                   <h6 class="fw-bold mb-1 text-dark" style="font-size: 1.1rem;">${escHtml(o.projectName)}</h6>
                   <div class="text-muted small mb-2"><i class="fa-regular fa-calendar-days text-primary"></i> ${dateHtml}</div>
-                  ${o.remark ? `<div class="alert alert-danger py-1 px-2 small mb-2 border-0"><i class="fa-solid fa-circle-exclamation"></i> <b>หมายเหตุ:</b> ${escHtml(o.remark)}</div>` : ''}
+                  ${detailsHtml}
+                  ${remarkHtml}
                 </div>
                 <div>${editBtn}</div>
               </div>
@@ -2802,7 +2860,7 @@
           : '<p class="text-muted">ยังไม่มีกำหนดวัน</p>';
         Swal.fire({
           title: o.projectName,
-          html: `<div class="text-start small">${dateText}${o.remark ? '<p><b>หมายเหตุ:</b> ' + escHtml(o.remark) + '</p>' : ''}${o.fromSheet ? '<p class="text-info mb-0"><i class="fa-solid fa-file-excel"></i> ข้อมูลจากชีทกำหนดการ</p>' : ''}</div>`,
+          html: `<div class="text-start small">${dateText}${renderOutageSheetDetailsHtml_(o, { title: false })}${!o.fromSheet && o.remark ? '<p><b>หมายเหตุ:</b> ' + escHtml(o.remark) + '</p>' : ''}${o.fromSheet ? '<p class="text-info mb-0"><i class="fa-solid fa-file-excel"></i> ข้อมูลจากชีทกำหนดการ</p>' : ''}</div>`,
           confirmButtonColor: '#2563eb',
           confirmButtonText: 'ปิด'
         });
