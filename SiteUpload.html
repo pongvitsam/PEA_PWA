@@ -48,6 +48,9 @@
       var siteKey = <?!= JSON.stringify(siteKey || '') ?>;
       var folderName = <?!= JSON.stringify(folderName || '') ?>;
       var token = <?!= JSON.stringify(token || '') ?>;
+      var inspectionId = <?!= JSON.stringify(inspectionId || '') ?>;
+      var uploadMode = <?!= JSON.stringify(uploadMode || 'site') ?>;
+      var isInspection = uploadMode === 'inspection';
 
       var meta = document.getElementById('metaBox');
       var statusEl = document.getElementById('status');
@@ -117,13 +120,13 @@
         closeSelf();
       });
 
-      if (!siteKey || !folderName || !token) {
+      if ((!siteKey && !inspectionId) || !folderName || !token) {
         meta.textContent = 'ข้อมูลไม่ครบ — ปิดแล้วเปิดใหม่จากหน้าหลัก';
         btn.disabled = true;
         btnClose.style.display = 'block';
         return;
       }
-      meta.innerHTML = '<b>โฟลเดอร์:</b> ' + escapeHtml(folderName);
+      meta.innerHTML = '<b>พื้นที่:</b> ' + escapeHtml(folderName) + (isInspection ? '<br><span class="hint">บันทึกใน Google Drive แยกตามชื่อสถานที่</span>' : '');
 
       fileInput.addEventListener('change', function () {
         var file = fileInput.files && fileInput.files[0];
@@ -173,6 +176,11 @@
             mimeType: file.type || 'application/pdf',
             originalName: file.name
           };
+          if (isInspection) {
+            formData.inspectionId = inspectionId;
+            formData.place = folderName;
+          }
+          var saveFn = isInspection ? 'saveInspectionFileComment' : 'saveSiteDoc';
           google.script.run
             .withSuccessHandler(function (res) {
               notifyParent(true, { result: res });
@@ -188,8 +196,7 @@
               var msg = (err && err.message) ? err.message : String(err);
               notifyParent(false, { error: msg });
               showDoneUi(false, msg);
-            })
-            .saveSiteDoc(formData, token);
+            })[saveFn](formData, token);
         };
         reader.onerror = function () {
           btn.disabled = false;

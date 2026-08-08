@@ -3765,6 +3765,7 @@
             }).getInspectionPlans();
           }
           filterInspections();
+          renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
           Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
         }).catch(function(err) {
           Swal.close();
@@ -3807,6 +3808,7 @@
           const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(plan.id); });
           if (idx > -1 && res && res.fileComment) inspectionData[idx].fileComment = res.fileComment;
           filterInspections();
+          renderInspectionFileCommentListInModal_(inspectionData[idx] || plan);
           Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
         }).withFailureHandler(function(err) {
           Swal.close();
@@ -4036,7 +4038,11 @@
         handoverRound: document.getElementById('insp_handoverRound').value.trim(),
         inspectSchedule: document.getElementById('insp_inspectSchedule').value.trim(),
         inspectors: document.getElementById('insp_inspectors').value.trim(),
-        fileComment: document.getElementById('insp_fileComment').value.trim(),
+        fileComment: (function() {
+          const id = document.getElementById('insp_id').value;
+          const ex = id ? inspectionData.find(function(x) { return String(x.id) === String(id); }) : null;
+          return mergeInspectionFileCommentNotes_(ex ? ex.fileComment : '', document.getElementById('insp_fileComment').value.trim());
+        })(),
         committee: document.getElementById('insp_committee').value.trim(),
         inspectLetterDate: document.getElementById('insp_inspectLetterDate').value.trim(),
         passLetterStatus: document.getElementById('insp_passLetterStatus').value.trim(),

@@ -10,6 +10,9 @@ const INSPECTION_SHEET = 'InspectionPlan';
 const INSPECTION_SOURCE_SS_ID = '18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc';
 const INSPECTION_SOURCE_TITLE = 'แผนการเข้าตรวจรับงานเฟส3-4';
 const INSPECTION_SOURCE_URL = 'https://docs.google.com/spreadsheets/d/' + INSPECTION_SOURCE_SS_ID + '/edit';
+/** โฟลเดอร์ File comment แผนตรวจรับ — แยกโฟลเดอร์ย่อยตามชื่อสถานที่ */
+const INSPECTION_FILE_FOLDER_ID = '14miqnUw4Vyq0X9xuLOUHZN_1FQWp_VsU';
+const INSPECTION_FILE_FOLDER_URL = 'https://drive.google.com/drive/folders/' + INSPECTION_FILE_FOLDER_ID;
 const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1_SRxF0_obGuzFCo9NDcA3QPiZDn7or-P';
@@ -34,11 +37,13 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.api === '1') {
     return handleApiGet_(e.parameter);
   }
-  if (e && e.parameter && e.parameter.page === 'siteUpload') {
+  if (e && e.parameter && (e.parameter.page === 'siteUpload' || e.parameter.page === 'inspectionUpload')) {
     const t = HtmlService.createTemplateFromFile('SiteUpload');
-    t.siteKey = (e.parameter.siteKey || '').toString();
-    t.folderName = (e.parameter.folder || '').toString();
+    t.siteKey = (e.parameter.siteKey || e.parameter.inspectionId || '').toString();
+    t.folderName = (e.parameter.folder || e.parameter.place || '').toString();
     t.token = (e.parameter.token || '').toString();
+    t.inspectionId = (e.parameter.inspectionId || '').toString();
+    t.uploadMode = e.parameter.page === 'inspectionUpload' ? 'inspection' : 'site';
     return t.evaluate()
       .setTitle('อัปโหลด PDF')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
@@ -146,6 +151,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'getInspectionPlans': return getInspectionPlans();
     case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
+    case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
     case 'deleteInspectionPlan': return deleteInspectionPlan(args[0], args[1] || tok);
     case 'updateLocation': return updateLocation(args[0], args[1] || tok);
     case 'getUsers': return getUsers(args[0] || tok);
@@ -1788,6 +1794,120 @@ function deleteInspectionPlan(id, sessionToken) {
     }
   }
   throw new Error('ไม่พบรายการที่ต้องการลบ');
+}
+
+function sanitizeDriveFolderName_(name) {
+  return String(name || '')
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 120) || 'ทั่วไป';
+}
+
+function buildInspectionFileFolderName_(plan) {
+  const place = ((plan && plan.place) || 'ไม่ระบุสถานที่').toString().trim();
+  const reg = ((plan && plan.region) || '').toString().trim().toUpperCase();
+  const base = reg ? (reg + ' - ' + place) : place;
+  return sanitizeDriveFolderName_(base);
+}
+
+function createInspectionCommentFile_(opts) {
+  let finalUrl = '';
+  try {
+    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    const targetFolder = getOrCreateDriveSubFolder_(parent, opts.folderName);
+    const decodedFile = Utilities.base64Decode(opts.fileBase64);
+    const driveName = opts.fileName.toLowerCase().endsWith('.pdf') ? opts.fileName : (opts.fileName + '.pdf');
+    const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
+    const file = targetFolder.createFile(blob);
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {}
+    finalUrl = file.getUrl();
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/Access denied|permission|ไม่มีสิทธิ์|Authorization/i.test(msg)) {
+      throw new Error('อัปโหลดไม่สำเร็จ: แชร์โฟลเดอร์ Drive ให้บัญชี Apps Script เป็น Editor — ' + INSPECTION_FILE_FOLDER_URL);
+    }
+    throw new Error('อัปโหลดไฟล์ไม่สำเร็จ: ' + msg);
+  }
+  return { success: true, url: finalUrl, fileName: opts.fileName, folderName: opts.folderName };
+}
+
+function appendInspectionFileComment_(inspectionId, fileName, url) {
+  const ss = getSpreadsheet_();
+  const sheet = ensureInspectionSheet_(ss);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0].toString() !== inspectionId.toString()) continue;
+    const row = mapInspectionRow_(data[i]);
+    const entry = fileName + '|' + url;
+    const nextComment = row.fileComment ? (row.fileComment + '\n' + entry) : entry;
+    const fields = inspectionFormToFields_({
+      id: inspectionId,
+      seq: row.seq,
+      phase: row.phase,
+      place: row.place,
+      pwaBranch: row.pwaBranch,
+      pwaDistrict: row.pwaDistrict,
+      peaZone: row.peaZone,
+      peaOffice: row.peaOffice,
+      handoverPlan: row.handoverPlan,
+      handoverRound: row.handoverRound,
+      inspectSchedule: row.inspectSchedule,
+      inspectors: row.inspectors,
+      fileComment: nextComment,
+      committee: row.committee,
+      inspectLetterDate: row.inspectLetterDate,
+      passLetterStatus: row.passLetterStatus,
+      visited: row.visited,
+      tcCoordinator: row.tcCoordinator,
+      tcContact: row.tcContact,
+      region: row.region
+    });
+    sheet.getRange(i + 1, 1, i + 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
+    if (isSyncedInspectionId_(inspectionId)) {
+      try {
+        writeInspectionBackToSource_(inspectionId, fields);
+        CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
+      } catch (e) {
+        logAction('อัปโหลด File comment แล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
+      }
+    }
+    return nextComment;
+  }
+  throw new Error('ไม่พบรายการตรวจรับ');
+}
+
+function saveInspectionFileComment(formObj, sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  const inspectionId = (formObj && formObj.inspectionId != null ? formObj.inspectionId : '').toString().trim();
+  const fileName = (formObj && formObj.fileName != null ? formObj.fileName : '').toString().trim();
+  let folderName = sanitizeDriveFolderName_((formObj && formObj.folderName != null ? formObj.folderName : '').toString().trim());
+  if (!folderName && formObj && formObj.place) folderName = buildInspectionFileFolderName_({ place: formObj.place, region: formObj.region });
+  if (!inspectionId) throw new Error('ไม่พบรหัสรายการ');
+  if (!folderName) throw new Error('ไม่พบชื่อพื้นที่');
+  if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
+  if (!formObj.fileBase64) throw new Error('กรุณาเลือกไฟล์ PDF');
+  const mime = (formObj.mimeType || '').toString().toLowerCase();
+  if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf') {
+    throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
+  }
+  const uploaded = createInspectionCommentFile_({
+    folderName: folderName,
+    fileName: fileName,
+    fileBase64: formObj.fileBase64
+  });
+  const fileComment = appendInspectionFileComment_(inspectionId, fileName, uploaded.url);
+  logAction('อัปโหลด File comment: ' + folderName + ' / ' + fileName);
+  return {
+    success: true,
+    message: 'อัปโหลดไฟล์สำเร็จ',
+    url: uploaded.url,
+    fileName: fileName,
+    folderName: folderName,
+    fileComment: fileComment
+  };
 }
 
 function forceAuth() {
