@@ -173,6 +173,15 @@
       background: linear-gradient(180deg, #ca8a04, #eab308); color: #1e293b;
       border-color: #ca8a04 !important; font-weight: 700;
     }
+    .inspection-sheet-table thead tr.inspection-filter-row th {
+      background: #f1f5f9; color: #334155; padding: 0.2rem 0.25rem;
+      position: sticky; top: 2.6rem; z-index: 2; font-weight: 400; vertical-align: middle;
+    }
+    .inspection-sheet-table thead tr.inspection-filter-row th.insp-edit-cell { background: #fef9c3; color: #334155; }
+    .inspection-sheet-table .insp-col-filter {
+      font-size: 0.64rem; min-width: 64px; padding: 0.12rem 0.25rem; border-color: #cbd5e1;
+    }
+    .inspection-sheet-table thead th .insp-filter-active { color: #fbbf24; margin-left: 2px; font-size: 0.55rem; }
     .inspection-sheet-table tbody td.insp-edit-cell { background: #fffbeb; min-width: 150px; white-space: normal; }
     .inspection-sheet-table .insp-edit-cell input {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff;
@@ -999,6 +1008,7 @@
     let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
     let inspectionData = [], filteredInspectionData = [];
     let inspectionActiveRegion = '';
+    let inspectionColumnFilters = {};
     let routeMap, routeMarkersLayer, routeLineLayer;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
@@ -3465,6 +3475,77 @@
       return (document.getElementById('inspectionRegionSelect')?.value || '').toUpperCase();
     }
 
+    function inspectionCellFilterValue_(p, col) {
+      if (col.type === 'visited') return p.visited ? 'yes' : 'no';
+      if (col.type === 'region') return (p.region || 'NC').toUpperCase();
+      if (col.type === 'phase') return String(p.phase || '').trim();
+      return String(p[col.key] || '').trim();
+    }
+
+    function getInspectionUniqueValues_(key, col) {
+      const set = new Set();
+      (inspectionData || []).forEach(function(p) {
+        const c = INSPECTION_TABLE_COLUMNS_.find(function(x) { return x.key === key; }) || col;
+        const v = inspectionCellFilterValue_(p, c);
+        if (v) set.add(v);
+      });
+      return [...set].sort(function(a, b) { return a.localeCompare(b, 'th'); });
+    }
+
+    function renderInspectionColumnFilter_(col) {
+      const key = col.key;
+      const cur = inspectionColumnFilters[key] || '';
+      if (col.type === 'visited') {
+        return '<select class="form-select form-select-sm insp-col-filter" data-col="' + key + '" onchange="onInspectionColumnFilterChange(this)">' +
+          '<option value="">ทั้งหมด</option>' +
+          '<option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>ไปแล้ว</option>' +
+          '<option value="no"' + (cur === 'no' ? ' selected' : '') + '>ยังไม่ไป</option></select>';
+      }
+      const selectKeys = ['region', 'phase', 'pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'];
+      if (selectKeys.indexOf(key) >= 0) {
+        const vals = getInspectionUniqueValues_(key, col);
+        if (vals.length && vals.length <= 60) {
+          let opts = '<option value="">ทั้งหมด</option>';
+          vals.forEach(function(v) {
+            opts += '<option value="' + escHtml(v) + '"' + (cur === v ? ' selected' : '') + '>' + escHtml(v) + '</option>';
+          });
+          return '<select class="form-select form-select-sm insp-col-filter" data-col="' + key + '" onchange="onInspectionColumnFilterChange(this)">' + opts + '</select>';
+        }
+      }
+      return '<input type="text" class="form-control form-control-sm insp-col-filter" data-col="' + key + '" value="' + escHtml(cur) + '" placeholder="กรอง..." oninput="onInspectionColumnFilterChange(this)">';
+    }
+
+    function onInspectionColumnFilterChange(el) {
+      if (!el) return;
+      const key = el.getAttribute('data-col');
+      if (!key) return;
+      const val = el.value.trim();
+      if (val) inspectionColumnFilters[key] = val;
+      else delete inspectionColumnFilters[key];
+      filterInspections();
+    }
+
+    function clearInspectionColumnFilters() {
+      inspectionColumnFilters = {};
+      filterInspections();
+    }
+
+    function matchesInspectionColumnFilters_(p) {
+      for (let i = 0; i < INSPECTION_TABLE_COLUMNS_.length; i++) {
+        const col = INSPECTION_TABLE_COLUMNS_[i];
+        const f = (inspectionColumnFilters[col.key] || '').trim();
+        if (!f) continue;
+        const raw = inspectionCellFilterValue_(p, col);
+        if (col.type === 'visited' || col.key === 'region' || col.key === 'phase' ||
+            ['pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
+          if (raw.toLowerCase() !== f.toLowerCase()) return false;
+        } else if (!raw.toLowerCase().includes(f.toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    }
+
     function inspectionPlanToForm_(p) {
       return {
         id: p.id,
@@ -3568,10 +3649,16 @@
       });
       let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
       INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
-        const thCls = col.editable ? ' class="insp-edit-cell"' : (col.cls ? ' class="' + col.cls + '"' : '');
-        html += '<th' + thCls + '>' + escHtml(col.label) + '</th>';
+        const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
+        const activeMark = inspectionColumnFilters[col.key] ? ' <i class="fa-solid fa-filter insp-filter-active"></i>' : '';
+        html += '<th class="' + thCls + '">' + escHtml(col.label) + activeMark + '</th>';
       });
-      html += '<th class="text-center" style="min-width:48px;"></th></tr></thead><tbody>';
+      html += '<th class="text-center" style="min-width:48px;"></th></tr><tr class="inspection-filter-row">';
+      INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
+        const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
+        html += '<th class="' + thCls + '">' + renderInspectionColumnFilter_(col) + '</th>';
+      });
+      html += '<th class="text-center"><button type="button" class="btn btn-link btn-sm p-0" style="color:#64748b;" onclick="clearInspectionColumnFilters()" title="ล้างตัวกรองคอลัมน์"><i class="fa-solid fa-filter-circle-xmark"></i></button></th></tr></thead><tbody>';
       let lastRegion = '';
       sorted.forEach(function(p) {
         const reg = (p.region || 'NC').toUpperCase();
@@ -3608,7 +3695,8 @@
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
         const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
         const matchRegion = !regionVal || (p.region || 'NC').toUpperCase() === regionVal;
-        return matchText && matchPhase && matchVisited && matchPwa && matchRegion;
+        const matchColumns = matchesInspectionColumnFilters_(p);
+        return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns;
       });
 
       renderInspectionList();
