@@ -37,13 +37,14 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.api === '1') {
     return handleApiGet_(e.parameter);
   }
-  if (e && e.parameter && (e.parameter.page === 'siteUpload' || e.parameter.page === 'inspectionUpload')) {
+  if (e && e.parameter && (e.parameter.page === 'siteUpload' || e.parameter.page === 'inspectionUpload' || e.parameter.page === 'inspectionFormUpload')) {
     const t = HtmlService.createTemplateFromFile('SiteUpload');
     t.siteKey = (e.parameter.siteKey || e.parameter.inspectionId || '').toString();
     t.folderName = (e.parameter.folder || e.parameter.place || '').toString();
     t.token = (e.parameter.token || '').toString();
     t.inspectionId = (e.parameter.inspectionId || '').toString();
-    t.uploadMode = e.parameter.page === 'inspectionUpload' ? 'inspection' : 'site';
+    if (e.parameter.page === 'inspectionFormUpload') t.uploadMode = 'inspectionForm';
+    else t.uploadMode = e.parameter.page === 'inspectionUpload' ? 'inspection' : 'site';
     return t.evaluate()
       .setTitle('อัปโหลด PDF')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
@@ -153,6 +154,9 @@ function dispatchApi_(action, args, sessionToken) {
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
     case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
+    case 'getInspectionFormTemplate': return getInspectionFormTemplate();
+    case 'uploadInspectionFormTemplate': return uploadInspectionFormTemplate(args[0], args[1] || tok);
+    case 'deleteInspectionFormTemplate': return deleteInspectionFormTemplate(args[0] || tok);
     case 'deleteInspectionPlan': return deleteInspectionPlan(args[0], args[1] || tok);
     case 'updateLocation': return updateLocation(args[0], args[1] || tok);
     case 'getUsers': return getUsers(args[0] || tok);
@@ -2026,6 +2030,127 @@ function deleteInspectionFileComment(formObj, sessionToken) {
   const fileComment = removeInspectionFileCommentEntry_(inspectionId, fileUrl);
   logAction('ลบ File comment: ' + inspectionId + (driveResult.deleted ? ' (+ Drive)' : ''));
   return { success: true, fileComment: fileComment, driveDeleted: !!driveResult.deleted };
+}
+
+const INSPECTION_FORM_TEMPLATE_PREFIX = '_แบบฟอร์มตรวจ';
+const INSPECTION_FORM_PROP_FILE_ID = 'inspectionFormTemplateFileId';
+const INSPECTION_FORM_PROP_FILE_NAME = 'inspectionFormTemplateFileName';
+const INSPECTION_FORM_PROP_UPDATED = 'inspectionFormTemplateUpdatedAt';
+
+function getInspectionFormTemplateProps_() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    fileId: props.getProperty(INSPECTION_FORM_PROP_FILE_ID) || '',
+    fileName: props.getProperty(INSPECTION_FORM_PROP_FILE_NAME) || '',
+    updatedAt: props.getProperty(INSPECTION_FORM_PROP_UPDATED) || ''
+  };
+}
+
+function setInspectionFormTemplateProps_(fileId, fileName) {
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(INSPECTION_FORM_PROP_FILE_ID, fileId);
+  props.setProperty(INSPECTION_FORM_PROP_FILE_NAME, fileName);
+  props.setProperty(INSPECTION_FORM_PROP_UPDATED, new Date().toISOString());
+}
+
+function clearInspectionFormTemplateProps_() {
+  const props = PropertiesService.getScriptProperties();
+  props.deleteProperty(INSPECTION_FORM_PROP_FILE_ID);
+  props.deleteProperty(INSPECTION_FORM_PROP_FILE_NAME);
+  props.deleteProperty(INSPECTION_FORM_PROP_UPDATED);
+}
+
+function findInspectionFormTemplateFile_() {
+  const meta = getInspectionFormTemplateProps_();
+  if (meta.fileId) {
+    try {
+      const file = DriveApp.getFileById(meta.fileId);
+      if (file && isInspectionDriveFile_(file)) {
+        return { file: file, fileName: meta.fileName || file.getName() };
+      }
+    } catch (e) {}
+  }
+  const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+  const files = parent.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    if (name.indexOf(INSPECTION_FORM_TEMPLATE_PREFIX) === 0) {
+      return { file: f, fileName: meta.fileName || name };
+    }
+  }
+  return null;
+}
+
+function removeInspectionFormTemplateFile_() {
+  const found = findInspectionFormTemplateFile_();
+  if (found && found.file) {
+    try {
+      found.file.setTrashed(true);
+    } catch (e) {}
+  }
+  clearInspectionFormTemplateProps_();
+}
+
+/** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ */
+function getInspectionFormTemplate() {
+  const found = findInspectionFormTemplateFile_();
+  if (!found) return { exists: false };
+  const meta = getInspectionFormTemplateProps_();
+  return {
+    exists: true,
+    url: found.file.getUrl(),
+    fileName: found.fileName || found.file.getName(),
+    updatedAt: meta.updatedAt || ''
+  };
+}
+
+/** อัปโหลด/แทนที่แบบฟอร์มตรวจ — แอดมินหลักเท่านั้น */
+function uploadInspectionFormTemplate(formObj, sessionToken) {
+  assertAdminFromSession_(sessionToken);
+  const fileName = (formObj && formObj.fileName != null ? formObj.fileName : '').toString().trim();
+  if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
+  if (!formObj.fileBase64) throw new Error('กรุณาเลือกไฟล์ PDF');
+  const mime = (formObj.mimeType || '').toString().toLowerCase();
+  if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf') {
+    throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
+  }
+  removeInspectionFormTemplateFile_();
+  let finalUrl = '';
+  try {
+    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    const decodedFile = Utilities.base64Decode(formObj.fileBase64);
+    const driveName = INSPECTION_FORM_TEMPLATE_PREFIX + '.pdf';
+    const blob = Utilities.newBlob(decodedFile, 'application/pdf', driveName);
+    const file = parent.createFile(blob);
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {}
+    finalUrl = file.getUrl();
+    setInspectionFormTemplateProps_(file.getId(), fileName);
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/Access denied|permission|ไม่มีสิทธิ์|Authorization/i.test(msg)) {
+      throw new Error('อัปโหลดไม่สำเร็จ: แชร์โฟลเดอร์ Drive ให้บัญชี Apps Script เป็น Editor — ' + INSPECTION_FILE_FOLDER_URL);
+    }
+    throw new Error('อัปโหลดแบบฟอร์มตรวจไม่สำเร็จ: ' + msg);
+  }
+  logAction('อัปโหลดแบบฟอร์มตรวจ: ' + fileName);
+  return {
+    success: true,
+    exists: true,
+    url: finalUrl,
+    fileName: fileName,
+    updatedAt: getInspectionFormTemplateProps_().updatedAt
+  };
+}
+
+/** ลบแบบฟอร์มตรวจ — แอดมินหลักเท่านั้น */
+function deleteInspectionFormTemplate(sessionToken) {
+  assertAdminFromSession_(sessionToken);
+  removeInspectionFormTemplateFile_();
+  logAction('ลบแบบฟอร์มตรวจ');
+  return { success: true, exists: false };
 }
 
 function saveInspectionFileComment(formObj, sessionToken) {

@@ -148,6 +148,28 @@
       background: #fff; border-radius: 20px; padding: 1.25rem;
       box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
     }
+    .inspection-form-template-banner {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
+      padding: 0.85rem 1rem; border-radius: 14px;
+      background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 45%, #fef3c7 100%);
+      border: 2px solid #fb923c; box-shadow: 0 4px 16px rgba(249, 115, 22, 0.15);
+    }
+    .inspection-form-template-banner .insp-form-icon {
+      width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #ea580c, #f97316); color: #fff;
+      font-size: 1.35rem; box-shadow: 0 4px 12px rgba(234, 88, 12, 0.35);
+    }
+    .inspection-form-template-banner .insp-form-title { font-weight: 700; color: #9a3412; margin: 0; }
+    .inspection-form-template-banner .insp-form-meta { font-size: 0.78rem; color: #78716c; }
+    .inspection-form-template-banner.empty {
+      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+      border-color: #cbd5e1; box-shadow: none;
+    }
+    .inspection-form-template-banner.empty .insp-form-icon {
+      background: linear-gradient(135deg, #64748b, #94a3b8); box-shadow: none;
+    }
+    .inspection-form-template-banner.empty .insp-form-title { color: #475569; }
     .inspection-card-meta { font-size: 0.82rem; color: #475569; line-height: 1.5; }
     .inspection-card-meta .meta-label { color: #64748b; font-weight: 600; min-width: 7.5rem; display: inline-block; }
     .inspection-detail-block {
@@ -290,6 +312,12 @@
     .map-insp-files-wrap .map-insp-files-title { font-size: 0.8rem; font-weight: 700; color: #9a3412; margin-bottom: 6px; }
     .map-insp-files-wrap .map-insp-files-list { display: flex; flex-wrap: wrap; gap: 4px; }
     .inspection-sheet-table .insp-inline-date { cursor: pointer; min-width: 130px; }
+    .inspection-sheet-table .insp-inline.has-value,
+    .inspection-sheet-table .insp-edit-cell input.insp-inline.has-value,
+    .inspection-sheet-table textarea.insp-inline.has-value {
+      background: #ecfdf5 !important;
+      border-color: #86efac !important;
+    }
     .site-docs-folder { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid var(--pwa-border); border-radius: 10px; }
     .site-docs-folder-title { font-size: 0.8rem; font-weight: 700; color: #334155; margin-bottom: 6px; }
     .site-docs-folder-title i { color: #38bdf8; margin-right: 4px; }
@@ -689,6 +717,14 @@
           </div>
           <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
         </div>
+        <div id="inspectionFormTemplateBanner" class="inspection-form-template-banner empty mb-3" style="display:none;">
+          <div class="insp-form-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+          <div class="flex-grow-1">
+            <p class="insp-form-title mb-0"><i class="fa-solid fa-file-pdf text-danger me-1"></i> แบบฟอร์มตรวจรับงาน</p>
+            <div class="insp-form-meta" id="inspFormTemplateMeta">กำลังโหลด...</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 align-items-center" id="inspFormTemplateActions"></div>
+        </div>
         <div class="row g-2 mb-3">
           <div class="col-md-4">
             <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspections()">
@@ -726,6 +762,7 @@
         </div>
         <div id="inspectionListContainer"></div>
         <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
+        <input type="file" id="inspectionFormTemplateInput" accept="application/pdf,.pdf" style="display:none">
       </div>
     </div>
   
@@ -1707,7 +1744,157 @@
   renderTable();
   if (typeof renderOutageList === 'function' && filteredOutageData) renderOutageList();
   if (typeof renderInspectionList === 'function' && filteredInspectionData) renderInspectionList();
+  if (typeof renderInspectionFormTemplateBanner === 'function') renderInspectionFormTemplateBanner();
 }
+
+    let inspectionFormTemplateMeta = { exists: false };
+
+    function formatInspectionFormUpdatedAt_(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+      } catch (e) { return ''; }
+    }
+
+    function renderInspectionFormTemplateBanner() {
+      const banner = document.getElementById('inspectionFormTemplateBanner');
+      const metaEl = document.getElementById('inspFormTemplateMeta');
+      const actionsEl = document.getElementById('inspFormTemplateActions');
+      if (!banner || !metaEl || !actionsEl) return;
+      banner.style.display = 'flex';
+      const meta = inspectionFormTemplateMeta || { exists: false };
+      const isAdmin = canEditAll();
+      if (meta.exists && meta.url) {
+        banner.classList.remove('empty');
+        const updated = formatInspectionFormUpdatedAt_(meta.updatedAt);
+        metaEl.innerHTML = escHtml(meta.fileName || 'แบบฟอร์มตรวจ.pdf')
+          + (updated ? ' · อัปเดต ' + escHtml(updated) : '');
+        let html = '<a href="' + escHtml(meta.url) + '" target="_blank" rel="noopener" class="btn btn-danger btn-sm fw-bold shadow-sm"><i class="fa-solid fa-download"></i> ดาวน์โหลด PDF</a>';
+        if (isAdmin) {
+          html += '<button type="button" class="btn btn-outline-warning btn-sm fw-bold" onclick="openInspectionFormTemplateUpload()"><i class="fa-solid fa-file-arrow-up"></i> แทนที่</button>';
+          html += '<button type="button" class="btn btn-outline-secondary btn-sm" onclick="deleteInspectionFormTemplateConfirm()"><i class="fa-solid fa-trash"></i> ลบ</button>';
+        }
+        actionsEl.innerHTML = html;
+      } else {
+        banner.classList.add('empty');
+        metaEl.textContent = isAdmin ? 'ยังไม่มีแบบฟอร์ม — อัปโหลด PDF ให้ทุกคนดาวน์โหลดได้' : 'ยังไม่มีแบบฟอร์มตรวจให้ดาวน์โหลด';
+        actionsEl.innerHTML = isAdmin
+          ? '<button type="button" class="btn btn-warning btn-sm fw-bold text-dark shadow-sm" onclick="openInspectionFormTemplateUpload()"><i class="fa-solid fa-upload"></i> อัปโหลดแบบฟอร์ม</button>'
+          : '';
+      }
+    }
+
+    function loadInspectionFormTemplate() {
+      google.script.run.withSuccessHandler(function(res) {
+        inspectionFormTemplateMeta = res || { exists: false };
+        renderInspectionFormTemplateBanner();
+      }).withFailureHandler(function() {
+        inspectionFormTemplateMeta = { exists: false };
+        renderInspectionFormTemplateBanner();
+      }).getInspectionFormTemplate();
+    }
+
+    function openInspectionFormTemplateUpload() {
+      if (!canEditAll()) return;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      const usePopup = !!window.pwaGasCall && !!window.GAS_API_URL;
+      if (usePopup) {
+        const url = window.GAS_API_URL
+          + '?page=inspectionFormUpload'
+          + '&token=' + encodeURIComponent(auth)
+          + '&_=' + Date.now();
+        const popup = window.open(url, 'peaInspectionFormUpload', 'width=460,height=520,menubar=no,toolbar=no,location=yes,status=no');
+        if (!popup) {
+          Swal.fire({ icon: 'warning', title: 'อนุญาตป๊อปอัป', text: 'เบราว์เซอร์บล็อกหน้าต่างอัปโหลด — อนุญาตป๊อปอัปแล้วลองใหม่' });
+          return;
+        }
+        Swal.fire({ title: 'เลือกไฟล์ในหน้าต่างที่เปิดขึ้น', allowOutsideClick: false, showConfirmButton: false, didOpen: function() { Swal.showLoading(); } });
+        waitSiteUploadPopup(popup).then(function(res) {
+          Swal.close();
+          if (res && res.result && res.result.exists) {
+            inspectionFormTemplateMeta = res.result;
+          } else {
+            loadInspectionFormTemplate();
+          }
+          renderInspectionFormTemplateBanner();
+          Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
+        }).catch(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
+        });
+        return;
+      }
+      const input = document.getElementById('inspectionFormTemplateInput');
+      if (!input) return;
+      input.onchange = function() { handleInspectionFormTemplateSelected_(input); };
+      input.click();
+    }
+
+    function handleInspectionFormTemplateSelected_(input) {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file || !canEditAll()) return;
+      const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+      if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Swal.fire({ title: 'กำลังอัปโหลดแบบฟอร์ม...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const payload = {
+          fileName: file.name,
+          fileBase64: String(e.target.result).split(',')[1],
+          mimeType: file.type || 'application/pdf'
+        };
+        google.script.run.withSuccessHandler(function(res) {
+          Swal.close();
+          inspectionFormTemplateMeta = res || { exists: true };
+          renderInspectionFormTemplateBanner();
+          Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
+        }).withFailureHandler(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+        }).uploadInspectionFormTemplate(payload, auth);
+      };
+      reader.onerror = function() { Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' }); };
+      reader.readAsDataURL(file);
+    }
+
+    function deleteInspectionFormTemplateConfirm() {
+      if (!canEditAll()) return;
+      Swal.fire({
+        title: 'ลบแบบฟอร์มตรวจ?',
+        text: 'ไฟล์จะถูกลบจาก Drive — ผู้ใช้จะดาวน์โหลดไม่ได้จนกว่าจะอัปโหลดใหม่',
+        icon: 'warning', showCancelButton: true,
+        confirmButtonText: 'ลบ', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#dc3545'
+      }).then(function(r) {
+        if (!r.isConfirmed) return;
+        let auth;
+        try { auth = gasAuthArgs(); } catch (e) {
+          Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+          return;
+        }
+        Swal.fire({ title: 'กำลังลบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+        google.script.run.withSuccessHandler(function() {
+          Swal.close();
+          inspectionFormTemplateMeta = { exists: false };
+          renderInspectionFormTemplateBanner();
+          Toast.fire({ icon: 'success', title: 'ลบแบบฟอร์มแล้ว' });
+        }).withFailureHandler(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+        }).deleteInspectionFormTemplate(auth);
+      });
+    }
 
     function showDrilldown(title, locData) {
       document.getElementById('drilldownTitle').innerText = title;
@@ -3068,7 +3255,7 @@
       const ro = document.getElementById('o_sheetDetailsReadonly');
       const panel = document.getElementById('o_sheetDetailsPanel');
       if (wrap) wrap.style.display = 'none';
-      if (ro) ro.innerHTML = '';
+      if (ro) { ro.innerHTML = ''; ro.style.display = ''; }
       if (panel) panel.innerHTML = '';
       updateOutageModalStepLabels_(false);
     }
@@ -3090,8 +3277,7 @@
       const ro = document.getElementById('o_sheetDetailsReadonly');
       if (!wrap || !o) return;
       wrap.style.display = 'block';
-      const viewHtml = renderOutageSheetDetailsHtml_(o);
-      if (ro) ro.innerHTML = viewHtml || '<div class="outage-sheet-details"><div class="text-muted small">ยังไม่มีรายละเอียดในชีท — กรอกด้านล่างแล้วบันทึก</div></div>';
+      if (ro) { ro.innerHTML = ''; ro.style.display = 'none'; }
       renderOutageSheetDetailsForm_(o.sheetDetails || {});
       updateOutageModalStepLabels_(true);
     }
@@ -3104,21 +3290,24 @@
       const panel = document.getElementById('o_sheetDetailsPanel');
       if (!panel) return;
       const sd = sheetDetails || {};
-      let html = '<div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;max-height:320px;overflow-y:auto;">';
-      html += '<h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-pen-to-square"></i> รายละเอียดชีท (แก้แล้วบันทึกกลับ Excel)</h6><div class="row g-2">';
+      let rows = '';
       OUTAGE_SHEET_DETAIL_LABELS_.forEach(function(pair) {
         if (pair[0] === 'remark') return;
         const val = sd[pair[0]] || '';
-        html += '<div class="col-md-6"><label class="form-label small text-muted mb-0">' + escHtml(pair[1]) + '</label>';
-        html += '<input type="text" class="form-control form-control-sm o-sd-field" data-sd-key="' + escHtml(pair[0]) + '" value="' + escHtml(String(val)) + '"></div>';
+        rows += '<tr><th scope="row">' + escHtml(pair[1]) + '</th><td>' +
+          '<input type="text" class="form-control form-control-sm o-sd-field" data-sd-key="' + escHtml(pair[0]) + '" value="' + escHtml(String(val)) + '"></td></tr>';
       });
       (sd._extras || []).forEach(function(ex, idx) {
         if (!ex || !ex.label) return;
-        html += '<div class="col-md-6"><label class="form-label small text-muted mb-0">' + escHtml(ex.label) + '</label>';
-        html += '<input type="text" class="form-control form-control-sm o-sd-extra" data-sd-extra-idx="' + idx + '" data-sd-extra-label="' + escHtml(ex.label) + '" value="' + escHtml(String(ex.value || '')) + '"></div>';
+        rows += '<tr><th scope="row">' + escHtml(ex.label) + '</th><td>' +
+          '<input type="text" class="form-control form-control-sm o-sd-extra" data-sd-extra-idx="' + idx + '" data-sd-extra-label="' + escHtml(ex.label) + '" value="' + escHtml(String(ex.value || '')) + '"></td></tr>';
       });
-      html += '</div></div>';
-      panel.innerHTML = html;
+      const hint = '<div class="small text-primary mb-2"><i class="fa-solid fa-pen-to-square"></i> แก้ไขได้ทุกช่อง — บันทึกแล้วจะเขียนกลับชีท Excel</div>';
+      panel.innerHTML = hint +
+        '<div class="table-responsive outage-sheet-details" style="max-height:360px;overflow-y:auto;">' +
+        '<table class="table table-sm table-bordered outage-sheet-table mb-0"><tbody>' +
+        (rows || '<tr><td colspan="2" class="text-muted small">ยังไม่มีข้อมูล — กรอกแล้วบันทึก</td></tr>') +
+        '</tbody></table></div>';
     }
 
     function readOutageSheetDetailsForm_() {
@@ -3296,7 +3485,7 @@
       document.getElementById('o_id').value = o.id;
       document.getElementById('o_project').value = o.projectName;
       document.getElementById('o_project').readOnly = false;
-      document.getElementById('o_remark').value = o.remark || '';
+      document.getElementById('o_remark').value = o.remark || (o.sheetDetails && o.sheetDetails.remark) || '';
       document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
       if (hasOutageDates(o)) {
         document.getElementById('o_start')._flatpickr.setDate(normalizeGregorianDate_(o.start));
@@ -3306,6 +3495,7 @@
         document.getElementById('o_end')._flatpickr.clear();
       }
       onOutageProjectChange();
+      if (fromSheet) document.getElementById('o_locationPanel').style.display = 'none';
       document.getElementById('btnDelOutage').style.display = fromSheet ? 'none' : 'block';
       if (fromSheet) showOutageSheetDetailsInModal_(o);
       else hideOutageSheetDetailsInModal_();
@@ -3526,6 +3716,7 @@
     }
 
     function initInspectionSystem() {
+      loadInspectionFormTemplate();
       google.script.run.withSuccessHandler(res => {
         inspectionData = res || [];
         setupInspectionPwaFilter();
@@ -3741,6 +3932,7 @@
         onMonthChange: adjustInspectionYearDisplay_,
         onChange: function(selectedDates, dateStr, instance) {
           if (selectedDates[0]) instance.input.value = formatInspectionPickerDisplay_(selectedDates[0]);
+          syncInspInlineFilledClass_(instance.input);
         },
         onClose: function(selectedDates, dateStr, instance) {
           const el = instance.input;
@@ -3752,6 +3944,7 @@
               if (formatted !== raw) el.value = formatted;
             }
           }
+          syncInspInlineFilledClass_(el);
           if (opts.autoSave !== false) {
             const newVal = el.value.trim();
             if (el.getAttribute('data-last-saved') !== newVal) {
@@ -3765,6 +3958,15 @@
       return cfg;
     }
 
+    function syncInspInlineFilledClass_(el) {
+      if (!el) return;
+      el.classList.toggle('has-value', String(el.value || '').trim().length > 0);
+    }
+
+    function initInspectionInlineFilledState_() {
+      document.querySelectorAll('.inspection-sheet-table .insp-inline').forEach(syncInspInlineFilledClass_);
+    }
+
     function initInspectionInlineDatePickers_() {
       if (typeof flatpickr === 'undefined') return;
       document.querySelectorAll('.insp-inline-date').forEach(function(el) {
@@ -3776,6 +3978,7 @@
           applyInspectionPickerDisplay_(el, parsed);
         }
         el.setAttribute('data-last-saved', el.value.trim());
+        syncInspInlineFilledClass_(el);
       });
     }
 
@@ -4176,15 +4379,18 @@
     }
 
     function inspectionInlineInput_(p, field, placeholder, multiline) {
+      const val = p[field] || '';
+      const filledCls = String(val).trim() ? ' has-value' : '';
       if (multiline) {
-        return '<textarea class="form-control form-control-sm insp-inline" rows="2" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" placeholder="' + escHtml(placeholder || '') + '" onchange="saveInspectionInline(this)">' + escHtml(p[field] || '') + '</textarea>';
+        return '<textarea class="form-control form-control-sm insp-inline' + filledCls + '" rows="2" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" placeholder="' + escHtml(placeholder || '') + '" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">' + escHtml(val) + '</textarea>';
       }
-      return '<input type="text" class="form-control form-control-sm insp-inline" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p[field] || '') + '" placeholder="' + escHtml(placeholder || '') + '" onchange="saveInspectionInline(this)">';
+      return '<input type="text" class="form-control form-control-sm insp-inline' + filledCls + '" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(val) + '" placeholder="' + escHtml(placeholder || '') + '" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">';
     }
 
     function inspectionInlineDateInput_(p, field, placeholder) {
       const display = formatInspectionHandoverDate_(p[field], false);
-      return '<input type="text" class="form-control form-control-sm insp-inline insp-inline-date" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" data-last-saved="' + escHtml(display) + '" value="' + escHtml(display) + '" placeholder="' + escHtml(placeholder || 'เช่น 15 มกราคม 2568') + '" autocomplete="off">';
+      const filledCls = String(display).trim() ? ' has-value' : '';
+      return '<input type="text" class="form-control form-control-sm insp-inline insp-inline-date' + filledCls + '" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" data-last-saved="' + escHtml(display) + '" value="' + escHtml(display) + '" placeholder="' + escHtml(placeholder || 'เช่น 15 มกราคม 2568') + '" autocomplete="off">';
     }
 
     function renderInspectionTableCell_(p, col) {
@@ -4309,6 +4515,7 @@
       html += '</tbody></table></div>';
       container.innerHTML = html;
       initInspectionInlineDatePickers_();
+      initInspectionInlineFilledState_();
       if (preserveUi && (preserveUi.scrollTop > 0 || preserveUi.windowScrollY > 0)) {
         restoreInspectionScroll_(preserveUi);
       }
