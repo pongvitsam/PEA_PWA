@@ -3117,7 +3117,6 @@
             ? `<div class="alert alert-danger py-1 px-2 small mb-2 border-0"><i class="fa-solid fa-circle-exclamation"></i> <b>หมายเหตุ:</b> ${escHtml(o.remark)}</div>`
             : '');
         
-        let disabledStr = canEditOutage() ? '' : 'disabled';
         let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>` : '';
         let locHint = findLocationForOutage(o.projectName) ? `<button class="btn btn-sm btn-outline-info rounded-pill mt-1" onclick="viewOutageLocation('${safeId}')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>` : '';
 
@@ -3134,61 +3133,11 @@
                 </div>
                 <div>${editBtn}</div>
               </div>
-              
-              <div class="bg-white rounded-3 p-3 mt-2 border" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="small fw-bold text-muted">1. Vendor ส่งหนังสือแจ้ง</span>
-                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c1_${safeId}" onchange="tglStatus('${safeId}','checkVendor',this.checked)" ${o.checkVendor ? 'checked':''} ${disabledStr}></div>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="small fw-bold text-muted">2. PEA ทำหนังสือแจ้ง กปภ.</span>
-                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c2_${safeId}" onchange="tglStatus('${safeId}','checkPEAPwa',this.checked)" ${o.checkPEAPwa ? 'checked':''} ${disabledStr}></div>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="small fw-bold text-muted">3. PEA ทำหนังสือแจ้ง กฟภ.หน้างาน</span>
-                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c3_${safeId}" onchange="tglStatus('${safeId}','checkPEASite',this.checked)" ${o.checkPEASite ? 'checked':''} ${disabledStr}></div>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="small fw-bold text-muted">4. PEA โทรยืนยันก่อน 1 วัน</span>
-                  <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="c4_${safeId}" onchange="tglStatus('${safeId}','checkPEAPhone',this.checked)" ${o.checkPEAPhone ? 'checked':''} ${disabledStr}></div>
-                </div>
-                <div class="d-flex justify-content-between align-items-center border-top pt-2 mt-2">
-                  <span class="small fw-bold ${o.checkDone ? 'text-success' : 'text-dark'}">5. ดำเนินการดับไฟเรียบร้อย</span>
-                  <div class="form-check form-switch m-0"><input class="form-check-input" style="transform: scale(1.2);" type="checkbox" id="c5_${safeId}" onchange="tglStatus('${safeId}','checkDone',this.checked)" ${o.checkDone ? 'checked':''} ${disabledStr}></div>
-                </div>
-              </div>
               ${fileBtn}
               ${locHint}
             </div>
           </div>`;
       });
-    }
-
-    const OUTAGE_STATUS_CHECKBOX = { checkVendor: 'c1_', checkPEAPwa: 'c2_', checkPEASite: 'c3_', checkPEAPhone: 'c4_', checkDone: 'c5_' };
-
-    function revertOutageCheckbox(id, field, isChecked) {
-      const cb = document.getElementById(OUTAGE_STATUS_CHECKBOX[field] + id);
-      if (cb) cb.checked = !isChecked;
-    }
-
-    function tglStatus(id, field, isChecked) {
-      if (!canEditOutage()) return;
-      let auth;
-      try { auth = gasAuthArgs(); } catch (e) {
-        revertOutageCheckbox(id, field, isChecked);
-        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
-        return;
-      }
-      Toast.fire({ icon: 'info', title: 'กำลังอัปเดต...' });
-      google.script.run.withSuccessHandler(() => {
-        let idx = outageData.findIndex(o => o.id == id); if(idx > -1) outageData[idx][field] = isChecked;
-        updateOutageStats(); refreshOutageCalendar(); renderOutageList();
-      }).withFailureHandler(err => {
-        revertOutageCheckbox(id, field, isChecked);
-        if (!handleOutageAuthError(err)) {
-          Swal.fire({ icon: 'error', title: 'อัปเดตไม่สำเร็จ', text: err.message });
-        }
-      }).updateOutageStatus(id, field, isChecked, auth);
     }
 
     function viewOutageLocation(id) {
