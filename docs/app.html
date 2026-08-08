@@ -204,8 +204,21 @@
     .inspection-sheet-table textarea.insp-inline {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff; min-width: 140px; resize: vertical;
     }
-    .inspection-sheet-table .insp-file-cell { min-width: 150px; white-space: normal; }
-    .inspection-sheet-table .insp-file-cell a { word-break: break-all; }
+    .inspection-sheet-table .insp-file-cell { min-width: 150px; white-space: normal; padding: 0.25rem; vertical-align: top; }
+    .inspection-sheet-table .insp-file-cell .insp-file-stack {
+      display: flex; flex-direction: column; gap: 0.25rem; width: 100%; min-height: 2.5rem;
+    }
+    .inspection-sheet-table .insp-file-cell .insp-file-link {
+      display: flex; align-items: center; gap: 0.35rem; width: 100%; box-sizing: border-box;
+      padding: 0.4rem 0.5rem; border-radius: 6px; background: #fef2f2; border: 1px solid #fecaca;
+      color: #991b1b; text-decoration: none; word-break: break-all; line-height: 1.3;
+    }
+    .inspection-sheet-table .insp-file-cell .insp-file-link:hover { background: #fee2e2; color: #7f1d1d; }
+    .inspection-sheet-table .insp-file-cell .insp-file-note {
+      display: block; width: 100%; box-sizing: border-box; padding: 0.35rem 0.5rem;
+      border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0;
+    }
+    .inspection-sheet-table .insp-file-cell .btn { width: 100%; }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
 .doc-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(37,99,235,0.03); transition: 0.2s; }
@@ -3669,23 +3682,23 @@
       const safeId = String(p.id).replace(/'/g, "\\'");
       const entries = parseInspectionFileCommentEntries_(p.fileComment);
       const hasPdf = entries.some(function(entry) { return !!entry.url; });
-      let html = '';
+      let inner = '';
       entries.forEach(function(entry) {
         if (entry.url) {
-          html += '<a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener" class="d-block small text-decoration-none"><i class="fa-solid fa-file-pdf text-danger"></i> ' + escHtml(entry.name) + '</a>';
+          inner += '<a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener" class="insp-file-link small"><i class="fa-solid fa-file-pdf text-danger"></i><span>' + escHtml(entry.name) + '</span></a>';
         } else if (entry.name) {
-          html += '<div class="small text-muted">' + escHtml(entry.name) + '</div>';
+          inner += '<div class="insp-file-note small text-muted">' + escHtml(entry.name) + '</div>';
         }
       });
       if (!hasPdf && canEditInspection()) {
-        html += '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2' + (html ? ' mt-1' : '') + '" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>';
+        inner += '<button type="button" class="btn btn-sm btn-outline-success py-1 px-2' + (inner ? ' mt-1' : '') + '" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>';
       }
-      if (!html) {
+      if (!inner) {
         return canEditInspection()
-          ? '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>'
+          ? '<div class="insp-file-stack"><button type="button" class="btn btn-sm btn-outline-success py-1 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button></div>'
           : '<span class="text-muted">-</span>';
       }
-      return html;
+      return '<div class="insp-file-stack">' + inner + '</div>';
     }
 
     function applyInspectionUploadSuccess_(planId, res) {
@@ -3829,7 +3842,7 @@
       if (!canEditInspection()) return;
       Swal.fire({
         title: 'ลบไฟล์นี้?',
-        text: 'จะลบการอ้างอิงไฟล์ออกจากรายการ (ไฟล์ใน Drive ยังอยู่)',
+        text: 'จะลบไฟล์จาก Google Drive และรายการตรวจรับ',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'ลบ',
