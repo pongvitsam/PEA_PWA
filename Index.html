@@ -142,6 +142,41 @@
       border: 1px solid #dbeafe; border-radius: 10px; padding: 0.75rem 0.9rem;
     }
     .inspection-phase-badge { font-size: 0.72rem; letter-spacing: 0.02em; }
+    .inspection-region-tabs .nav-link {
+      border-radius: 999px; font-weight: 600; color: #475569; padding: 0.45rem 1rem;
+      border: 1px solid #dbeafe; background: #fff;
+    }
+    .inspection-region-tabs .nav-link.active {
+      background: linear-gradient(135deg, #1e40af, #2563eb); color: #fff; border-color: transparent;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    }
+    .inspection-table-wrap {
+      overflow-x: auto; border-radius: 14px; border: 1px solid #cbd5e1;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    .inspection-sheet-table { font-size: 0.78rem; margin: 0; white-space: nowrap; }
+    .inspection-sheet-table thead th {
+      background: linear-gradient(180deg, #0f766e, #0d9488); color: #fff; font-weight: 600;
+      border-color: #0f766e !important; vertical-align: middle; padding: 0.55rem 0.5rem;
+    }
+    .inspection-sheet-table tbody td {
+      vertical-align: middle; padding: 0.45rem 0.5rem; border-color: #e2e8f0; max-width: 220px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .inspection-sheet-table tbody tr:nth-child(even) { background: #f0fdfa; }
+    .inspection-sheet-table tbody tr:hover { background: #ecfeff; }
+    .inspection-sheet-table .col-place { min-width: 200px; white-space: normal; font-weight: 600; color: #1e293b; }
+    .inspection-sheet-table .insp-edit-cell { background: #fffbeb; min-width: 150px; white-space: normal; }
+    .inspection-sheet-table .insp-edit-cell input {
+      font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff;
+    }
+    .inspection-sheet-table .phase-pill {
+      display: inline-block; min-width: 1.5rem; text-align: center; font-weight: 700;
+      border-radius: 6px; padding: 0.1rem 0.35rem; color: #fff;
+    }
+    .inspection-sheet-table .phase-pill.ph3, .inspection-sheet-table .phase-pill.ph4 { background: #dc2626; }
+    .inspection-sheet-table .phase-pill.ph2 { background: #2563eb; }
+    .inspection-sheet-table .phase-pill.ph1 { background: #16a34a; }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
 .doc-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(37,99,235,0.03); transition: 0.2s; }
@@ -577,9 +612,14 @@
       </div>
       <div class="inspection-list-panel">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-          <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน</h5>
+          <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small" id="inspectionRegionLabel">· NC</span></h5>
           <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
         </div>
+        <ul class="nav nav-pills inspection-region-tabs gap-2 mb-3 flex-wrap" id="inspectionRegionTabs">
+          <li class="nav-item"><button type="button" class="nav-link active" data-region="NC" onclick="setInspectionRegion('NC')"><span class="badge bg-danger me-1">NC</span> ภาคกลาง-เหนือ</button></li>
+          <li class="nav-item"><button type="button" class="nav-link" data-region="NE" onclick="setInspectionRegion('NE')"><span class="badge bg-success me-1">NE</span> ภาคอีสาน</button></li>
+          <li class="nav-item"><button type="button" class="nav-link" data-region="S" onclick="setInspectionRegion('S')"><span class="badge bg-warning text-dark me-1">S</span> ภาคใต้</button></li>
+        </ul>
         <div class="row g-2 mb-3">
           <div class="col-md-5">
             <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspections()">
@@ -939,6 +979,7 @@
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
     let inspectionData = [], filteredInspectionData = [];
+    let inspectionActiveRegion = 'NC';
     let routeMap, routeMarkersLayer, routeLineLayer;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
@@ -3379,58 +3420,115 @@
       set('statInspectionPending', pending);
     }
 
+    function setInspectionRegion(region) {
+      inspectionActiveRegion = region || 'NC';
+      document.querySelectorAll('#inspectionRegionTabs .nav-link').forEach(function(btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-region') === inspectionActiveRegion);
+      });
+      const lbl = document.getElementById('inspectionRegionLabel');
+      if (lbl) lbl.textContent = '· ' + inspectionActiveRegion;
+      filterInspections();
+    }
+
+    function inspectionPlanToForm_(p) {
+      return {
+        id: p.id,
+        seq: p.seq || '',
+        phase: p.phase || '',
+        place: p.place || '',
+        pwaBranch: p.pwaBranch || '',
+        pwaDistrict: p.pwaDistrict || '',
+        peaZone: p.peaZone || '',
+        peaOffice: p.peaOffice || '',
+        handoverPlan: p.handoverPlan || '',
+        handoverRound: p.handoverRound || '',
+        inspectSchedule: p.inspectSchedule || '',
+        inspectors: p.inspectors || '',
+        fileComment: p.fileComment || '',
+        committee: p.committee || '',
+        inspectLetterDate: p.inspectLetterDate || '',
+        passLetterStatus: p.passLetterStatus || '',
+        visited: !!p.visited,
+        tcCoordinator: p.tcCoordinator || '',
+        tcContact: p.tcContact || '',
+        region: p.region || inspectionActiveRegion || 'NC'
+      };
+    }
+
+    function saveInspectionInline(el) {
+      if (!canEditInspection() || !el) return;
+      const id = el.getAttribute('data-id');
+      const field = el.getAttribute('data-field');
+      const p = inspectionData.find(x => String(x.id) === String(id));
+      if (!p || !field) return;
+      const formData = inspectionPlanToForm_(p);
+      formData[field] = el.value.trim();
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Toast.fire({ icon: 'info', title: 'กำลังบันทึก...' });
+      google.script.run.withSuccessHandler(function() {
+        const idx = inspectionData.findIndex(x => String(x.id) === String(id));
+        if (idx > -1) inspectionData[idx][field] = formData[field];
+        filterInspections();
+        Toast.fire({ icon: 'success', title: 'บันทึกแล้ว' });
+      }).withFailureHandler(function(err) {
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err.message });
+      }).saveInspectionPlan(formData, auth);
+    }
+
     function renderInspectionList() {
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
       if (!filteredInspectionData.length) {
-        container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการตามตัวกรอง</p></div>';
+        container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการภาค ' + escHtml(inspectionActiveRegion) + ' ตามตัวกรอง</p></div>';
         return;
       }
-      const sorted = [...filteredInspectionData].sort((a, b) => {
+      const sorted = [...filteredInspectionData].sort(function(a, b) {
         const pa = parseInt(a.seq, 10), pb = parseInt(b.seq, 10);
         if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
         return (a.place || '').localeCompare(b.place || '', 'th');
       });
-      container.innerHTML = sorted.map(p => {
+      let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>' +
+        '<th>Phase</th><th>สถานที่</th><th>กปภ.สาขา</th><th>กปภ.เขต</th><th>กฟภ.</th><th>กฟจ./สำนักงาน</th>' +
+        '<th>แผนส่งมอบงาน</th><th>รอบส่งมอบจริง</th>' +
+        '<th class="insp-edit-cell">กำหนดตรวจงาน</th><th class="insp-edit-cell">รายชื่อคนเข้าตรวจ</th>' +
+        '<th>ไปแล้ว</th><th></th></tr></thead><tbody>';
+      sorted.forEach(function(p) {
         const safeId = String(p.id).replace(/'/g, "\\'");
-        const ph = String(p.phase || '-').trim();
-        const phaseCls = (ph === '3' || ph === '4') ? 'bg-danger' : (ph === '2' ? 'bg-primary' : 'bg-success');
-        const cardStyle = p.visited
-          ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;'
-          : 'border-left: 5px solid #60a5fa;';
-        const statusBadge = p.visited
-          ? '<span class="badge bg-success mb-2"><i class="fa-solid fa-check-circle"></i> ไปแล้ว</span>'
-          : '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-hourglass-half"></i> ยังไม่ไป</span>';
-        const sheetBadge = p.fromSheet ? ' <span class="badge bg-info text-dark mb-2"><i class="fa-solid fa-file-excel"></i> จากชีท</span>' : '';
+        const ph = String(p.phase || '').trim();
+        const phCls = ph === '3' || ph === '4' ? 'ph3' : (ph === '2' ? 'ph2' : (ph === '1' ? 'ph1' : ''));
+        const peaCell = [p.peaZone, p.peaOffice].filter(Boolean).join(' / ') || '-';
+        const scheduleCell = canEditInspection()
+          ? '<input type="text" class="form-control form-control-sm insp-inline" data-field="inspectSchedule" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p.inspectSchedule || '') + '" placeholder="วางแผนวันตรวจ..." onchange="saveInspectionInline(this)">'
+          : escHtml(p.inspectSchedule || '-');
+        const inspectorsCell = canEditInspection()
+          ? '<input type="text" class="form-control form-control-sm insp-inline" data-field="inspectors" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p.inspectors || '') + '" placeholder="ชื่อผู้เข้าตรวจ..." onchange="saveInspectionInline(this)">'
+          : escHtml(p.inspectors || '-');
+        const visitCell = canEditInspection()
+          ? '<div class="form-check form-switch m-0 d-flex justify-content-center"><input class="form-check-input" type="checkbox" onchange="toggleInspectionVisited(\'' + safeId + '\', this.checked)" ' + (p.visited ? 'checked' : '') + '></div>'
+          : (p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<span class="text-muted">-</span>');
         const editBtn = canEditInspection()
-          ? '<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width:32px;height:32px;" onclick="editInspection(\'' + safeId + '\')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>'
+          ? '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="editInspection(\'' + safeId + '\')" title="แก้ไขทั้งหมด"><i class="fa-solid fa-pen"></i></button>'
           : '';
-        const visitToggle = canEditInspection()
-          ? '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" onchange="toggleInspectionVisited(\'' + safeId + '\', this.checked)" ' + (p.visited ? 'checked' : '') + '></div>'
-          : (p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<i class="fa-regular fa-circle text-muted"></i>');
-        const scheduleHtml = p.inspectSchedule
-          ? '<div class="text-muted small mb-2"><i class="fa-regular fa-calendar-days text-primary"></i> กำหนดตรวจ: <b>' + escHtml(p.inspectSchedule) + '</b></div>'
-          : '';
-        const locHint = findLocationForOutage(p.place)
-          ? '<button class="btn btn-sm btn-outline-info rounded-pill mt-2" onclick="viewInspectionLocation(\'' + safeId + '\')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>'
-          : '';
-        return '<div class="card border-0 shadow-sm mb-3" style="border-radius:12px;' + cardStyle + ' transition:0.3s;" onmouseover="this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.transform=\'translateY(0)\'">' +
-          '<div class="card-body p-3">' +
-          '<div class="d-flex justify-content-between align-items-start">' +
-          '<div class="flex-grow-1 pe-2">' +
-          statusBadge + sheetBadge +
-          ' <span class="badge ' + phaseCls + ' inspection-phase-badge mb-2">เฟส ' + escHtml(ph) + '</span>' +
-          (p.seq ? ' <span class="badge bg-secondary inspection-phase-badge mb-2">#' + escHtml(p.seq) + '</span>' : '') +
-          '<h6 class="fw-bold mb-1 text-dark" style="font-size:1.05rem;">' + escHtml(p.place) + '</h6>' +
-          '<div class="small text-muted mb-1">' + escHtml(p.pwaBranch || '-') + ' · เขต ' + escHtml(p.pwaDistrict || '-') + '</div>' +
-          scheduleHtml +
-          renderInspectionDetailsHtml_(p) +
-          '</div><div>' + editBtn + '</div></div>' +
-          '<div class="d-flex justify-content-between align-items-center bg-white rounded-3 p-2 mt-2 border">' +
-          '<span class="small fw-bold text-muted">ไปตรวจแล้วหรือยัง?</span>' + visitToggle +
-          '</div>' + locHint +
-          '</div></div>';
-      }).join('');
+        html += '<tr' + (p.visited ? ' style="opacity:0.85"' : '') + '>' +
+          '<td><span class="phase-pill ' + phCls + '">' + escHtml(ph || '-') + '</span></td>' +
+          '<td class="col-place">' + escHtml(p.place || '-') + '</td>' +
+          '<td title="' + escHtml(p.pwaBranch || '') + '">' + escHtml(p.pwaBranch || '-') + '</td>' +
+          '<td>' + escHtml(p.pwaDistrict || '-') + '</td>' +
+          '<td>' + escHtml(p.peaZone || '-') + '</td>' +
+          '<td title="' + escHtml(p.peaOffice || '') + '">' + escHtml(p.peaOffice || '-') + '</td>' +
+          '<td>' + escHtml(p.handoverPlan || '-') + '</td>' +
+          '<td>' + escHtml(p.handoverRound || '-') + '</td>' +
+          '<td class="insp-edit-cell">' + scheduleCell + '</td>' +
+          '<td class="insp-edit-cell">' + inspectorsCell + '</td>' +
+          '<td class="text-center">' + visitCell + '</td>' +
+          '<td class="text-center">' + editBtn + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      container.innerHTML = html;
     }
 
     function filterInspections() {
@@ -3438,14 +3536,16 @@
       const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
       const pwaVal = document.getElementById('inspectionPwaSelect')?.value || '';
+      const regionVal = inspectionActiveRegion || 'NC';
 
-      filteredInspectionData = (inspectionData || []).filter(p => {
+      filteredInspectionData = (inspectionData || []).filter(function(p) {
         const blob = [p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.inspectors, p.tcCoordinator, p.tcContact, p.fileComment].join(' ').toLowerCase();
         const matchText = !textVal || blob.includes(textVal);
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
         const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
-        return matchText && matchPhase && matchVisited && matchPwa;
+        const matchRegion = (p.region || 'NC').toUpperCase() === regionVal;
+        return matchText && matchPhase && matchVisited && matchPwa && matchRegion;
       });
 
       renderInspectionList();
@@ -3494,7 +3594,12 @@
         passLetterStatus: document.getElementById('insp_passLetterStatus').value.trim(),
         visited: document.getElementById('insp_visited').checked,
         tcCoordinator: document.getElementById('insp_tcCoordinator').value.trim(),
-        tcContact: document.getElementById('insp_tcContact').value.trim()
+        tcContact: document.getElementById('insp_tcContact').value.trim(),
+        region: (function() {
+          const id = document.getElementById('insp_id').value;
+          const ex = id ? inspectionData.find(x => x.id == id) : null;
+          return (ex && ex.region) ? ex.region : (inspectionActiveRegion || 'NC');
+        })()
       };
     }
 

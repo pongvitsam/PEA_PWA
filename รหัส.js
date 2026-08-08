@@ -1356,7 +1356,7 @@ function deleteOutage(id, sessionToken) {
 const INSPECTION_HEADERS = [
   'ID', 'Seq', 'Phase', 'Place', 'PwaBranch', 'PwaDistrict', 'PeaZone', 'PeaOffice',
   'HandoverPlan', 'HandoverRound', 'InspectSchedule', 'Inspectors', 'FileComment',
-  'Committee', 'InspectLetterDate', 'PassLetterStatus', 'Visited', 'TcCoordinator', 'TcContact'
+  'Committee', 'InspectLetterDate', 'PassLetterStatus', 'Visited', 'TcCoordinator', 'TcContact', 'Region'
 ];
 
 const INSPECTION_SOURCE_COL_KEYS_ = [
@@ -1381,6 +1381,12 @@ function ensureInspectionSheet_(ss) {
     INSPECTION_HEADERS.forEach((name, i) => {
       if (headers[i] !== name) sheet.getRange(1, i + 1).setValue(name);
     });
+  }
+  if (headers.length < INSPECTION_HEADERS.length || headers[19] !== 'Region') {
+    if (sheet.getLastColumn() < INSPECTION_HEADERS.length) {
+      sheet.insertColumnsAfter(sheet.getLastColumn(), INSPECTION_HEADERS.length - sheet.getLastColumn());
+    }
+    sheet.getRange(1, 20).setValue('Region');
   }
   return sheet;
 }
@@ -1431,6 +1437,7 @@ function mapInspectionRow_(row) {
     visited: parseInspectionVisited_(row[16]),
     tcCoordinator: cellStr_(row[17]),
     tcContact: cellStr_(row[18]),
+    region: cellStr_(row[19]) || '',
     fromSheet: fromSheet,
     sourceTitle: fromSheet ? INSPECTION_SOURCE_TITLE : '',
     sourceUrl: fromSheet ? INSPECTION_SOURCE_URL : ''
@@ -1527,37 +1534,70 @@ function inspectionFieldsToLocalRow_(id, fields) {
     fields.passLetterStatus || '',
     !!fields.visited,
     fields.tcCoordinator || '',
-    fields.tcContact || ''
+    fields.tcContact || '',
+    (fields.region || '').toString().trim().toUpperCase()
   ];
+}
+
+function isInspectionRegionSheet_(name) {
+  const n = (name || '').toString().trim().toUpperCase();
+  return n === 'NC' || n === 'NE' || n === 'S';
+}
+
+function findInspectionSourceSheet_(srcSs, sheetId) {
+  const sheets = srcSs.getSheets();
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getSheetId() === sheetId) return sheets[i];
+  }
+  return null;
 }
 
 function collectSourceInspectionRows_() {
   const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
-  const srcSheet = srcSs.getSheets()[0];
-  const lastRow = srcSheet.getLastRow();
-  const lastCol = Math.max(srcSheet.getLastColumn(), 18);
-  if (lastRow < 2) return [];
-  const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
-  const map = findInspectionHeaderMap_(values);
-  const sheetId = srcSheet.getSheetId();
   const collected = [];
-  for (let r = map.headerRow + 1; r < values.length; r++) {
-    const row = values[r];
-    if (!isInspectionSourceDataRow_(row, map)) continue;
-    const fields = extractInspectionFieldsFromSourceRow_(row, map);
-    collected.push({
-      id: buildSyncedInspectionId_(sheetId, r + 1),
-      fields: fields,
-      sourceRow: r + 1
-    });
-  }
+  srcSs.getSheets().forEach(function(srcSheet) {
+    const sheetName = srcSheet.getName();
+    if (!isInspectionRegionSheet_(sheetName)) return;
+    const region = sheetName.trim().toUpperCase();
+    const lastRow = srcSheet.getLastRow();
+    const lastCol = Math.max(srcSheet.getLastColumn(), 18);
+    if (lastRow < 2) return;
+    const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const map = findInspectionHeaderMap_(values);
+    const sheetId = srcSheet.getSheetId();
+    for (let r = map.headerRow + 1; r < values.length; r++) {
+      const row = values[r];
+      if (!isInspectionSourceDataRow_(row, map)) continue;
+      const fields = extractInspectionFieldsFromSourceRow_(row, map);
+      fields.region = region;
+      collected.push({
+        id: buildSyncedInspectionId_(sheetId, r + 1),
+        fields: fields,
+        sourceRow: r + 1
+      });
+    }
+  });
   return collected;
 }
 
 function syncInspectionsFromSource_(destSheet) {
   const rows = collectSourceInspectionRows_();
+  const oldData = destSheet.getDataRange().getValues();
+  const oldById = {};
+  for (let i = 1; i < oldData.length; i++) {
+    const id = oldData[i][0];
+    if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
+  }
+  const preserveKeys = ['inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
   const newData = [INSPECTION_HEADERS];
   rows.forEach(function(item) {
+    const old = oldById[item.id];
+    if (old) {
+      preserveKeys.forEach(function(key) {
+        const v = old[key];
+        if (v === true || (v != null && v !== '')) item.fields[key] = v;
+      });
+    }
     newData.push(inspectionFieldsToLocalRow_(item.id, item.fields));
   });
   destSheet.clearContents();
@@ -1635,7 +1675,8 @@ function inspectionFormToFields_(formObj) {
     passLetterStatus: (formObj.passLetterStatus || '').toString().trim(),
     visited: !!formObj.visited,
     tcCoordinator: (formObj.tcCoordinator || '').toString().trim(),
-    tcContact: (formObj.tcContact || '').toString().trim()
+    tcContact: (formObj.tcContact || '').toString().trim(),
+    region: (formObj.region || '').toString().trim().toUpperCase()
   };
 }
 
@@ -1643,8 +1684,8 @@ function writeInspectionBackToSource_(id, fields) {
   const ref = parseSyncedInspectionRowRef_(id);
   if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
   const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
-  const srcSheet = srcSs.getSheets()[0];
-  if (srcSheet.getSheetId() !== ref.sheetId) throw new Error('ไม่พบแท็บชีทต้นทาง');
+  const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
+  if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
   const lastCol = Math.max(srcSheet.getLastColumn(), 18);
   const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 8));
   const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
