@@ -1444,6 +1444,26 @@
       let sortedData = [...currentDrilldownData].sort((a, b) => parseInt(a.phase) - parseInt(b.phase));
       let title = document.getElementById('drilldownTitle').innerText;
       let regionType = document.getElementById('dashRegionFilter') ? document.getElementById('dashRegionFilter').value : 'pwa';
+      let rLabel = regionType === 'pwa' ? 'กปภ.' : 'กฟภ.';
+
+      let phaseCount = { '1': 0, '2': 0, '3': 0, '4': 0 };
+      let regionCount = {};
+      let totalKwp = 0;
+      currentDrilldownData.forEach(loc => {
+        let ph = String(loc.phase || '').trim();
+        if (phaseCount[ph] !== undefined) phaseCount[ph]++;
+        let r = regionType === 'pwa' ? loc.pwaRegion : loc.peaRegion;
+        if (r) regionCount[r] = (regionCount[r] || 0) + 1;
+        let kwp = parseFloat(loc.kwp) || 0;
+        if (kwp > 0) totalKwp += kwp;
+      });
+
+      let phaseSummary = ['1', '2', '3', '4'].map(ph => 'เฟส ' + ph + ': ' + phaseCount[ph] + ' แห่ง').join(' | ');
+      let sortedRegions = Object.keys(regionCount).sort();
+      let regionSummary = sortedRegions.length
+        ? sortedRegions.map(r => rLabel + ' ' + r + ': ' + regionCount[r] + ' แห่ง').join(' | ')
+        : rLabel + ' — ไม่มีข้อมูล';
+      let kwpSummary = totalKwp.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
       let html = '<!DOCTYPE html><html><head><title>Export - ' + title + '</title>';
       html += '<style>';
@@ -1452,16 +1472,23 @@
       html += 'table { width: 100%; border-collapse: collapse; margin-top: 20px; }';
       html += 'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; }';
       html += 'th { background-color: #20c997; color: white; }';
-      html += 'tr:nth-child(even) { background-color: #f9f9f9; }';
+      html += 'tbody tr:nth-child(even) { background-color: #f9f9f9; }';
+      html += 'tfoot td { background-color: #f0f4f8; font-weight: 600; font-size: 13px; }';
+      html += 'tfoot tr:first-child td { background-color: #dee2e6; }';
       html += '</style></head><body>';
       html += '<h2>สรุปรายงาน: ' + title + ' (เรียงตามเฟส)</h2>';
-      html += '<table><tr><th>ลำดับ</th><th>เฟส</th><th>ชื่อสถานที่</th><th>กปภ. เขต</th><th>กฟภ. เขต</th><th>กำลังการผลิต (kWp)</th></tr>';
-      
+      html += '<table><thead><tr><th>ลำดับ</th><th>เฟส</th><th>ชื่อสถานที่</th><th>กปภ. เขต</th><th>กฟภ. เขต</th><th>กำลังการผลิต (kWp)</th></tr></thead><tbody>';
+
       sortedData.forEach((loc, idx) => {
         html += '<tr><td>' + (idx+1) + '</td><td>เฟส ' + (loc.phase||'-') + '</td><td>' + (loc.name||'-') + '</td><td>' + (loc.pwaRegion||'-') + '</td><td>' + (loc.peaRegion||'-') + '</td><td>' + (loc.kwp||'-') + '</td></tr>';
       });
-      
-      html += '</table></body></html>';
+
+      html += '</tbody><tfoot>';
+      html += '<tr><td colspan="6"><strong>สรุป</strong></td></tr>';
+      html += '<tr><td colspan="6">' + phaseSummary + '</td></tr>';
+      html += '<tr><td colspan="6">' + regionSummary + '</td></tr>';
+      html += '<tr><td colspan="6">กำลังการผลิตรวม (เฉพาะ kWp &gt; 0): ' + kwpSummary + ' kWp</td></tr>';
+      html += '</tfoot></table></body></html>';
 
       let printWindow = window.open('', '_blank');
       printWindow.document.write(html);
