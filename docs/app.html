@@ -3336,15 +3336,13 @@
       { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
       { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
       { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
-      { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', readOnly: true, type: 'thaiDate' },
+      { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 ม.ค. 2568' },
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, placeholder: 'วางแผนวันตรวจ...' },
       { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
       { key: 'fileComment', label: 'File comment', type: 'fileComment' },
       { key: 'committee', label: 'คณะกรรมการตรวจรับ', editable: true },
       { key: 'inspectLetterDate', label: 'วันตรวจงาน / หนังสือตรวจรับ', editable: true },
-      { key: 'visited', label: 'ไปแล้ว', type: 'visited' },
-      { key: 'tcCoordinator', label: 'ผู้ประสานงาน TC', editable: true },
-      { key: 'tcContact', label: 'เบอร์ติดต่อ TC', editable: true }
+      { key: 'visited', label: 'ไปแล้ว', type: 'visited' }
     ];
 
     function applyInspectionPack(pack, opts) {
