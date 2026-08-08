@@ -152,6 +152,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
+    case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
     case 'deleteInspectionPlan': return deleteInspectionPlan(args[0], args[1] || tok);
     case 'updateLocation': return updateLocation(args[0], args[1] || tok);
     case 'getUsers': return getUsers(args[0] || tok);
@@ -1755,7 +1756,7 @@ function saveInspectionPlan(formObj, sessionToken) {
     const data = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (data[i][0].toString() === formObj.id.toString()) {
-        sheet.getRange(i + 1, 1, i + 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(formObj.id, fields)]);
+        sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(formObj.id, fields)]);
         if (isSyncedInspectionId_(formObj.id)) {
           try {
             writeInspectionBackToSource_(formObj.id, fields);
@@ -1860,12 +1861,12 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
       committee: row.committee,
       inspectLetterDate: row.inspectLetterDate,
       passLetterStatus: row.passLetterStatus,
-      visited: row.visited,
+      visited: true,
       tcCoordinator: row.tcCoordinator,
       tcContact: row.tcContact,
       region: row.region
     });
-    sheet.getRange(i + 1, 1, i + 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
+    sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
     if (isSyncedInspectionId_(inspectionId)) {
       try {
         writeInspectionBackToSource_(inspectionId, fields);
@@ -1874,9 +1875,75 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
         logAction('อัปโหลด File comment แล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
       }
     }
+    return { fileComment: nextComment, visited: true };
+  }
+  throw new Error('ไม่พบรายการตรวจรับ');
+}
+
+function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
+  const targetUrl = (fileUrl || '').toString().trim();
+  if (!targetUrl) throw new Error('ไม่พบ URL ไฟล์');
+  const ss = getSpreadsheet_();
+  const sheet = ensureInspectionSheet_(ss);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0].toString() !== inspectionId.toString()) continue;
+    const row = mapInspectionRow_(data[i]);
+    const lines = String(row.fileComment || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean);
+    const nextLines = lines.filter(function(line) {
+      const idx = line.indexOf('|');
+      if (idx > 0 && /^https?:\/\//i.test(line.slice(idx + 1).trim())) {
+        return line.slice(idx + 1).trim() !== targetUrl;
+      }
+      if (/^https?:\/\//i.test(line)) return line !== targetUrl;
+      return true;
+    });
+    const nextComment = nextLines.join('\n');
+    const fields = inspectionFormToFields_({
+      id: inspectionId,
+      seq: row.seq,
+      phase: row.phase,
+      place: row.place,
+      pwaBranch: row.pwaBranch,
+      pwaDistrict: row.pwaDistrict,
+      peaZone: row.peaZone,
+      peaOffice: row.peaOffice,
+      handoverPlan: row.handoverPlan,
+      handoverRound: row.handoverRound,
+      inspectSchedule: row.inspectSchedule,
+      inspectors: row.inspectors,
+      fileComment: nextComment,
+      committee: row.committee,
+      inspectLetterDate: row.inspectLetterDate,
+      passLetterStatus: row.passLetterStatus,
+      visited: row.visited,
+      tcCoordinator: row.tcCoordinator,
+      tcContact: row.tcContact,
+      region: row.region
+    });
+    sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
+    if (isSyncedInspectionId_(inspectionId)) {
+      try {
+        writeInspectionBackToSource_(inspectionId, fields);
+        CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
+      } catch (e) {
+        logAction('ลบ File comment แล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
+      }
+    }
     return nextComment;
   }
   throw new Error('ไม่พบรายการตรวจรับ');
+}
+
+function deleteInspectionFileComment(formObj, sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  const inspectionId = (formObj && formObj.inspectionId != null ? formObj.inspectionId : '').toString().trim();
+  const fileUrl = (formObj && formObj.fileUrl != null ? formObj.fileUrl : '').toString().trim();
+  if (!inspectionId) throw new Error('ไม่พบรหัสรายการ');
+  if (!fileUrl) throw new Error('ไม่พบ URL ไฟล์');
+  const fileComment = removeInspectionFileCommentEntry_(inspectionId, fileUrl);
+  logAction('ลบ File comment: ' + inspectionId);
+  return { success: true, fileComment: fileComment };
 }
 
 function saveInspectionFileComment(formObj, sessionToken) {
@@ -1898,7 +1965,7 @@ function saveInspectionFileComment(formObj, sessionToken) {
     fileName: fileName,
     fileBase64: formObj.fileBase64
   });
-  const fileComment = appendInspectionFileComment_(inspectionId, fileName, uploaded.url);
+  const saved = appendInspectionFileComment_(inspectionId, fileName, uploaded.url);
   logAction('อัปโหลด File comment: ' + folderName + ' / ' + fileName);
   return {
     success: true,
@@ -1906,7 +1973,8 @@ function saveInspectionFileComment(formObj, sessionToken) {
     url: uploaded.url,
     fileName: fileName,
     folderName: folderName,
-    fileComment: fileComment
+    fileComment: saved.fileComment,
+    visited: saved.visited
   };
 }
 

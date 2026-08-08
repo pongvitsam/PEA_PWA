@@ -2878,18 +2878,20 @@
       const loc = findLocationForOutage(p && p.place);
       if (loc) {
         const index = allData.findIndex(function(d) { return d.row === loc.row; });
-        return {
-          loc: loc,
-          index: index,
-          name: (loc.name || p.place || '-').toString().trim(),
-          pwaText: (loc.pwaRegion || p.pwaBranch || '').toString().trim()
-        };
+      return {
+        loc: loc,
+        index: index,
+        name: (loc.name || p.place || '-').toString().trim(),
+        pwaText: (p.pwaDistrict || loc.pwaRegion || p.pwaBranch || '').toString().trim(),
+        peaZone: (p.peaZone || '').toString().trim()
+      };
       }
       return {
         loc: null,
         index: -1,
         name: (p && p.place ? p.place : '-').toString().trim(),
-        pwaText: (p && p.pwaBranch ? p.pwaBranch : '').toString().trim()
+        pwaText: (p && (p.pwaDistrict || p.pwaBranch) ? (p.pwaDistrict || p.pwaBranch) : '').toString().trim(),
+        peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim()
       };
     }
 
@@ -3353,7 +3355,6 @@
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'mapLocation', label: 'สถานที่', readOnly: true, cls: 'col-place', type: 'mapLocation' },
-      { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
       { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
       { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
       { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 ม.ค. 2568' },
@@ -3458,7 +3459,7 @@
       if (col.type === 'phase') return String(p.phase || '').trim();
       if (col.type === 'mapLocation') {
         const info = getInspectionMapLocation_(p);
-        return [info.name, info.pwaText].filter(Boolean).join(' ');
+        return [info.name, info.pwaText, info.peaZone].filter(Boolean).join(' ');
       }
       if (col.type === 'thaiDate') return formatInspectionHandoverDate_(p[col.key], false);
       return String(p[col.key] || '').trim();
@@ -3602,7 +3603,7 @@
           '<option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>ไปแล้ว</option>' +
           '<option value="no"' + (cur === 'no' ? ' selected' : '') + '>ยังไม่ไป</option></select>';
       }
-      const selectKeys = ['region', 'phase', 'mapLocation', 'peaZone', 'peaOffice'];
+      const selectKeys = ['region', 'phase', 'mapLocation', 'peaOffice'];
       if (selectKeys.indexOf(key) >= 0) {
         const vals = getInspectionUniqueValues_(key, col);
         if (vals.length && vals.length <= 60) {
@@ -3638,7 +3639,7 @@
         if (!f) continue;
         const raw = inspectionCellFilterValue_(p, col);
         if (col.type === 'visited' || col.type === 'mapLocation' || col.key === 'region' || col.key === 'phase' ||
-            ['peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
+            col.key === 'peaOffice') {
           if (raw.toLowerCase() !== f.toLowerCase()) return false;
         } else if (!raw.toLowerCase().includes(f.toLowerCase())) {
           return false;
@@ -3667,6 +3668,7 @@
     function renderInspectionFileCommentHtml_(p) {
       const safeId = String(p.id).replace(/'/g, "\\'");
       const entries = parseInspectionFileCommentEntries_(p.fileComment);
+      const hasPdf = entries.some(function(entry) { return !!entry.url; });
       let html = '';
       entries.forEach(function(entry) {
         if (entry.url) {
@@ -3675,12 +3677,27 @@
           html += '<div class="small text-muted">' + escHtml(entry.name) + '</div>';
         }
       });
-      if (canEditInspection()) {
-        html += '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2 mt-1" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด</button>';
+      if (!hasPdf && canEditInspection()) {
+        html += '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2' + (html ? ' mt-1' : '') + '" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>';
       }
-      return html || (canEditInspection()
-        ? '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>'
-        : '<span class="text-muted">-</span>');
+      if (!html) {
+        return canEditInspection()
+          ? '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>'
+          : '<span class="text-muted">-</span>';
+      }
+      return html;
+    }
+
+    function applyInspectionUploadSuccess_(planId, res) {
+      const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(planId); });
+      if (idx > -1) {
+        if (res && res.fileComment) inspectionData[idx].fileComment = res.fileComment;
+        inspectionData[idx].visited = true;
+      }
+      const inspIdEl = document.getElementById('insp_id');
+      const visitedEl = document.getElementById('insp_visited');
+      if (visitedEl && inspIdEl && String(inspIdEl.value) === String(planId)) visitedEl.checked = true;
+      filterInspections();
     }
 
     let inspectionUploadTargetId = null;
@@ -3729,17 +3746,15 @@
         waitSiteUploadPopup(popup).then(function(res) {
           Swal.close();
           if (res && res.result && res.result.fileComment) {
-            const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(plan.id); });
-            if (idx > -1) inspectionData[idx].fileComment = res.result.fileComment;
+            applyInspectionUploadSuccess_(plan.id, res.result);
           } else {
             google.script.run.withSuccessHandler(function(list) {
               inspectionData = list || inspectionData;
               filterInspections();
             }).getInspectionPlans();
           }
-          filterInspections();
           renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
-          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
+          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
         }).catch(function(err) {
           Swal.close();
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
@@ -3778,11 +3793,9 @@
         };
         google.script.run.withSuccessHandler(function(res) {
           Swal.close();
-          const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(plan.id); });
-          if (idx > -1 && res && res.fileComment) inspectionData[idx].fileComment = res.fileComment;
-          filterInspections();
-          renderInspectionFileCommentListInModal_(inspectionData[idx] || plan);
-          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
+          applyInspectionUploadSuccess_(plan.id, res);
+          renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
+          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
         }).withFailureHandler(function(err) {
           Swal.close();
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
@@ -3795,14 +3808,53 @@
     function renderInspectionFileCommentListInModal_(p) {
       const box = document.getElementById('insp_fileCommentList');
       if (!box) return;
+      p = p || {};
       const entries = parseInspectionFileCommentEntries_(p.fileComment);
+      const canEdit = canEditInspection();
+      const safeId = String(p.id || document.getElementById('insp_id').value || '').replace(/'/g, "\\'");
       if (!entries.length) { box.innerHTML = '<span class="text-muted">ยังไม่มีไฟล์</span>'; return; }
       box.innerHTML = entries.map(function(entry) {
         if (entry.url) {
-          return '<div><a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf text-danger"></i> ' + escHtml(entry.name) + '</a></div>';
+          const safeUrl = String(entry.url).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const delBtn = canEdit
+            ? ' <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" title="ลบไฟล์" onclick="deleteInspectionFileCommentEntry(\'' + safeId + '\', \'' + safeUrl + '\')"><i class="fa-solid fa-trash"></i></button>'
+            : '';
+          return '<div class="d-flex align-items-center flex-wrap gap-1 mb-1"><a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf text-danger"></i> ' + escHtml(entry.name) + '</a>' + delBtn + '</div>';
         }
-        return '<div class="text-muted">' + escHtml(entry.name) + '</div>';
+        return '<div class="text-muted mb-1">' + escHtml(entry.name) + '</div>';
       }).join('');
+    }
+
+    function deleteInspectionFileCommentEntry(inspectionId, fileUrl) {
+      if (!canEditInspection()) return;
+      Swal.fire({
+        title: 'ลบไฟล์นี้?',
+        text: 'จะลบการอ้างอิงไฟล์ออกจากรายการ (ไฟล์ใน Drive ยังอยู่)',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ลบ',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#dc3545'
+      }).then(function(result) {
+        if (!result.isConfirmed) return;
+        let auth;
+        try { auth = gasAuthArgs(); } catch (e) {
+          Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+          return;
+        }
+        Swal.fire({ title: 'กำลังลบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+        google.script.run.withSuccessHandler(function(res) {
+          Swal.close();
+          const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(inspectionId); });
+          if (idx > -1 && res && res.fileComment != null) inspectionData[idx].fileComment = res.fileComment;
+          filterInspections();
+          renderInspectionFileCommentListInModal_(inspectionData[idx] || { id: inspectionId, fileComment: res.fileComment });
+          Toast.fire({ icon: 'success', title: 'ลบไฟล์แล้ว' });
+        }).withFailureHandler(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+        }).deleteInspectionFileComment({ inspectionId: inspectionId, fileUrl: fileUrl }, auth);
+      });
     }
 
     function inspectionPlanToForm_(p) {
@@ -3861,8 +3913,11 @@
             html += ' <span class="badge text-bg-secondary" style="font-size:0.62rem;font-weight:500;">ไม่พบในแผนที่</span>';
           }
         }
-        if (info.pwaText) {
-          html += '<div class="small text-muted mt-1"><i class="fa-solid fa-building-columns me-1"></i>กปภ. ' + escHtml(info.pwaText) + '</div>';
+        if (info.pwaText || info.peaZone) {
+          const subParts = [];
+          if (info.pwaText) subParts.push('กปภ. ' + info.pwaText);
+          if (info.peaZone) subParts.push('กฟภ. ' + info.peaZone);
+          html += '<div class="small text-muted mt-1"><i class="fa-solid fa-building-columns me-1"></i>' + escHtml(subParts.join(' · ')) + '</div>';
         }
         return html;
       }
