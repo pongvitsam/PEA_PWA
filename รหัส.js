@@ -1493,7 +1493,7 @@ function mapInspectionRow_(row) {
     peaOffice: cellStr_(row[7]),
     handoverPlan: formatInspectionDateDisplay_(row[8]),
     handoverRound: formatInspectionDateDisplay_(row[9]),
-    inspectSchedule: cellStr_(row[10]),
+    inspectSchedule: formatInspectionDateDisplay_(row[10]),
     inspectors: cellStr_(row[11]),
     fileComment: cellStr_(row[12]),
     committee: cellStr_(row[13]),
@@ -1574,7 +1574,7 @@ function extractInspectionFieldsFromSourceRow_(row, map) {
     const col = cols[key];
     if (col == null) { out[key] = ''; return; }
     if (key === 'visited') out[key] = parseInspectionVisited_(row[col]);
-    else if (key === 'handoverPlan' || key === 'handoverRound') out[key] = formatInspectionDateDisplay_(row[col]);
+    else if (key === 'handoverPlan' || key === 'handoverRound' || key === 'inspectSchedule') out[key] = formatInspectionDateDisplay_(row[col]);
     else out[key] = cellStr_(row[col]);
   });
   return out;
@@ -1723,6 +1723,11 @@ function refreshInspectionPlansFromSource(force) {
 }
 
 function inspectionFormToFields_(formObj) {
+  function normInspDate_(val) {
+    const s = (val == null ? '' : val).toString().trim();
+    if (!s) return '';
+    return formatInspectionDateDisplay_(s) || s;
+  }
   return {
     seq: (formObj.seq || '').toString().trim(),
     phase: (formObj.phase || '').toString().trim(),
@@ -1732,8 +1737,8 @@ function inspectionFormToFields_(formObj) {
     peaZone: (formObj.peaZone || '').toString().trim(),
     peaOffice: (formObj.peaOffice || '').toString().trim(),
     handoverPlan: (formObj.handoverPlan || '').toString().trim(),
-    handoverRound: (formObj.handoverRound || '').toString().trim(),
-    inspectSchedule: (formObj.inspectSchedule || '').toString().trim(),
+    handoverRound: normInspDate_(formObj.handoverRound),
+    inspectSchedule: normInspDate_(formObj.inspectSchedule),
     inspectors: (formObj.inspectors || '').toString().trim(),
     fileComment: (formObj.fileComment || '').toString().trim(),
     committee: (formObj.committee || '').toString().trim(),
