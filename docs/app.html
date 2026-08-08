@@ -3493,6 +3493,46 @@
       return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + (d.getFullYear() + 543);
     }
 
+    function inspectionPeaZoneSortKey_(zone) {
+      const s = String(zone || '').trim();
+      if (!s) return { num: 99999, text: '' };
+      const m = s.match(/(\d+(?:\.\d+)?)/);
+      return { num: m ? parseFloat(m[1]) : 99999, text: s };
+    }
+
+    function inspectionHandoverSortTime_(p) {
+      const plan = parseInspectionHandoverDate_(p.handoverPlan);
+      const round = parseInspectionHandoverDate_(p.handoverRound);
+      const d = plan || round;
+      return d ? d.getTime() : Number.MAX_SAFE_INTEGER;
+    }
+
+    function compareInspectionPlans_(a, b) {
+      const REGION_ORDER_ = { NC: 0, NE: 1, S: 2 };
+      const ra = REGION_ORDER_[(a.region || 'NC').toUpperCase()] ?? 9;
+      const rb = REGION_ORDER_[(b.region || 'NC').toUpperCase()] ?? 9;
+      if (ra !== rb) return ra - rb;
+
+      const za = inspectionPeaZoneSortKey_(a.peaZone);
+      const zb = inspectionPeaZoneSortKey_(b.peaZone);
+      if (za.num !== zb.num) return za.num - zb.num;
+      const zoneCmp = za.text.localeCompare(zb.text, 'th');
+      if (zoneCmp !== 0) return zoneCmp;
+
+      const ta = inspectionHandoverSortTime_(a);
+      const tb = inspectionHandoverSortTime_(b);
+      if (ta !== tb) return ta - tb;
+
+      const ha = formatInspectionHandoverDate_(a.handoverPlan, false) || formatInspectionHandoverDate_(a.handoverRound, false);
+      const hb = formatInspectionHandoverDate_(b.handoverPlan, false) || formatInspectionHandoverDate_(b.handoverRound, false);
+      const handCmp = ha.localeCompare(hb, 'th');
+      if (handCmp !== 0) return handCmp;
+
+      const pa = parseInt(a.seq, 10), pb = parseInt(b.seq, 10);
+      if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
+      return (a.place || '').localeCompare(b.place || '', 'th');
+    }
+
     function getInspectionUniqueValues_(key, col) {
       const set = new Set();
       (inspectionData || []).forEach(function(p) {
@@ -3654,14 +3694,7 @@
       const REGION_ORDER_ = { NC: 0, NE: 1, S: 2 };
       const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
       const regionFilter = getInspectionRegionFilter_();
-      const sorted = [...filteredInspectionData].sort(function(a, b) {
-        const ra = REGION_ORDER_[(a.region || 'NC').toUpperCase()] ?? 9;
-        const rb = REGION_ORDER_[(b.region || 'NC').toUpperCase()] ?? 9;
-        if (ra !== rb) return ra - rb;
-        const pa = parseInt(a.seq, 10), pb = parseInt(b.seq, 10);
-        if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
-        return (a.place || '').localeCompare(b.place || '', 'th');
-      });
+      const sorted = [...filteredInspectionData].sort(compareInspectionPlans_);
       let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
       INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
         const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
