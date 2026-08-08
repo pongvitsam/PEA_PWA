@@ -176,15 +176,25 @@
       background: linear-gradient(180deg, #ca8a04, #eab308); color: #1e293b;
       border-color: #ca8a04 !important; font-weight: 700;
     }
-    .inspection-sheet-table thead tr.inspection-filter-row th {
-      background: #f1f5f9; color: #334155; padding: 0.2rem 0.25rem;
-      position: sticky; top: 2.6rem; z-index: 2; font-weight: 400; vertical-align: middle;
+    .inspection-sheet-table thead th .insp-th-inner {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.25rem;
     }
-    .inspection-sheet-table thead tr.inspection-filter-row th.insp-edit-cell { background: #fef9c3; color: #334155; }
+    .inspection-sheet-table thead th .insp-th-label { flex: 1; min-width: 0; }
+    .inspection-sheet-table .insp-col-filter-wrap { position: relative; flex-shrink: 0; }
+    .inspection-sheet-table .insp-filter-btn { color: rgba(255,255,255,0.65); font-size: 0.6rem; line-height: 1; }
+    .inspection-sheet-table .insp-filter-btn:hover { color: #fff; }
+    .inspection-sheet-table .insp-filter-btn-active { color: #fbbf24 !important; }
+    .inspection-sheet-table thead th.insp-edit-cell .insp-filter-btn { color: #78716c; }
+    .inspection-sheet-table thead th.insp-edit-cell .insp-filter-btn-active { color: #b45309 !important; }
+    .inspection-sheet-table .insp-filter-dropdown {
+      display: none; position: absolute; top: 100%; right: 0; z-index: 10;
+      min-width: 130px; padding: 0.35rem; background: #fff; border: 1px solid #cbd5e1;
+      border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); margin-top: 2px;
+    }
+    .inspection-sheet-table .insp-filter-dropdown.show { display: block; }
     .inspection-sheet-table .insp-col-filter {
       font-size: 0.64rem; min-width: 64px; padding: 0.12rem 0.25rem; border-color: #cbd5e1;
     }
-    .inspection-sheet-table thead th .insp-filter-active { color: #fbbf24; margin-left: 2px; font-size: 0.55rem; }
     .inspection-sheet-table tbody td.insp-edit-cell { background: #fffbeb; min-width: 150px; white-space: normal; }
     .inspection-sheet-table .insp-edit-cell input {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff;
@@ -3364,6 +3374,8 @@
       ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatus', 'ทำใบนำตัว'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
+    const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'peaOffice', 'handoverPlan', 'handoverRound'];
+
     const INSPECTION_TABLE_COLUMNS_ = [
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
@@ -3610,13 +3622,7 @@
     function renderInspectionColumnFilter_(col) {
       const key = col.key;
       const cur = inspectionColumnFilters[key] || '';
-      if (col.type === 'visited') {
-        return '<select class="form-select form-select-sm insp-col-filter" data-col="' + key + '" onchange="onInspectionColumnFilterChange(this)">' +
-          '<option value="">ทั้งหมด</option>' +
-          '<option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>ไปแล้ว</option>' +
-          '<option value="no"' + (cur === 'no' ? ' selected' : '') + '>ยังไม่ไป</option></select>';
-      }
-      const selectKeys = ['region', 'phase', 'mapLocation', 'peaOffice'];
+      const selectKeys = ['region', 'phase', 'peaOffice'];
       if (selectKeys.indexOf(key) >= 0) {
         const vals = getInspectionUniqueValues_(key, col);
         if (vals.length && vals.length <= 60) {
@@ -3628,6 +3634,38 @@
         }
       }
       return '<input type="text" class="form-control form-control-sm insp-col-filter" data-col="' + key + '" value="' + escHtml(cur) + '" placeholder="กรอง..." oninput="onInspectionColumnFilterChange(this)">';
+    }
+
+    function renderInspectionHeaderCell_(col) {
+      const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
+      const filterable = INSPECTION_FILTERABLE_KEYS_.indexOf(col.key) >= 0;
+      let inner = '<div class="insp-th-inner"><span class="insp-th-label">' + escHtml(col.label) + '</span>';
+      if (filterable) {
+        const active = inspectionColumnFilters[col.key] ? ' insp-filter-btn-active' : '';
+        inner += '<div class="insp-col-filter-wrap">' +
+          '<button type="button" class="btn btn-link btn-sm p-0 insp-filter-btn' + active + '" onclick="toggleInspectionColumnFilter(this, event)" title="กรอง"><i class="fa-solid fa-filter"></i></button>' +
+          '<div class="insp-filter-dropdown">' + renderInspectionColumnFilter_(col) + '</div></div>';
+      }
+      inner += '</div>';
+      return '<th class="' + thCls + '">' + inner + '</th>';
+    }
+
+    function closeAllInspectionColumnFilters_() {
+      document.querySelectorAll('.insp-filter-dropdown.show').forEach(function(el) { el.classList.remove('show'); });
+    }
+
+    function toggleInspectionColumnFilter(btn, ev) {
+      if (ev) ev.stopPropagation();
+      const wrap = btn.closest('.insp-col-filter-wrap');
+      const dropdown = wrap ? wrap.querySelector('.insp-filter-dropdown') : null;
+      if (!dropdown) return;
+      const wasOpen = dropdown.classList.contains('show');
+      closeAllInspectionColumnFilters_();
+      if (!wasOpen) {
+        dropdown.classList.add('show');
+        const input = dropdown.querySelector('.insp-col-filter');
+        if (input) setTimeout(function() { input.focus(); }, 50);
+      }
     }
 
     function onInspectionColumnFilterChange(el) {
@@ -3992,17 +4030,11 @@
       const regionFilter = getInspectionRegionFilter_();
       const sorted = [...filteredInspectionData].sort(compareInspectionPlans_);
       let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
-      INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
-        const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
-        const activeMark = inspectionColumnFilters[col.key] ? ' <i class="fa-solid fa-filter insp-filter-active"></i>' : '';
-        html += '<th class="' + thCls + '">' + escHtml(col.label) + activeMark + '</th>';
-      });
-      html += '<th class="text-center" style="min-width:48px;"></th></tr><tr class="inspection-filter-row">';
-      INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
-        const thCls = col.editable ? 'insp-edit-cell' : (col.cls || '');
-        html += '<th class="' + thCls + '">' + renderInspectionColumnFilter_(col) + '</th>';
-      });
-      html += '<th class="text-center"><button type="button" class="btn btn-link btn-sm p-0" style="color:#64748b;" onclick="clearInspectionColumnFilters()" title="ล้างตัวกรองคอลัมน์"><i class="fa-solid fa-filter-circle-xmark"></i></button></th></tr></thead><tbody>';
+      INSPECTION_TABLE_COLUMNS_.forEach(function(col) { html += renderInspectionHeaderCell_(col); });
+      const hasColFilters = Object.keys(inspectionColumnFilters).length > 0;
+      html += '<th class="text-center" style="min-width:48px;">' +
+        (hasColFilters ? '<button type="button" class="btn btn-link btn-sm p-0" style="color:rgba(255,255,255,0.75);" onclick="clearInspectionColumnFilters()" title="ล้างตัวกรองคอลัมน์"><i class="fa-solid fa-filter-circle-xmark"></i></button>' : '') +
+        '</th></tr></thead><tbody>';
       let lastRegion = '';
       sorted.forEach(function(p) {
         const reg = (p.region || 'NC').toUpperCase();
@@ -4023,6 +4055,12 @@
       });
       html += '</tbody></table></div>';
       container.innerHTML = html;
+      if (!window._inspFilterClickBound) {
+        window._inspFilterClickBound = true;
+        document.addEventListener('click', function(e) {
+          if (!e.target.closest('.insp-col-filter-wrap')) closeAllInspectionColumnFilters_();
+        });
+      }
     }
 
     function filterInspections() {
