@@ -151,17 +151,20 @@
       box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
     }
     .inspection-table-wrap {
-      overflow-x: auto; border-radius: 14px; border: 1px solid #cbd5e1;
+      overflow: auto; border-radius: 14px; border: 1px solid #cbd5e1;
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+      max-height: calc(100vh - 260px);
     }
-    .inspection-sheet-table { font-size: 0.78rem; margin: 0; white-space: nowrap; }
+    .inspection-sheet-table { font-size: 0.72rem; margin: 0; white-space: normal; width: 100%; }
     .inspection-sheet-table thead th {
       background: linear-gradient(180deg, #0f766e, #0d9488); color: #fff; font-weight: 600;
-      border-color: #0f766e !important; vertical-align: middle; padding: 0.55rem 0.5rem;
+      border-color: #0f766e !important; vertical-align: middle; padding: 0.5rem 0.4rem;
+      white-space: normal; line-height: 1.25; font-size: 0.67rem;
+      position: sticky; top: 0; z-index: 3;
     }
     .inspection-sheet-table tbody td {
-      vertical-align: middle; padding: 0.45rem 0.5rem; border-color: #e2e8f0; max-width: 220px;
-      overflow: hidden; text-overflow: ellipsis;
+      vertical-align: top; padding: 0.4rem 0.45rem; border-color: #e2e8f0;
+      white-space: normal; word-break: break-word; line-height: 1.35;
     }
     .inspection-sheet-table tbody tr:nth-child(even) { background: #f0fdfa; }
     .inspection-sheet-table tbody tr:hover { background: #ecfeff; }
@@ -178,6 +181,11 @@
     .inspection-sheet-table .phase-pill.ph2 { background: #2563eb; }
     .inspection-sheet-table .phase-pill.ph1 { background: #16a34a; }
     .inspection-sheet-table .col-seq { min-width: 52px; max-width: 64px; }
+    .inspection-sheet-table .col-region { min-width: 44px; text-align: center; }
+    .inspection-sheet-table .inspection-region-divider td {
+      background: linear-gradient(90deg, #1e40af, #2563eb); color: #fff; font-weight: 700;
+      padding: 0.45rem 0.75rem; border: none; font-size: 0.8rem;
+    }
     .inspection-sheet-table textarea.insp-inline {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff; min-width: 140px; resize: vertical;
     }
@@ -616,19 +624,22 @@
       </div>
       <div class="inspection-list-panel">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-          <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small" id="inspectionRegionLabel">· NC</span></h5>
+          <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small">(ทุกภาค · ทุกคอลัมน์)</span></h5>
           <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
         </div>
-        <ul class="nav nav-pills inspection-region-tabs gap-2 mb-3 flex-wrap" id="inspectionRegionTabs">
-          <li class="nav-item"><button type="button" class="nav-link active" data-region="NC" onclick="setInspectionRegion('NC')"><span class="badge bg-danger me-1">NC</span> ภาคกลาง-เหนือ</button></li>
-          <li class="nav-item"><button type="button" class="nav-link" data-region="NE" onclick="setInspectionRegion('NE')"><span class="badge bg-success me-1">NE</span> ภาคอีสาน</button></li>
-          <li class="nav-item"><button type="button" class="nav-link" data-region="S" onclick="setInspectionRegion('S')"><span class="badge bg-warning text-dark me-1">S</span> ภาคใต้</button></li>
-        </ul>
         <div class="row g-2 mb-3">
-          <div class="col-md-5">
+          <div class="col-md-4">
             <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspections()">
           </div>
-          <div class="col-md-3">
+          <div class="col-md-2">
+            <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="" selected>ทุกภาค NC+NE+S</option>
+              <option value="NC">NC ภาคกลาง-เหนือ</option>
+              <option value="NE">NE ภาคอีสาน</option>
+              <option value="S">S ภาคใต้</option>
+            </select>
+          </div>
+          <div class="col-md-2">
             <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
               <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
               <option value="">ทุกเฟส</option>
@@ -983,7 +994,7 @@
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
     let inspectionData = [], filteredInspectionData = [];
-    let inspectionActiveRegion = 'NC';
+    let inspectionActiveRegion = '';
     let routeMap, routeMarkersLayer, routeLineLayer;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
@@ -3342,6 +3353,7 @@
 
     const INSPECTION_TABLE_COLUMNS_ = [
       { key: 'seq', label: 'ลำดับที่', readOnly: true, cls: 'text-center col-seq' },
+      { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'place', label: 'สถานที่', readOnly: true, cls: 'col-place' },
       { key: 'pwaBranch', label: 'กปภ.สาขา', readOnly: true },
@@ -3445,14 +3457,8 @@
       set('statInspectionPending', pending);
     }
 
-    function setInspectionRegion(region) {
-      inspectionActiveRegion = region || 'NC';
-      document.querySelectorAll('#inspectionRegionTabs .nav-link').forEach(function(btn) {
-        btn.classList.toggle('active', btn.getAttribute('data-region') === inspectionActiveRegion);
-      });
-      const lbl = document.getElementById('inspectionRegionLabel');
-      if (lbl) lbl.textContent = '· ' + inspectionActiveRegion;
-      filterInspections();
+    function getInspectionRegionFilter_() {
+      return (document.getElementById('inspectionRegionSelect')?.value || '').toUpperCase();
     }
 
     function inspectionPlanToForm_(p) {
@@ -3476,7 +3482,7 @@
         visited: !!p.visited,
         tcCoordinator: p.tcCoordinator || '',
         tcContact: p.tcContact || '',
-        region: p.region || inspectionActiveRegion || 'NC'
+        region: p.region || getInspectionRegionFilter_() || 'NC'
       };
     }
 
@@ -3489,6 +3495,11 @@
 
     function renderInspectionTableCell_(p, col) {
       const safeId = String(p.id).replace(/'/g, "\\'");
+      if (col.type === 'region') {
+        const reg = (p.region || 'NC').toUpperCase();
+        const cls = reg === 'NE' ? 'bg-success' : (reg === 'S' ? 'bg-warning text-dark' : 'bg-danger');
+        return '<span class="badge ' + cls + '">' + escHtml(reg) + '</span>';
+      }
       if (col.type === 'phase') {
         const ph = String(p.phase || '').trim();
         const phCls = ph === '3' || ph === '4' ? 'ph3' : (ph === '2' ? 'ph2' : (ph === '1' ? 'ph1' : ''));
@@ -3537,10 +3548,16 @@
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
       if (!filteredInspectionData.length) {
-        container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการภาค ' + escHtml(inspectionActiveRegion) + ' ตามตัวกรอง</p></div>';
+        container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการตามตัวกรอง</p></div>';
         return;
       }
+      const REGION_ORDER_ = { NC: 0, NE: 1, S: 2 };
+      const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
+      const regionFilter = getInspectionRegionFilter_();
       const sorted = [...filteredInspectionData].sort(function(a, b) {
+        const ra = REGION_ORDER_[(a.region || 'NC').toUpperCase()] ?? 9;
+        const rb = REGION_ORDER_[(b.region || 'NC').toUpperCase()] ?? 9;
+        if (ra !== rb) return ra - rb;
         const pa = parseInt(a.seq, 10), pb = parseInt(b.seq, 10);
         if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
         return (a.place || '').localeCompare(b.place || '', 'th');
@@ -3551,7 +3568,13 @@
         html += '<th' + thCls + '>' + escHtml(col.label) + '</th>';
       });
       html += '<th class="text-center" style="min-width:48px;"></th></tr></thead><tbody>';
+      let lastRegion = '';
       sorted.forEach(function(p) {
+        const reg = (p.region || 'NC').toUpperCase();
+        if (!regionFilter && reg !== lastRegion) {
+          lastRegion = reg;
+          html += '<tr class="inspection-region-divider"><td colspan="' + (INSPECTION_TABLE_COLUMNS_.length + 1) + '"><i class="fa-solid fa-layer-group me-2"></i>' + escHtml(REGION_LABELS_[reg] || reg) + '</td></tr>';
+        }
         const safeId = String(p.id).replace(/'/g, "\\'");
         const editBtn = canEditInspection()
           ? '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="editInspection(\'' + safeId + '\')" title="แก้ไขทั้งหมด"><i class="fa-solid fa-pen"></i></button>'
@@ -3572,15 +3595,15 @@
       const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
       const pwaVal = document.getElementById('inspectionPwaSelect')?.value || '';
-      const regionVal = inspectionActiveRegion || 'NC';
+      const regionVal = getInspectionRegionFilter_();
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
-        const blob = [p.seq, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
+        const blob = [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
         const matchText = !textVal || blob.includes(textVal);
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
         const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
-        const matchRegion = (p.region || 'NC').toUpperCase() === regionVal;
+        const matchRegion = !regionVal || (p.region || 'NC').toUpperCase() === regionVal;
         return matchText && matchPhase && matchVisited && matchPwa && matchRegion;
       });
 
@@ -3634,7 +3657,7 @@
         region: (function() {
           const id = document.getElementById('insp_id').value;
           const ex = id ? inspectionData.find(x => x.id == id) : null;
-          return (ex && ex.region) ? ex.region : (inspectionActiveRegion || 'NC');
+          return (ex && ex.region) ? ex.region : (getInspectionRegionFilter_() || 'NC');
         })()
       };
     }
