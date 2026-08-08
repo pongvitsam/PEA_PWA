@@ -1227,6 +1227,19 @@ function formatThaiDateForSheet_(d) {
   return day + ' ' + months[monthIdx] + ' ' + year;
 }
 
+const THAI_MONTHS_FULL_INSP_ = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
+
+/** แสดงวันที่แผนส่งมอบ/ส่งมอบจริง: 10 สิงหาคม 2569 */
+function formatInspectionDateDisplay_(val) {
+  if (val == null || val === '') return '';
+  const d = parseThaiDate_(val);
+  if (!d) return cellStr_(val);
+  return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+}
+
 function formatTimeRangeForSheet_(start, end) {
   if (!(start instanceof Date) || !(end instanceof Date)) return '';
   const tz = Session.getScriptTimeZone() || 'Asia/Bangkok';
@@ -1426,8 +1439,8 @@ function mapInspectionRow_(row) {
     pwaDistrict: cellStr_(row[5]),
     peaZone: cellStr_(row[6]),
     peaOffice: cellStr_(row[7]),
-    handoverPlan: cellStr_(row[8]),
-    handoverRound: cellStr_(row[9]),
+    handoverPlan: formatInspectionDateDisplay_(row[8]),
+    handoverRound: formatInspectionDateDisplay_(row[9]),
     inspectSchedule: cellStr_(row[10]),
     inspectors: cellStr_(row[11]),
     fileComment: cellStr_(row[12]),
@@ -1509,6 +1522,7 @@ function extractInspectionFieldsFromSourceRow_(row, map) {
     const col = cols[key];
     if (col == null) { out[key] = ''; return; }
     if (key === 'visited') out[key] = parseInspectionVisited_(row[col]);
+    else if (key === 'handoverPlan' || key === 'handoverRound') out[key] = formatInspectionDateDisplay_(row[col]);
     else out[key] = cellStr_(row[col]);
   });
   return out;

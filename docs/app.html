@@ -3327,8 +3327,8 @@
       { key: 'pwaDistrict', label: 'กปภ.เขต', readOnly: true },
       { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
       { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
-      { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true },
-      { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', readOnly: true },
+      { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
+      { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', readOnly: true, type: 'thaiDate' },
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, placeholder: 'วางแผนวันตรวจ...' },
       { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
       { key: 'fileComment', label: 'File comment', editable: true },
@@ -3432,7 +3432,65 @@
       if (col.type === 'visited') return p.visited ? 'yes' : 'no';
       if (col.type === 'region') return (p.region || 'NC').toUpperCase();
       if (col.type === 'phase') return String(p.phase || '').trim();
+      if (col.type === 'thaiDate') return formatInspectionHandoverDate_(p[col.key], false);
       return String(p[col.key] || '').trim();
+    }
+
+    const INSPECTION_THAI_MONTHS_ = [
+      'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+      'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+    ];
+    const INSPECTION_EN_MONTH_MAP_ = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+
+    function parseInspectionHandoverDate_(raw) {
+      if (raw == null || raw === '') return null;
+      if (raw instanceof Date && !isNaN(raw.getTime())) return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+      const s = String(raw).replace(/\u00a0/g, ' ').trim();
+      if (!s) return null;
+      const th = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
+      if (th) {
+        const day = parseInt(th[1], 10);
+        let monthKey = th[2].replace(/\s+/g, '');
+        const monthMap = {
+          'ม.ค.': 0, 'มกราคม': 0, 'ก.พ.': 1, 'กุมภาพันธ์': 1, 'มี.ค.': 2, 'มีนาคม': 2,
+          'เม.ย.': 3, 'เมษายน': 3, 'พ.ค.': 4, 'พฤษภาคม': 4, 'มิ.ย.': 5, 'มิถุนายน': 5,
+          'ก.ค.': 6, 'กรกฎาคม': 6, 'ส.ค.': 7, 'สิงหาคม': 7, 'ก.ย.': 8, 'กันยายน': 8,
+          'ต.ค.': 9, 'ตุลาคม': 9, 'พ.ย.': 10, 'พฤศจิกายน': 10, 'ธ.ค.': 11, 'ธันวาคม': 11
+        };
+        let month = monthMap[monthKey];
+        if (month == null && monthKey.indexOf('.') < 0) month = monthMap[monthKey + '.'];
+        if (month != null) {
+          let year = parseInt(th[3], 10);
+          if (year < 100) year += 2500;
+          if (year > 2400) year -= 543;
+          const dt = new Date(year, month, day);
+          if (!isNaN(dt.getTime()) && dt.getDate() === day) return dt;
+        }
+      }
+      const en = s.match(/(\d{1,2})\s+([A-Za-z\.]+)\s+(\d{4})/);
+      if (en) {
+        const month = INSPECTION_EN_MONTH_MAP_[en[2].toLowerCase().replace(/\./g, '').substring(0, 3)];
+        if (month != null) {
+          const dt = new Date(parseInt(en[3], 10), month, parseInt(en[1], 10));
+          if (!isNaN(dt.getTime())) return dt;
+        }
+      }
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      return null;
+    }
+
+    function formatInspectionHandoverDate_(raw, emptyDash) {
+      if (raw == null || raw === '') return emptyDash ? '-' : '';
+      const s = String(raw).replace(/\u00a0/g, ' ').trim();
+      if (!s) return emptyDash ? '-' : '';
+      if (/(\d{1,2})\s+[ก-๙]{3,}\s+25\d{2}/.test(s)) return s;
+      const d = parseInspectionHandoverDate_(raw);
+      if (!d) return s;
+      return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + (d.getFullYear() + 543);
     }
 
     function getInspectionUniqueValues_(key, col) {
@@ -3552,6 +3610,10 @@
       if (col.editable && canEditInspection()) {
         const multiline = col.key === 'inspectors' || col.key === 'committee' || col.key === 'fileComment';
         return inspectionInlineInput_(p, col.key, col.placeholder, multiline);
+      }
+      if (col.type === 'thaiDate') {
+        const text = formatInspectionHandoverDate_(p[col.key], true);
+        return '<span title="' + escHtml(text) + '">' + escHtml(text) + '</span>';
       }
       const val = p[col.key];
       const text = val != null && val !== '' ? String(val) : '-';
