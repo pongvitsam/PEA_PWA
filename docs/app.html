@@ -118,6 +118,31 @@
     .outage-sheet-details .det-row { font-size: 0.82rem; color: #334155; margin-bottom: 0.3rem; line-height: 1.45; }
     .outage-sheet-details .det-label { color: #64748b; font-weight: 600; display: inline-block; min-width: 9.5rem; vertical-align: top; }
     .form-switch .form-check-input:checked { background-color: #2563eb; border-color: #2563eb; }
+    /* สไตล์แผนตรวจรับงาน */
+    .inspection-page-header {
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #38bdf8 100%);
+      border-radius: 20px; padding: 1.25rem 1.5rem; color: #fff;
+      box-shadow: 0 12px 40px rgba(37, 99, 235, 0.22); margin-bottom: 1.25rem;
+    }
+    .inspection-stat-card {
+      background: rgba(255,255,255,0.18); backdrop-filter: blur(8px);
+      border-radius: 14px; padding: 0.85rem 1rem; text-align: center;
+      border: 1px solid rgba(255,255,255,0.28); transition: transform 0.2s;
+    }
+    .inspection-stat-card:hover { transform: translateY(-2px); }
+    .inspection-stat-card h4 { font-size: 1.75rem; font-weight: 700; margin: 0; line-height: 1.1; }
+    .inspection-stat-card small { opacity: 0.92; font-weight: 500; }
+    .inspection-list-panel {
+      background: #fff; border-radius: 20px; padding: 1.25rem;
+      box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
+    }
+    .inspection-card-meta { font-size: 0.82rem; color: #475569; line-height: 1.5; }
+    .inspection-card-meta .meta-label { color: #64748b; font-weight: 600; min-width: 7.5rem; display: inline-block; }
+    .inspection-detail-block {
+      background: linear-gradient(180deg, #f8fbff, #f1f5f9);
+      border: 1px solid #dbeafe; border-radius: 10px; padding: 0.75rem 0.9rem;
+    }
+    .inspection-phase-badge { font-size: 0.72rem; letter-spacing: 0.02em; }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
 .doc-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(37,99,235,0.03); transition: 0.2s; }
@@ -182,7 +207,11 @@
     .route-icon { width: 30px; height: 30px; background: var(--pwa-primary-light); color: var(--pwa-primary); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-weight: bold; margin-right: 15px; font-size: 0.9rem;}
 
     .route-summary { background: #eff6ff; border-radius: 12px; padding: 15px; margin-bottom: 10px; border-left: 4px solid #2563eb; font-size: 0.9rem;}
-    #routeMap { height: 420px; width: 100%; border-radius: 16px; z-index: 1; border: 1px solid var(--pwa-border); }
+    .route-page-layout { display: flex; flex-direction: column; min-height: calc(100vh - 88px); min-height: calc(100dvh - 88px); }
+    .route-page-layout > .route-map-row { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+    .route-page-layout > .route-map-row > .col-12 { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+    .route-map-panel { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0 !important; }
+    #routeMap { flex: 1 1 0; min-height: 240px; width: 100%; border-radius: 16px; z-index: 1; border: 1px solid var(--pwa-border); }
     .route-num-marker { background: transparent; border: none; }
     div:where(.swal2-container) { z-index: 9999 !important; font-family: 'Prompt', sans-serif !important; }
     .marker-label-tooltip { background: rgba(37, 99, 235, 0.92); color: #fff; border: 0; border-radius: 14px; font-weight: 600; padding: 2px 10px; box-shadow: 0 2px 8px rgba(37,99,235,0.25); }
@@ -337,6 +366,7 @@
     </div>
 
     <div id="menu-route" style="display: none;">
+      <div class="route-page-layout">
       <div class="row">
         <div class="col-md-5 mb-4">
           <div class="filter-bar">
@@ -376,14 +406,15 @@
           </div>
         </div>
       </div>
-      <div class="row mt-2">
+      <div class="row mt-2 route-map-row">
         <div class="col-12">
-          <div class="filter-bar p-2">
+          <div class="filter-bar p-2 route-map-panel">
             <h5 class="fw-bold mb-2"><i class="fa-solid fa-map-location-dot"></i> แผนที่เส้นทาง</h5>
             <p class="text-muted small mb-2" id="routeMapHint">เลือกจุดในรายการด้านบน — แผนที่จะแสดงลำดับและเส้นทางจากจุดหนึ่งไปอีกจุด</p>
             <div id="routeMap"></div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -514,6 +545,68 @@
             <div id="outageListContainer" style="max-height: 70vh; overflow-y: auto; padding-right: 5px;"></div>
           </div>
         </div>
+      </div>
+    </div>
+  
+    <div id="menu-inspection" style="display: none;">
+      <div class="inspection-page-header">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <div>
+            <h4 class="fw-bold mb-1"><i class="fa-solid fa-clipboard-check"></i> แผนการเข้าตรวจรับงานเฟส3-4</h4>
+            <small class="opacity-90">ซิงก์จาก Google Sheet อัตโนมัติ — แก้ในแอปแล้วบันทึกกลับชีทได้</small>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit" target="_blank" rel="noopener" class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm">
+              <i class="fa-solid fa-file-excel"></i> เปิดชีท
+            </a>
+            <button class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm" onclick="refreshInspectionFromSheet()" id="btnRefreshInspectionSheet" title="ดึงข้อมูลล่าสุดจากชีท">
+              <i class="fa-solid fa-rotate"></i> รีเฟรชจากชีท
+            </button>
+            <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openInspectionModal()" id="btnAddInspectionTop" disabled>
+              <i class="fa-solid fa-plus text-success"></i> เพิ่มรายการ
+            </button>
+          </div>
+        </div>
+        <div class="row g-2" id="inspectionStatsRow">
+          <div class="col-6 col-md-3"><div class="inspection-stat-card"><h4 id="statInspectionTotal">0</h4><small>แสดงอยู่</small></div></div>
+          <div class="col-6 col-md-3"><div class="inspection-stat-card"><h4 id="statInspectionPhase34">0</h4><small>เฟส 3-4</small></div></div>
+          <div class="col-6 col-md-3"><div class="inspection-stat-card"><h4 id="statInspectionDone">0</h4><small>ไปแล้ว</small></div></div>
+          <div class="col-6 col-md-3"><div class="inspection-stat-card"><h4 id="statInspectionPending">0</h4><small>ยังไม่ไป</small></div></div>
+        </div>
+      </div>
+      <div class="inspection-list-panel">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน</h5>
+          <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-5">
+            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspections()">
+          </div>
+          <div class="col-md-3">
+            <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
+              <option value="">ทุกเฟส</option>
+              <option value="3">เฟส 3</option>
+              <option value="4">เฟส 4</option>
+              <option value="1">เฟส 1</option>
+              <option value="2">เฟส 2</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="">ทุกสถานะ</option>
+              <option value="done">ไปแล้ว</option>
+              <option value="pending">ยังไม่ไป</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionPwaSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="">ทุกเขต กปภ.</option>
+            </select>
+          </div>
+        </div>
+        <div id="inspectionListContainer"></div>
       </div>
     </div>
   
@@ -695,7 +788,7 @@
         <div class="modal-body bg-white">
           <input type="hidden" id="o_id">
           <div id="o_sheetSourceNote" class="alert alert-info py-2 px-3 small border-0 mb-3" style="display:none;">
-            <i class="fa-solid fa-file-excel"></i> รายการจากชีทกำหนดการ — แก้ในแอปได้ และจะบันทึกกลับชีทด้วย (ลบรายการให้ทำที่ชีท)
+            <i class="fa-solid fa-file-excel"></i> รายการจากชีทกำหนดการ — แก้ในแอปได้ (รวมรายละเอียดชีท) และจะบันทึกกลับชีทด้วย (ลบรายการให้ทำที่ชีท)
           </div>
           <div class="mb-3">
             <label class="fw-bold small text-muted">1. โครงการ/สถานที่ดับไฟ</label>
@@ -703,13 +796,18 @@
             <small class="text-muted">เลือกสถานที่แล้วระบบจะแสดงข้อมูลโครงการด้านล่าง (อ่านอย่างเดียว)</small>
           </div>
           <div id="o_locationPanel" class="outage-loc-panel mb-3" style="display:none;"></div>
-          <div class="row mb-3">
-            <div class="col-md-6"><label class="fw-bold small text-muted">2. เริ่มวันที่/เวลา</label><input type="text" id="o_start" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
-            <div class="col-md-6"><label class="fw-bold small text-muted">ถึงวันที่/เวลา</label><input type="text" id="o_end" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
+          <div id="o_sheetDetailsWrap" class="mb-3" style="display:none;">
+            <label class="fw-bold small text-muted d-block mb-2">2. รายละเอียดจากชีท</label>
+            <div id="o_sheetDetailsReadonly"></div>
+            <div id="o_sheetDetailsPanel"></div>
           </div>
-          <div class="mb-3"><label class="fw-bold small text-muted">3. หมายเหตุ (เช่น เลื่อนดับไฟ)</label><textarea id="o_remark" class="form-control" rows="2" placeholder="กรอกหมายเหตุ..."></textarea></div>
+          <div class="row mb-3">
+            <div class="col-md-6"><label class="fw-bold small text-muted o-outage-step-date">2. เริ่มวันที่/เวลา</label><input type="text" id="o_start" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
+            <div class="col-md-6"><label class="fw-bold small text-muted o-outage-step-date-end">ถึงวันที่/เวลา</label><input type="text" id="o_end" class="form-control datepicker" placeholder="เลือกวันเวลา"></div>
+          </div>
+          <div class="mb-3"><label class="fw-bold small text-muted o-outage-step-remark">3. หมายเหตุ (เช่น เลื่อนดับไฟ)</label><textarea id="o_remark" class="form-control" rows="2" placeholder="กรอกหมายเหตุ..."></textarea></div>
           <div class="mb-2">
-            <label class="fw-bold small text-muted">4. ลิงก์หนังสือ PEA (URL)</label>
+            <label class="fw-bold small text-muted o-outage-step-url">4. ลิงก์หนังสือ PEA (URL)</label>
             <input type="url" id="o_peaUrl" class="form-control" placeholder="https://drive.google.com/... หรือลิงก์เอกสารอื่น">
             <small class="text-muted"><i class="fa-solid fa-link"></i> วางลิงก์ Google Drive หรือ URL เอกสารหนังสือ PEA</small>
           </div>
@@ -722,6 +820,68 @@
       </div>
     </div>
   </div>
+
+<div class="modal fade" id="inspectionModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius: 16px; border: none; overflow: hidden;">
+      <div class="modal-header text-white" style="background: linear-gradient(135deg, #1e3a8a, #2563eb);">
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-clipboard-check"></i> แผนตรวจรับงาน</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body bg-white">
+        <input type="hidden" id="insp_id">
+        <div id="insp_sheetSourceNote" class="alert alert-info py-2 px-3 small border-0 mb-3" style="display:none;">
+          <i class="fa-solid fa-file-excel"></i> รายการจากชีท — แก้แล้วบันทึกกลับ Google Sheet ได้ (ลบรายการให้ทำที่ชีท)
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-3"><label class="fw-bold small text-muted">ลำดับที่</label><input type="text" id="insp_seq" class="form-control form-control-sm"></div>
+          <div class="col-md-3"><label class="fw-bold small text-muted">Phase</label><input type="text" id="insp_phase" class="form-control form-control-sm" placeholder="3 หรือ 4"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">สถานที่ *</label><input type="text" list="mapSearchList" id="insp_place" class="form-control form-control-sm" placeholder="ชื่อสถานที่"></div>
+        </div>
+        <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
+          <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-building"></i> หน่วยงาน</h6>
+          <div class="row g-2">
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. สาขา</label><input type="text" id="insp_pwaBranch" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. เขต</label><input type="text" id="insp_pwaDistrict" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">เขตความรับผิดชอบ กฟภ.</label><input type="text" id="insp_peaZone" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กฟจ./สำนักงาน กฟภ.</label><input type="text" id="insp_peaOffice" class="form-control form-control-sm"></div>
+          </div>
+        </div>
+        <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
+          <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-calendar-check"></i> กำหนดการ</h6>
+          <div class="row g-2">
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">แผนส่งมอบงาน</label><input type="text" id="insp_handoverPlan" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">รอบส่งมอบงานจริง</label><input type="text" id="insp_handoverRound" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กำหนดตรวจงาน</label><input type="text" id="insp_inspectSchedule" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">วันตรวจงาน / หนังสือตรวจรับ</label><input type="text" id="insp_inspectLetterDate" class="form-control form-control-sm"></div>
+          </div>
+        </div>
+        <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
+          <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-users"></i> ผู้เกี่ยวข้อง</h6>
+          <div class="row g-2">
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">รายชื่อคนเข้าตรวจงาน</label><input type="text" id="insp_inspectors" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">คณะกรรมการตรวจรับ (ไปตรวจ)</label><input type="text" id="insp_committee" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">ผู้ประสานงาน TC</label><input type="text" id="insp_tcCoordinator" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">เบอร์ติดต่อ TC</label><input type="text" id="insp_tcContact" class="form-control form-control-sm"></div>
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-8"><label class="fw-bold small text-muted">File comment (ชื่อไฟล์ PDF)</label><input type="text" id="insp_fileComment" class="form-control form-control-sm"></div>
+          <div class="col-md-4"><label class="fw-bold small text-muted">ทำใบนำตัวหรือยัง?</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
+        </div>
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input" type="checkbox" id="insp_visited">
+          <label class="form-check-label fw-bold" for="insp_visited">ไปตรวจแล้ว</label>
+        </div>
+      </div>
+      <div class="modal-footer border-0 bg-light">
+        <button class="btn btn-outline-danger me-auto" id="btnDelInspection" onclick="deleteCurrentInspection()" style="display:none;"><i class="fa-solid fa-trash"></i> ลบ</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+        <button class="btn btn-custom-primary px-4" onclick="saveInspection()"><i class="fa-solid fa-save"></i> บันทึก</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal fade" id="userManageModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -776,7 +936,8 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   
   <script>
-    let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, calendar;
+    let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
+    let inspectionData = [], filteredInspectionData = [];
     let routeMap, routeMarkersLayer, routeLineLayer;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
@@ -1323,7 +1484,8 @@
       
       renderMap();
       renderTable();
-      initOutageSystem(); 
+      initOutageSystem();
+      initInspectionSystem();
     }
 
     function checkAuthToken() {
@@ -1373,6 +1535,7 @@
     }
 
     function canEditOutage() { return userRole === 'admin' || userRole === 'editor'; }
+    function canEditInspection() { return userRole === 'admin' || userRole === 'editor'; }
     function canEditAll() { return userRole === 'admin'; }
     function canEditSiteDocs() { return userRole === 'admin' || userRole === 'editor'; }
 
@@ -1393,6 +1556,11 @@
   document.getElementById('btnAddOutage').disabled = !outageEditable;
   const btnTop = document.getElementById('btnAddOutageTop');
   if (btnTop) btnTop.disabled = !outageEditable;
+  const inspectionEditable = canEditInspection();
+  const btnInsp = document.getElementById('btnAddInspection');
+  if (btnInsp) btnInsp.disabled = !inspectionEditable;
+  const btnInspTop = document.getElementById('btnAddInspectionTop');
+  if (btnInspTop) btnInspTop.disabled = !inspectionEditable;
   const btnUsers = document.getElementById('btnManageUsers');
   if (btnUsers) btnUsers.style.display = canEditAll() ? 'inline-block' : 'none';
 
@@ -1404,6 +1572,7 @@
   document.querySelectorAll('.btn-edit-doc').forEach(el => el.style.display = canEditAll() ? 'block' : 'none');
   renderTable();
   if (typeof renderOutageList === 'function' && filteredOutageData) renderOutageList();
+  if (typeof renderInspectionList === 'function' && filteredInspectionData) renderInspectionList();
 }
 
     function showDrilldown(title, locData) {
@@ -2086,6 +2255,13 @@
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(routeMap);
       routeMarkersLayer = L.layerGroup().addTo(routeMap);
       routeLineLayer = L.layerGroup().addTo(routeMap);
+      if (!window._routeMapResizeBound) {
+        window._routeMapResizeBound = true;
+        window.addEventListener('resize', function () {
+          var menu = document.getElementById('menu-route');
+          if (routeMap && menu && menu.style.display !== 'none') routeMap.invalidateSize();
+        });
+      }
     }
 
     function createRouteNumberIcon(num, isStart, isEnd) {
@@ -2267,7 +2443,7 @@
     }
 
     function switchMenu(menuId) {
-      ['dash', 'map', 'route', 'db', 'outage', 'docs'].forEach(id => {
+      ['dash', 'map', 'route', 'db', 'outage', 'inspection', 'docs'].forEach(id => {
         var menuEl = document.getElementById('menu-' + id);
         var tabEl = document.getElementById('tab-' + id);
         if (menuEl) menuEl.style.display = 'none';
@@ -2298,6 +2474,11 @@
           renderCalendar();
           window.dispatchEvent(new Event('resize'));
         }, 200);
+      }
+
+      if (menuId === 'inspection') {
+        if (!inspectionData.length) initInspectionSystem();
+        else filterInspections();
       }
     }
 
@@ -2511,13 +2692,13 @@
 
     function applyOutageCalendarLayout(events) {
       const maxPerDay = calcMaxEventsPerDay(events);
-      const dayMinH = Math.max(88, 52 + maxPerDay * 28);
-      const calHeight = Math.min(920, Math.max(520, 300 + maxPerDay * 34));
+      const dayMinH = Math.max(72, 48 + maxPerDay * 24);
+      const calHeight = 150 + 6 * dayMinH;
       const container = document.querySelector('.calendar-container');
       if (container) {
         container.style.minHeight = calHeight + 'px';
-        container.style.maxHeight = '92vh';
-        container.style.overflowY = 'auto';
+        container.style.maxHeight = 'none';
+        container.style.overflowY = 'visible';
       }
       document.querySelectorAll('.fc .fc-daygrid-day').forEach(el => {
         el.style.minHeight = dayMinH + 'px';
@@ -2657,6 +2838,79 @@
       if (!rows) return '';
       const title = opts.title === false ? '' : '<div class="small fw-bold text-primary mb-2"><i class="fa-solid fa-table-list"></i> รายละเอียดจากชีท</div>';
       return '<div class="outage-sheet-details mt-2 mb-2">' + title + rows + '</div>';
+    }
+
+    function hideOutageSheetDetailsInModal_() {
+      const wrap = document.getElementById('o_sheetDetailsWrap');
+      const ro = document.getElementById('o_sheetDetailsReadonly');
+      const panel = document.getElementById('o_sheetDetailsPanel');
+      if (wrap) wrap.style.display = 'none';
+      if (ro) ro.innerHTML = '';
+      if (panel) panel.innerHTML = '';
+      updateOutageModalStepLabels_(false);
+    }
+
+    function updateOutageModalStepLabels_(fromSheet) {
+      const dateN = fromSheet ? 3 : 2;
+      const remarkN = fromSheet ? 4 : 3;
+      const urlN = fromSheet ? 5 : 4;
+      const dateEl = document.querySelector('.o-outage-step-date');
+      const remarkEl = document.querySelector('.o-outage-step-remark');
+      const urlEl = document.querySelector('.o-outage-step-url');
+      if (dateEl) dateEl.textContent = dateN + '. เริ่มวันที่/เวลา';
+      if (remarkEl) remarkEl.textContent = remarkN + '. หมายเหตุ (เช่น เลื่อนดับไฟ)';
+      if (urlEl) urlEl.textContent = urlN + '. ลิงก์หนังสือ PEA (URL)';
+    }
+
+    function showOutageSheetDetailsInModal_(o) {
+      const wrap = document.getElementById('o_sheetDetailsWrap');
+      const ro = document.getElementById('o_sheetDetailsReadonly');
+      if (!wrap || !o) return;
+      wrap.style.display = 'block';
+      const viewHtml = renderOutageSheetDetailsHtml_(o);
+      if (ro) ro.innerHTML = viewHtml || '<div class="outage-sheet-details"><div class="text-muted small">ยังไม่มีรายละเอียดในชีท — กรอกด้านล่างแล้วบันทึก</div></div>';
+      renderOutageSheetDetailsForm_(o.sheetDetails || {});
+      updateOutageModalStepLabels_(true);
+    }
+
+    function hideOutageSheetDetailsForm_() {
+      hideOutageSheetDetailsInModal_();
+    }
+
+    function renderOutageSheetDetailsForm_(sheetDetails) {
+      const panel = document.getElementById('o_sheetDetailsPanel');
+      if (!panel) return;
+      const sd = sheetDetails || {};
+      let html = '<div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;max-height:320px;overflow-y:auto;">';
+      html += '<h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-pen-to-square"></i> รายละเอียดชีท (แก้แล้วบันทึกกลับ Excel)</h6><div class="row g-2">';
+      OUTAGE_SHEET_DETAIL_LABELS_.forEach(function(pair) {
+        if (pair[0] === 'remark') return;
+        const val = sd[pair[0]] || '';
+        html += '<div class="col-md-6"><label class="form-label small text-muted mb-0">' + escHtml(pair[1]) + '</label>';
+        html += '<input type="text" class="form-control form-control-sm o-sd-field" data-sd-key="' + escHtml(pair[0]) + '" value="' + escHtml(String(val)) + '"></div>';
+      });
+      (sd._extras || []).forEach(function(ex, idx) {
+        if (!ex || !ex.label) return;
+        html += '<div class="col-md-6"><label class="form-label small text-muted mb-0">' + escHtml(ex.label) + '</label>';
+        html += '<input type="text" class="form-control form-control-sm o-sd-extra" data-sd-extra-idx="' + idx + '" data-sd-extra-label="' + escHtml(ex.label) + '" value="' + escHtml(String(ex.value || '')) + '"></div>';
+      });
+      html += '</div></div>';
+      panel.innerHTML = html;
+    }
+
+    function readOutageSheetDetailsForm_() {
+      const d = {};
+      document.querySelectorAll('#o_sheetDetailsPanel .o-sd-field').forEach(function(inp) {
+        const k = inp.getAttribute('data-sd-key');
+        if (k) d[k] = inp.value.trim();
+      });
+      const extras = [];
+      document.querySelectorAll('#o_sheetDetailsPanel .o-sd-extra').forEach(function(inp) {
+        const label = inp.getAttribute('data-sd-extra-label');
+        if (label) extras.push({ label: label, value: inp.value.trim() });
+      });
+      if (extras.length) d._extras = extras;
+      return d;
     }
 
     function renderOutageLocReadonly(loc) {
@@ -2847,6 +3101,7 @@
       document.getElementById('btnDelOutage').style.display = 'none';
       document.getElementById('o_start')._flatpickr.clear();
       document.getElementById('o_end')._flatpickr.clear();
+      hideOutageSheetDetailsInModal_();
       setOutageModalSheetMode(false);
       showOutageModalSafe();
     }
@@ -2881,6 +3136,8 @@
       }
       onOutageProjectChange();
       document.getElementById('btnDelOutage').style.display = fromSheet ? 'none' : 'block';
+      if (fromSheet) showOutageSheetDetailsInModal_(o);
+      else hideOutageSheetDetailsInModal_();
       setOutageModalSheetMode(fromSheet);
       showOutageModalSafe();
     }
@@ -2912,6 +3169,7 @@
         remark: document.getElementById('o_remark').value,
         fileUrl: document.getElementById('o_peaUrl').value.trim()
       };
+      if (fromSheet) formData.sheetDetails = readOutageSheetDetailsForm_();
 
       if (document.activeElement) document.activeElement.blur();
       outageModalObj.hide();
@@ -2976,6 +3234,327 @@
       refreshOutageCalendar();
       renderOutageList();
       updateOutageStats();
+    }
+
+    const INSPECTION_SOURCE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit';
+    const INSPECTION_SOURCE_SHEET_TITLE = 'แผนการเข้าตรวจรับงานเฟส3-4';
+
+    const INSPECTION_FIELD_LABELS_ = [
+      ['pwaBranch', 'กปภ. สาขา'], ['pwaDistrict', 'กปภ. เขต'], ['peaZone', 'เขต กฟภ.'], ['peaOffice', 'กฟจ./สำนักงาน กฟภ.'],
+      ['handoverPlan', 'แผนส่งมอบงาน'], ['handoverRound', 'รอบส่งมอบงานจริง'], ['inspectSchedule', 'กำหนดตรวจงาน'],
+      ['inspectors', 'รายชื่อคนเข้าตรวจ'], ['fileComment', 'File comment'], ['committee', 'คณะกรรมการตรวจรับ'],
+      ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatus', 'ทำใบนำตัว'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
+    ];
+
+    function applyInspectionPack(pack, opts) {
+      opts = opts || {};
+      if (!pack || !pack.plans) return;
+      inspectionData = pack.plans || [];
+      setupInspectionPwaFilter();
+      filterInspections();
+      if (pack.error && opts.showError) {
+        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่าน/เขียนได้' });
+      } else if (pack.synced && opts.toast) {
+        Toast.fire({ icon: 'success', title: 'อัปเดตจากชีทแล้ว (' + (pack.count != null ? pack.count : pack.plans.length) + ' รายการ)' });
+      }
+    }
+
+    function initInspectionSystem() {
+      google.script.run.withSuccessHandler(res => {
+        inspectionData = res || [];
+        setupInspectionPwaFilter();
+        filterInspections();
+        google.script.run.withSuccessHandler(pack => {
+          applyInspectionPack(pack, { showError: true });
+        }).withFailureHandler(err => {
+          Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทตรวจรับไม่สำเร็จ', text: err.message });
+        }).refreshInspectionPlansFromSource(true);
+      }).withFailureHandler(err => {
+        inspectionData = [];
+        filterInspections();
+        Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
+      }).getInspectionPlans();
+    }
+
+    function refreshInspectionFromSheet() {
+      const btn = document.getElementById('btnRefreshInspectionSheet');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังดึง...'; }
+      Toast.fire({ icon: 'info', title: 'กำลังดึงจากชีท...' });
+      google.script.run.withSuccessHandler(pack => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-rotate"></i> รีเฟรชจากชีท'; }
+        applyInspectionPack(pack, { showError: true, toast: true });
+      }).withFailureHandler(err => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-rotate"></i> รีเฟรชจากชีท'; }
+        Swal.fire({ icon: 'error', title: 'รีเฟรชไม่สำเร็จ', text: err.message });
+      }).refreshInspectionPlansFromSource(true);
+    }
+
+    function setupInspectionPwaFilter() {
+      const sel = document.getElementById('inspectionPwaSelect');
+      if (!sel) return;
+      const cur = sel.value;
+      const districts = [...new Set((inspectionData || []).map(p => (p.pwaDistrict || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+      sel.innerHTML = '<option value="">ทุกเขต กปภ.</option>' + districts.map(d => '<option value="' + escHtml(d) + '">' + escHtml(d) + '</option>').join('');
+      if (cur && districts.includes(cur)) sel.value = cur;
+    }
+
+    function inspectionMatchesPhaseFilter_(p, phaseVal) {
+      const ph = String(p.phase || '').trim();
+      if (!phaseVal) return true;
+      if (phaseVal === '34') return ph === '3' || ph === '4';
+      return ph === phaseVal;
+    }
+
+    function renderInspectionDetailsHtml_(p) {
+      let rows = '';
+      INSPECTION_FIELD_LABELS_.forEach(function(pair) {
+        const val = p[pair[0]];
+        if (val == null || val === '') return;
+        rows += '<div class="inspection-card-meta"><span class="meta-label">' + escHtml(pair[1]) + ':</span> ' + escHtml(String(val)) + '</div>';
+      });
+      return rows ? '<div class="inspection-detail-block mt-2 mb-2">' + rows + '</div>' : '';
+    }
+
+    function updateInspectionStats() {
+      const source = filteredInspectionData || [];
+      let phase34 = 0, done = 0, pending = 0;
+      source.forEach(p => {
+        const ph = String(p.phase || '').trim();
+        if (ph === '3' || ph === '4') phase34++;
+        if (p.visited) done++; else pending++;
+      });
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('statInspectionTotal', source.length);
+      set('statInspectionPhase34', phase34);
+      set('statInspectionDone', done);
+      set('statInspectionPending', pending);
+    }
+
+    function renderInspectionList() {
+      const container = document.getElementById('inspectionListContainer');
+      if (!container) return;
+      if (!filteredInspectionData.length) {
+        container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการตามตัวกรอง</p></div>';
+        return;
+      }
+      const sorted = [...filteredInspectionData].sort((a, b) => {
+        const pa = parseInt(a.seq, 10), pb = parseInt(b.seq, 10);
+        if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
+        return (a.place || '').localeCompare(b.place || '', 'th');
+      });
+      container.innerHTML = sorted.map(p => {
+        const safeId = String(p.id).replace(/'/g, "\\'");
+        const ph = String(p.phase || '-').trim();
+        const phaseCls = (ph === '3' || ph === '4') ? 'bg-danger' : (ph === '2' ? 'bg-primary' : 'bg-success');
+        const cardStyle = p.visited
+          ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;'
+          : 'border-left: 5px solid #60a5fa;';
+        const statusBadge = p.visited
+          ? '<span class="badge bg-success mb-2"><i class="fa-solid fa-check-circle"></i> ไปแล้ว</span>'
+          : '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-hourglass-half"></i> ยังไม่ไป</span>';
+        const sheetBadge = p.fromSheet ? ' <span class="badge bg-info text-dark mb-2"><i class="fa-solid fa-file-excel"></i> จากชีท</span>' : '';
+        const editBtn = canEditInspection()
+          ? '<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width:32px;height:32px;" onclick="editInspection(\'' + safeId + '\')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>'
+          : '';
+        const visitToggle = canEditInspection()
+          ? '<div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" onchange="toggleInspectionVisited(\'' + safeId + '\', this.checked)" ' + (p.visited ? 'checked' : '') + '></div>'
+          : (p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<i class="fa-regular fa-circle text-muted"></i>');
+        const scheduleHtml = p.inspectSchedule
+          ? '<div class="text-muted small mb-2"><i class="fa-regular fa-calendar-days text-primary"></i> กำหนดตรวจ: <b>' + escHtml(p.inspectSchedule) + '</b></div>'
+          : '';
+        const locHint = findLocationForOutage(p.place)
+          ? '<button class="btn btn-sm btn-outline-info rounded-pill mt-2" onclick="viewInspectionLocation(\'' + safeId + '\')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>'
+          : '';
+        return '<div class="card border-0 shadow-sm mb-3" style="border-radius:12px;' + cardStyle + ' transition:0.3s;" onmouseover="this.style.transform=\'translateY(-2px)\'" onmouseout="this.style.transform=\'translateY(0)\'">' +
+          '<div class="card-body p-3">' +
+          '<div class="d-flex justify-content-between align-items-start">' +
+          '<div class="flex-grow-1 pe-2">' +
+          statusBadge + sheetBadge +
+          ' <span class="badge ' + phaseCls + ' inspection-phase-badge mb-2">เฟส ' + escHtml(ph) + '</span>' +
+          (p.seq ? ' <span class="badge bg-secondary inspection-phase-badge mb-2">#' + escHtml(p.seq) + '</span>' : '') +
+          '<h6 class="fw-bold mb-1 text-dark" style="font-size:1.05rem;">' + escHtml(p.place) + '</h6>' +
+          '<div class="small text-muted mb-1">' + escHtml(p.pwaBranch || '-') + ' · เขต ' + escHtml(p.pwaDistrict || '-') + '</div>' +
+          scheduleHtml +
+          renderInspectionDetailsHtml_(p) +
+          '</div><div>' + editBtn + '</div></div>' +
+          '<div class="d-flex justify-content-between align-items-center bg-white rounded-3 p-2 mt-2 border">' +
+          '<span class="small fw-bold text-muted">ไปตรวจแล้วหรือยัง?</span>' + visitToggle +
+          '</div>' + locHint +
+          '</div></div>';
+      }).join('');
+    }
+
+    function filterInspections() {
+      const textVal = (document.getElementById('inspectionSearchInput')?.value || '').toLowerCase().trim();
+      const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
+      const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
+      const pwaVal = document.getElementById('inspectionPwaSelect')?.value || '';
+
+      filteredInspectionData = (inspectionData || []).filter(p => {
+        const blob = [p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.inspectors, p.tcCoordinator, p.tcContact, p.fileComment].join(' ').toLowerCase();
+        const matchText = !textVal || blob.includes(textVal);
+        const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
+        const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
+        const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
+        return matchText && matchPhase && matchVisited && matchPwa;
+      });
+
+      renderInspectionList();
+      updateInspectionStats();
+    }
+
+    function fillInspectionForm_(p) {
+      document.getElementById('insp_id').value = p.id || '';
+      document.getElementById('insp_seq').value = p.seq || '';
+      document.getElementById('insp_phase').value = p.phase || '';
+      document.getElementById('insp_place').value = p.place || '';
+      document.getElementById('insp_pwaBranch').value = p.pwaBranch || '';
+      document.getElementById('insp_pwaDistrict').value = p.pwaDistrict || '';
+      document.getElementById('insp_peaZone').value = p.peaZone || '';
+      document.getElementById('insp_peaOffice').value = p.peaOffice || '';
+      document.getElementById('insp_handoverPlan').value = p.handoverPlan || '';
+      document.getElementById('insp_handoverRound').value = p.handoverRound || '';
+      document.getElementById('insp_inspectSchedule').value = p.inspectSchedule || '';
+      document.getElementById('insp_inspectors').value = p.inspectors || '';
+      document.getElementById('insp_fileComment').value = p.fileComment || '';
+      document.getElementById('insp_committee').value = p.committee || '';
+      document.getElementById('insp_inspectLetterDate').value = p.inspectLetterDate || '';
+      document.getElementById('insp_passLetterStatus').value = p.passLetterStatus || '';
+      document.getElementById('insp_tcCoordinator').value = p.tcCoordinator || '';
+      document.getElementById('insp_tcContact').value = p.tcContact || '';
+      document.getElementById('insp_visited').checked = !!p.visited;
+    }
+
+    function readInspectionForm_() {
+      return {
+        id: document.getElementById('insp_id').value,
+        seq: document.getElementById('insp_seq').value.trim(),
+        phase: document.getElementById('insp_phase').value.trim(),
+        place: document.getElementById('insp_place').value.trim(),
+        pwaBranch: document.getElementById('insp_pwaBranch').value.trim(),
+        pwaDistrict: document.getElementById('insp_pwaDistrict').value.trim(),
+        peaZone: document.getElementById('insp_peaZone').value.trim(),
+        peaOffice: document.getElementById('insp_peaOffice').value.trim(),
+        handoverPlan: document.getElementById('insp_handoverPlan').value.trim(),
+        handoverRound: document.getElementById('insp_handoverRound').value.trim(),
+        inspectSchedule: document.getElementById('insp_inspectSchedule').value.trim(),
+        inspectors: document.getElementById('insp_inspectors').value.trim(),
+        fileComment: document.getElementById('insp_fileComment').value.trim(),
+        committee: document.getElementById('insp_committee').value.trim(),
+        inspectLetterDate: document.getElementById('insp_inspectLetterDate').value.trim(),
+        passLetterStatus: document.getElementById('insp_passLetterStatus').value.trim(),
+        visited: document.getElementById('insp_visited').checked,
+        tcCoordinator: document.getElementById('insp_tcCoordinator').value.trim(),
+        tcContact: document.getElementById('insp_tcContact').value.trim()
+      };
+    }
+
+    function showInspectionModalSafe() {
+      if (!inspectionModalObj) inspectionModalObj = new bootstrap.Modal(document.getElementById('inspectionModal'), { focus: false });
+      if (document.activeElement) document.activeElement.blur();
+      inspectionModalObj.show();
+    }
+
+    function openInspectionModal() {
+      if (!canEditInspection()) return;
+      fillInspectionForm_({});
+      document.getElementById('insp_sheetSourceNote').style.display = 'none';
+      document.getElementById('btnDelInspection').style.display = 'none';
+      showInspectionModalSafe();
+    }
+
+    function editInspection(id) {
+      const p = inspectionData.find(x => x.id == id);
+      if (!p) return;
+      if (!canEditInspection()) {
+        Swal.fire({
+          title: p.place,
+          html: '<div class="text-start small">' + renderInspectionDetailsHtml_(p) + '</div>',
+          confirmButtonColor: '#2563eb',
+          confirmButtonText: 'ปิด'
+        });
+        return;
+      }
+      fillInspectionForm_(p);
+      const fromSheet = !!(p.fromSheet || String(p.id).indexOf('insp-') === 0);
+      document.getElementById('insp_sheetSourceNote').style.display = fromSheet ? 'block' : 'none';
+      document.getElementById('btnDelInspection').style.display = fromSheet ? 'none' : 'block';
+      showInspectionModalSafe();
+    }
+
+    function saveInspection() {
+      if (!canEditInspection()) return;
+      const formData = readInspectionForm_();
+      if (!formData.place) { Swal.fire({ icon: 'warning', title: 'กรุณาระบุสถานที่' }); return; }
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      if (document.activeElement) document.activeElement.blur();
+      if (inspectionModalObj) inspectionModalObj.hide();
+      Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+      google.script.run.withSuccessHandler(() => {
+        Swal.fire({ icon: 'success', title: 'สำเร็จ', timer: 1500 });
+        initInspectionSystem();
+      }).withFailureHandler(err => {
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
+      }).saveInspectionPlan(formData, auth);
+    }
+
+    function deleteCurrentInspection() {
+      if (!canEditInspection()) return;
+      const id = document.getElementById('insp_id').value;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Swal.fire({ title: 'ลบรายการนี้?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
+        if (!res.isConfirmed) return;
+        google.script.run.withSuccessHandler(() => {
+          if (inspectionModalObj) inspectionModalObj.hide();
+          initInspectionSystem();
+        }).withFailureHandler(err => {
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
+        }).deleteInspectionPlan(id, auth);
+      });
+    }
+
+    function toggleInspectionVisited(id, isChecked) {
+      if (!canEditInspection()) return;
+      const p = inspectionData.find(x => x.id == id);
+      if (!p) return;
+      const formData = Object.assign({}, p, { visited: isChecked });
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        filterInspections();
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Toast.fire({ icon: 'info', title: 'กำลังอัปเดต...' });
+      google.script.run.withSuccessHandler(() => {
+        const idx = inspectionData.findIndex(x => x.id == id);
+        if (idx > -1) inspectionData[idx].visited = isChecked;
+        filterInspections();
+      }).withFailureHandler(err => {
+        filterInspections();
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปเดตไม่สำเร็จ', text: err.message });
+      }).saveInspectionPlan(formData, auth);
+    }
+
+    function viewInspectionLocation(id) {
+      const p = inspectionData.find(x => x.id == id);
+      if (!p) return;
+      const loc = findLocationForOutage(p.place);
+      if (!loc) { Swal.fire({ icon: 'info', title: 'ไม่พบข้อมูลสถานที่ในฐานข้อมูล' }); return; }
+      Swal.fire({
+        title: loc.name || p.place,
+        html: renderOutageLocReadonly(loc),
+        width: 620,
+        confirmButtonColor: '#2563eb',
+        confirmButtonText: 'ปิด'
+      });
     }
 
     // --- จัดการแอดมินรอง (แอดมินหลักเท่านั้น) ---

@@ -5,6 +5,11 @@ const OUTAGE_SHEET = 'OutagePlan';
 const OUTAGE_SOURCE_SS_ID = '12oKHsTOG9FpPE9F80ACAjYox3s_WxVgl_2gTovEyx_I';
 const OUTAGE_SOURCE_TITLE = 'กำหนดการดับกระแสไฟฟ้า ระยะที่ 3-4';
 const OUTAGE_SOURCE_URL = 'https://docs.google.com/spreadsheets/d/' + OUTAGE_SOURCE_SS_ID + '/edit';
+/** ชีทต้นทาง "แผนการเข้าตรวจรับงานเฟส3-4" — ต้องแชร์ให้บัญชีเจ้าของ Apps Script อ่าน/เขียนได้ */
+const INSPECTION_SHEET = 'InspectionPlan';
+const INSPECTION_SOURCE_SS_ID = '18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc';
+const INSPECTION_SOURCE_TITLE = 'แผนการเข้าตรวจรับงานเฟส3-4';
+const INSPECTION_SOURCE_URL = 'https://docs.google.com/spreadsheets/d/' + INSPECTION_SOURCE_SS_ID + '/edit';
 const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1_SRxF0_obGuzFCo9NDcA3QPiZDn7or-P';
@@ -138,6 +143,10 @@ function dispatchApi_(action, args, sessionToken) {
     case 'saveOutageData': return saveOutageData(args[0], args[1] || tok);
     case 'updateOutageStatus': return updateOutageStatus(args[0], args[1], args[2], args[3] || tok);
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
+    case 'getInspectionPlans': return getInspectionPlans();
+    case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
+    case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
+    case 'deleteInspectionPlan': return deleteInspectionPlan(args[0], args[1] || tok);
     case 'updateLocation': return updateLocation(args[0], args[1] || tok);
     case 'getUsers': return getUsers(args[0] || tok);
     case 'createDeputyAdmin': return createDeputyAdmin(args[0], args[1], args[2] || tok);
@@ -280,6 +289,13 @@ function assertOutageFromSession_(sessionToken) {
   const role = getRoleFromSession_(sessionToken);
   if (role !== 'admin' && role !== 'editor') {
     throw new Error('คุณไม่มีสิทธิ์แก้ไขแผนดับไฟ');
+  }
+}
+
+function assertInspectionFromSession_(sessionToken) {
+  const role = getRoleFromSession_(sessionToken);
+  if (role !== 'admin' && role !== 'editor') {
+    throw new Error('คุณไม่มีสิทธิ์แก้ไขแผนตรวจรับงาน');
   }
 }
 
@@ -1169,6 +1185,7 @@ function saveOutageData(formObj, sessionToken) {
           fileUrl
         ]]);
         if (isSyncedOutageId_(formObj.id)) {
+          if (formObj.sheetDetails) formObj.sheetDetails.remark = formObj.remark || '';
           try {
             writeOutageBackToSource_(formObj.id, formObj, startDate, endDate);
             CacheService.getScriptCache().remove(OUTAGE_SYNC_CACHE_KEY);
@@ -1177,6 +1194,10 @@ function saveOutageData(formObj, sessionToken) {
             return { success: true, message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message };
           }
         }
+        const sheetDetailsStr = formObj.sheetDetails
+          ? JSON.stringify(formObj.sheetDetails)
+          : (data[i][11] != null ? data[i][11].toString() : '');
+        sheet.getRange(i + 1, 12).setValue(sheetDetailsStr);
         logAction('แก้ไขแผนดับไฟ: ' + formObj.projectName);
         return { success: true, message: isSyncedOutageId_(formObj.id) ? 'อัปเดตแล้ว (แอป + ชีทกำหนดการ)' : 'อัปเดตข้อมูลสำเร็จ' };
       }
@@ -1213,7 +1234,41 @@ function formatTimeRangeForSheet_(start, end) {
   return fmt(start) + ' – ' + fmt(end);
 }
 
-/** เขียนชื่อ/วัน/หมายเหตุกลับไปชีทกำหนดการ (สองทาง) */
+/** เขียนชื่อ/วัน/หมายเหตุ/รายละเอียดชีทกลับไปชีทกำหนดการ (สองทาง) */
+function writeOutageSheetDetailsToSource_(srcSheet, ref, map, sheetDetails) {
+  const sd = sheetDetails || {};
+  const dc = map.detailCols || {};
+  const detailKeys = ['tcDocNo', 'peaTcReceivedDate', 'outageDate', 'outageTime', 'outageDateNew', 'outageTimeNew',
+    'powerStatus', 'peaPwaDoc', 'peaPwaDocNo', 'peaPwaReceivedDate', 'peaPeaSiteDoc', 'peaPeaSiteDocNo',
+    'peaPeaSiteReceivedDate', 'peaCoordinator', 'peaPosition', 'peaDept', 'peaPhoneEgat', 'peaContact',
+    'tcCoordinator', 'tcContact', 'coordRequestDocNo', 'notifyAgency'];
+
+  if (sd.outageDate != null && map.date != null) srcSheet.getRange(ref.row, map.date + 1).setValue(sd.outageDate || '');
+  if (sd.outageTime != null && map.time != null) srcSheet.getRange(ref.row, map.time + 1).setValue(sd.outageTime || '');
+  if (sd.outageDateNew != null && map.dateNew != null) srcSheet.getRange(ref.row, map.dateNew + 1).setValue(sd.outageDateNew || '');
+  if (sd.outageTimeNew != null && map.timeNew != null) srcSheet.getRange(ref.row, map.timeNew + 1).setValue(sd.outageTimeNew || '');
+
+  detailKeys.forEach(function(key) {
+    if (sd[key] == null) return;
+    const col = dc[key];
+    if (col == null) return;
+    srcSheet.getRange(ref.row, col + 1).setValue(sd[key] || '');
+  });
+
+  const headers = map.headerLabels || [];
+  (sd._extras || []).forEach(function(ex) {
+    if (!ex || !ex.label) return;
+    const want = cellStr_(ex.label).replace(/\s+/g, ' ').trim();
+    for (let c = 0; c < headers.length; c++) {
+      const h = cellStr_(headers[c]).replace(/\s+/g, ' ').trim();
+      if (h === want) {
+        srcSheet.getRange(ref.row, c + 1).setValue(ex.value || '');
+        break;
+      }
+    }
+  });
+}
+
 function writeOutageBackToSource_(id, formObj, startDate, endDate) {
   const ref = parseSyncedOutageRowRef_(id);
   if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
@@ -1243,11 +1298,21 @@ function writeOutageBackToSource_(id, formObj, startDate, endDate) {
     if (map.date != null) srcSheet.getRange(ref.row, map.date + 1).setValue(dateText);
     if (map.dateNew != null) srcSheet.getRange(ref.row, map.dateNew + 1).setValue('');
     if (map.time != null) srcSheet.getRange(ref.row, map.time + 1).setValue(timeText);
+    if (map.timeNew != null) srcSheet.getRange(ref.row, map.timeNew + 1).setValue('');
+    if (formObj.sheetDetails) {
+      formObj.sheetDetails.outageDate = dateText;
+      formObj.sheetDetails.outageTime = timeText;
+      if (formObj.sheetDetails.outageDateNew != null) formObj.sheetDetails.outageDateNew = '';
+      if (formObj.sheetDetails.outageTimeNew != null) formObj.sheetDetails.outageTimeNew = '';
+    }
   } else {
     if (map.date != null) srcSheet.getRange(ref.row, map.date + 1).setValue('');
     if (map.dateNew != null) srcSheet.getRange(ref.row, map.dateNew + 1).setValue('');
     if (map.time != null) srcSheet.getRange(ref.row, map.time + 1).setValue('');
+    if (map.timeNew != null) srcSheet.getRange(ref.row, map.timeNew + 1).setValue('');
   }
+
+  if (formObj.sheetDetails) writeOutageSheetDetailsToSource_(srcSheet, ref, map, formObj.sheetDetails);
   return true;
 }
 
@@ -1277,6 +1342,367 @@ function deleteOutage(id, sessionToken) {
   const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(OUTAGE_SHEET);
   if (!sheet) throw new Error('ไม่พบตารางแผนดับไฟ');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0].toString() === id.toString()) {
+      sheet.deleteRow(i + 1);
+      return true;
+    }
+  }
+  throw new Error('ไม่พบรายการที่ต้องการลบ');
+}
+
+// --- แผนการเข้าตรวจรับงานเฟส3-4 ---
+const INSPECTION_HEADERS = [
+  'ID', 'Seq', 'Phase', 'Place', 'PwaBranch', 'PwaDistrict', 'PeaZone', 'PeaOffice',
+  'HandoverPlan', 'HandoverRound', 'InspectSchedule', 'Inspectors', 'FileComment',
+  'Committee', 'InspectLetterDate', 'PassLetterStatus', 'Visited', 'TcCoordinator', 'TcContact'
+];
+
+const INSPECTION_SOURCE_COL_KEYS_ = [
+  'seq', 'phase', 'place', 'pwaBranch', 'pwaDistrict', 'peaZone', 'peaOffice',
+  'handoverPlan', 'handoverRound', 'inspectSchedule', 'inspectors', 'fileComment',
+  'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'tcCoordinator', 'tcContact'
+];
+
+function ensureInspectionSheet_(ss) {
+  let sheet = ss.getSheetByName(INSPECTION_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(INSPECTION_SHEET);
+    sheet.appendRow(INSPECTION_HEADERS);
+    return sheet;
+  }
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => (h || '').toString().trim());
+  if (headers[0] !== 'ID') {
+    sheet.insertRowBefore(1);
+    sheet.getRange(1, 1, 1, INSPECTION_HEADERS.length).setValues([INSPECTION_HEADERS]);
+  } else {
+    INSPECTION_HEADERS.forEach((name, i) => {
+      if (headers[i] !== name) sheet.getRange(1, i + 1).setValue(name);
+    });
+  }
+  return sheet;
+}
+
+function isSyncedInspectionId_(id) {
+  return id != null && id.toString().indexOf('insp-') === 0;
+}
+
+function buildSyncedInspectionId_(sheetId, rowIndex1Based) {
+  return 'insp-' + sheetId + '-r' + rowIndex1Based;
+}
+
+function parseSyncedInspectionRowRef_(id) {
+  const m = String(id || '').match(/^insp-(\d+)-r(\d+)$/);
+  if (!m) return null;
+  return { sheetId: Number(m[1]), row: Number(m[2]) };
+}
+
+function parseInspectionVisited_(val) {
+  if (val === true || val === false) return val;
+  const s = cellStr_(val).toLowerCase();
+  if (!s) return false;
+  if (s === 'true' || s === 'yes' || s === 'y' || s === '1' || s.indexOf('ไปแล้ว') >= 0) return true;
+  if (s === 'false' || s === 'no' || s === '0') return false;
+  return s === 'TRUE';
+}
+
+function mapInspectionRow_(row) {
+  const id = row[0];
+  const fromSheet = isSyncedInspectionId_(id);
+  return {
+    id: id,
+    seq: cellStr_(row[1]),
+    phase: cellStr_(row[2]),
+    place: cellStr_(row[3]),
+    pwaBranch: cellStr_(row[4]),
+    pwaDistrict: cellStr_(row[5]),
+    peaZone: cellStr_(row[6]),
+    peaOffice: cellStr_(row[7]),
+    handoverPlan: cellStr_(row[8]),
+    handoverRound: cellStr_(row[9]),
+    inspectSchedule: cellStr_(row[10]),
+    inspectors: cellStr_(row[11]),
+    fileComment: cellStr_(row[12]),
+    committee: cellStr_(row[13]),
+    inspectLetterDate: cellStr_(row[14]),
+    passLetterStatus: cellStr_(row[15]),
+    visited: parseInspectionVisited_(row[16]),
+    tcCoordinator: cellStr_(row[17]),
+    tcContact: cellStr_(row[18]),
+    fromSheet: fromSheet,
+    sourceTitle: fromSheet ? INSPECTION_SOURCE_TITLE : '',
+    sourceUrl: fromSheet ? INSPECTION_SOURCE_URL : ''
+  };
+}
+
+function readInspectionsMapped_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  return data.slice(1).filter(r => r[3]).map(mapInspectionRow_);
+}
+
+function findInspectionHeaderMap_(values) {
+  const fallback = {
+    headerRow: 0,
+    cols: { seq: 0, phase: 1, place: 2, pwaBranch: 3, pwaDistrict: 4, peaZone: 5, peaOffice: 6,
+      handoverPlan: 7, handoverRound: 8, inspectSchedule: 9, inspectors: 10, fileComment: 11,
+      committee: 12, inspectLetterDate: 13, passLetterStatus: 14, visited: 15, tcCoordinator: 16, tcContact: 17 }
+  };
+  if (!values || !values.length) return fallback;
+  for (let r = 0; r < Math.min(values.length, 8); r++) {
+    const row = values[r];
+    const map = { headerRow: r, cols: {} };
+    for (let c = 0; c < row.length; c++) {
+      const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
+      const h = t.toLowerCase();
+      if (!t) continue;
+      if (t === 'ลำดับที่' || h.indexOf('ลำดับ') === 0) map.cols.seq = c;
+      else if (h === 'phase' || t === 'Phase') map.cols.phase = c;
+      else if (t === 'สถานที่') map.cols.place = c;
+      else if (h.indexOf('กปภ') >= 0 && h.indexOf('สาขา') >= 0) map.cols.pwaBranch = c;
+      else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0) map.cols.pwaDistrict = c;
+      else if (h.indexOf('กฟภ') >= 0 && h.indexOf('ความรับผิดชอบ') >= 0) map.cols.peaZone = c;
+      else if (h.indexOf('แผนส่งมอบงาน') >= 0) map.cols.handoverPlan = c;
+      else if (h.indexOf('รอบส่งมอบงานจริง') >= 0) map.cols.handoverRound = c;
+      else if (h.indexOf('กำหนดตรวจงาน') >= 0) map.cols.inspectSchedule = c;
+      else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
+      else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
+      else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
+      else if (h.indexOf('วันตรวจงาน') >= 0 || h.indexOf('หนังสือตรวจรับ') >= 0) map.cols.inspectLetterDate = c;
+      else if (h.indexOf('ใบนำตัว') >= 0) map.cols.passLetterStatus = c;
+      else if (h.indexOf('ไปแล้ว') >= 0) map.cols.visited = c;
+      else if (h.indexOf('ผู้ประสานงาน tc') >= 0) map.cols.tcCoordinator = c;
+      else if (h.indexOf('เบอร์ติดต่อ tc') >= 0) map.cols.tcContact = c;
+      else if (h.indexOf('กฟจ') >= 0 || h.indexOf('กฟน') >= 0) {
+        if (map.cols.peaOffice == null && map.cols.peaZone != null && c === map.cols.peaZone + 1) map.cols.peaOffice = c;
+      }
+    }
+    if (map.cols.place != null) {
+      if (map.cols.peaOffice == null && map.cols.peaZone != null) map.cols.peaOffice = map.cols.peaZone + 1;
+      return map;
+    }
+  }
+  return fallback;
+}
+
+function isInspectionSourceDataRow_(row, map) {
+  if (!row || !map || !map.cols || map.cols.place == null) return false;
+  const place = cellStr_(row[map.cols.place]);
+  if (!place || place === 'สถานที่') return false;
+  if (place.indexOf('ลำดับ') >= 0) return false;
+  return place.length >= 2;
+}
+
+function extractInspectionFieldsFromSourceRow_(row, map) {
+  const cols = map.cols;
+  const out = {};
+  INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
+    const col = cols[key];
+    if (col == null) { out[key] = ''; return; }
+    if (key === 'visited') out[key] = parseInspectionVisited_(row[col]);
+    else out[key] = cellStr_(row[col]);
+  });
+  return out;
+}
+
+function inspectionFieldsToLocalRow_(id, fields) {
+  return [
+    id,
+    fields.seq || '',
+    fields.phase || '',
+    fields.place || '',
+    fields.pwaBranch || '',
+    fields.pwaDistrict || '',
+    fields.peaZone || '',
+    fields.peaOffice || '',
+    fields.handoverPlan || '',
+    fields.handoverRound || '',
+    fields.inspectSchedule || '',
+    fields.inspectors || '',
+    fields.fileComment || '',
+    fields.committee || '',
+    fields.inspectLetterDate || '',
+    fields.passLetterStatus || '',
+    !!fields.visited,
+    fields.tcCoordinator || '',
+    fields.tcContact || ''
+  ];
+}
+
+function collectSourceInspectionRows_() {
+  const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
+  const srcSheet = srcSs.getSheets()[0];
+  const lastRow = srcSheet.getLastRow();
+  const lastCol = Math.max(srcSheet.getLastColumn(), 18);
+  if (lastRow < 2) return [];
+  const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const map = findInspectionHeaderMap_(values);
+  const sheetId = srcSheet.getSheetId();
+  const collected = [];
+  for (let r = map.headerRow + 1; r < values.length; r++) {
+    const row = values[r];
+    if (!isInspectionSourceDataRow_(row, map)) continue;
+    const fields = extractInspectionFieldsFromSourceRow_(row, map);
+    collected.push({
+      id: buildSyncedInspectionId_(sheetId, r + 1),
+      fields: fields,
+      sourceRow: r + 1
+    });
+  }
+  return collected;
+}
+
+function syncInspectionsFromSource_(destSheet) {
+  const rows = collectSourceInspectionRows_();
+  const newData = [INSPECTION_HEADERS];
+  rows.forEach(function(item) {
+    newData.push(inspectionFieldsToLocalRow_(item.id, item.fields));
+  });
+  destSheet.clearContents();
+  destSheet.getRange(1, 1, newData.length, INSPECTION_HEADERS.length).setValues(newData);
+  return rows.length;
+}
+
+function getInspectionPlans() {
+  const ss = getSpreadsheet_();
+  const sheet = ensureInspectionSheet_(ss);
+  return readInspectionsMapped_(sheet);
+}
+
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v1';
+const INSPECTION_SYNC_TTL_SEC = 60;
+
+function refreshInspectionPlansFromSource(force) {
+  const wantForce = !!force;
+  const cache = CacheService.getScriptCache();
+  if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
+    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+  }
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL, error: 'ระบบกำลังซิงก์อยู่ ลองใหม่ในอีกสักครู่' };
+  }
+  try {
+    if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
+      return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+    }
+    const ss = getSpreadsheet_();
+    const sheet = ensureInspectionSheet_(ss);
+    try {
+      const n = syncInspectionsFromSource_(sheet);
+      cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
+      return {
+        synced: true,
+        count: n,
+        plans: readInspectionsMapped_(sheet),
+        sourceTitle: INSPECTION_SOURCE_TITLE,
+        sourceUrl: INSPECTION_SOURCE_URL
+      };
+    } catch (e) {
+      Logger.log('inspection sync failed: ' + e.message);
+      try { logAction('ซิงก์แผนตรวจรับล้มเหลว: ' + e.message); } catch (ignore) {}
+      return {
+        synced: false,
+        error: e.message,
+        plans: readInspectionsMapped_(sheet),
+        sourceTitle: INSPECTION_SOURCE_TITLE,
+        sourceUrl: INSPECTION_SOURCE_URL
+      };
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function inspectionFormToFields_(formObj) {
+  return {
+    seq: (formObj.seq || '').toString().trim(),
+    phase: (formObj.phase || '').toString().trim(),
+    place: (formObj.place || '').toString().trim(),
+    pwaBranch: (formObj.pwaBranch || '').toString().trim(),
+    pwaDistrict: (formObj.pwaDistrict || '').toString().trim(),
+    peaZone: (formObj.peaZone || '').toString().trim(),
+    peaOffice: (formObj.peaOffice || '').toString().trim(),
+    handoverPlan: (formObj.handoverPlan || '').toString().trim(),
+    handoverRound: (formObj.handoverRound || '').toString().trim(),
+    inspectSchedule: (formObj.inspectSchedule || '').toString().trim(),
+    inspectors: (formObj.inspectors || '').toString().trim(),
+    fileComment: (formObj.fileComment || '').toString().trim(),
+    committee: (formObj.committee || '').toString().trim(),
+    inspectLetterDate: (formObj.inspectLetterDate || '').toString().trim(),
+    passLetterStatus: (formObj.passLetterStatus || '').toString().trim(),
+    visited: !!formObj.visited,
+    tcCoordinator: (formObj.tcCoordinator || '').toString().trim(),
+    tcContact: (formObj.tcContact || '').toString().trim()
+  };
+}
+
+function writeInspectionBackToSource_(id, fields) {
+  const ref = parseSyncedInspectionRowRef_(id);
+  if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
+  const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
+  const srcSheet = srcSs.getSheets()[0];
+  if (srcSheet.getSheetId() !== ref.sheetId) throw new Error('ไม่พบแท็บชีทต้นทาง');
+  const lastCol = Math.max(srcSheet.getLastColumn(), 18);
+  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 8));
+  const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
+  const map = findInspectionHeaderMap_(values);
+  const cols = map.cols;
+  INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
+    const col = cols[key];
+    if (col == null) return;
+    let val = fields[key];
+    if (key === 'visited') val = val ? 'TRUE' : '';
+    srcSheet.getRange(ref.row, col + 1).setValue(val == null ? '' : val);
+  });
+  return true;
+}
+
+function saveInspectionPlan(formObj, sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  const fields = inspectionFormToFields_(formObj);
+  if (!fields.place) throw new Error('กรุณาระบุสถานที่');
+
+  const ss = getSpreadsheet_();
+  const sheet = ensureInspectionSheet_(ss);
+
+  if (formObj.id) {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0].toString() === formObj.id.toString()) {
+        sheet.getRange(i + 1, 1, i + 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(formObj.id, fields)]);
+        if (isSyncedInspectionId_(formObj.id)) {
+          try {
+            writeInspectionBackToSource_(formObj.id, fields);
+            CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
+          } catch (e) {
+            logAction('บันทึกแผนตรวจรับแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
+            return { success: true, message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message };
+          }
+        }
+        logAction('แก้ไขแผนตรวจรับ: ' + fields.place);
+        return { success: true, message: isSyncedInspectionId_(formObj.id) ? 'อัปเดตแล้ว (แอป + ชีท)' : 'อัปเดตข้อมูลสำเร็จ' };
+      }
+    }
+    throw new Error('ไม่พบรายการที่ต้องการแก้ไข');
+  }
+
+  const newId = new Date().getTime().toString();
+  sheet.appendRow(inspectionFieldsToLocalRow_(newId, fields));
+  logAction('เพิ่มแผนตรวจรับ: ' + fields.place);
+  return { success: true, message: 'บันทึกข้อมูลสำเร็จ' };
+}
+
+function deleteInspectionPlan(id, sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  if (isSyncedInspectionId_(id)) {
+    throw new Error('รายการจากชีทต้นทางลบไม่ได้ — แก้หรือลบที่ Google Sheet');
+  }
+  const ss = getSpreadsheet_();
+  const sheet = ss.getSheetByName(INSPECTION_SHEET);
+  if (!sheet) throw new Error('ไม่พบตารางแผนตรวจรับ');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === id.toString()) {
