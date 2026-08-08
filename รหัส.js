@@ -1279,6 +1279,13 @@ function inspectionNormalizeBeYear_(beYear) {
 function formatInspectionDateDisplay_(val) {
   if (val == null || val === '') return '';
   const s = cellStr_(val).replace(/\s+/g, ' ').trim();
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+    if (!isNaN(d.getTime())) {
+      return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+    }
+  }
   const m = s.match(/^(\d{1,2})\s+([ก-๙][ก-๙\.]*)\s+(\d{4})$/);
   if (m) {
     const d = parseThaiDate_(s);

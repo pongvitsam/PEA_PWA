@@ -2097,8 +2097,8 @@
       });
     }
 
-    window.calcDistanceMyLoc = function(destLat, destLng) {
-      var resultBox = document.getElementById('distMeResult');
+    window.calcDistanceMyLoc = function(destLat, destLng, resultBoxId) {
+      var resultBox = document.getElementById(resultBoxId || 'distMeResult');
       if (!resultBox) return;
 
       resultBox.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> กำลังเตรียมพิกัดและคำนวณเส้นทาง...';
@@ -2605,6 +2605,7 @@
       }
 
       if (menuId === 'inspection') {
+        startMapGpsTracking();
         if (!inspectionData.length) initInspectionSystem();
         else filterInspections();
       }
@@ -3595,6 +3596,11 @@
       }
       const s = String(raw).replace(/\u00a0/g, ' ').trim();
       if (!s) return null;
+      const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (iso) {
+        const dt = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+        if (!isNaN(dt.getTime())) return dt;
+      }
       const th = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
       if (th) {
         const day = parseInt(th[1], 10);
@@ -3676,13 +3682,26 @@
       return date.getDate() + ' ' + INSPECTION_THAI_MONTHS_[date.getMonth()] + ' ' + (inspectionChristianYear_(date) + 543);
     }
 
+    function applyInspectionPickerDisplay_(el, date) {
+      if (!el || !date) return;
+      el.value = formatInspectionPickerDisplay_(date);
+    }
+
     function getInspectionFlatpickrConfig_(opts) {
       opts = opts || {};
       const cfg = {
         allowInput: true,
         clickOpens: true,
         disableMobile: true,
-        onReady: adjustInspectionYearDisplay_,
+        onReady: function(selectedDates, dateStr, instance) {
+          adjustInspectionYearDisplay_(selectedDates, dateStr, instance);
+          if (instance.selectedDates[0]) {
+            applyInspectionPickerDisplay_(instance.input, instance.selectedDates[0]);
+          } else if (instance.input && instance.input.value) {
+            const d = parseInspectionHandoverDate_(instance.input.value);
+            if (d) applyInspectionPickerDisplay_(instance.input, d);
+          }
+        },
         onYearChange: adjustInspectionYearDisplay_,
         onMonthChange: adjustInspectionYearDisplay_,
         onChange: function(selectedDates, dateStr, instance) {
@@ -3717,7 +3736,10 @@
         if (el._flatpickr) el._flatpickr.destroy();
         const parsed = parseInspectionHandoverDate_(el.value);
         const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: true }));
-        if (parsed) fp.setDate(parsed, false);
+        if (parsed) {
+          fp.setDate(parsed, false);
+          applyInspectionPickerDisplay_(el, parsed);
+        }
         el.setAttribute('data-last-saved', el.value.trim());
       });
     }
@@ -3730,7 +3752,10 @@
         if (el._flatpickr) el._flatpickr.destroy();
         const parsed = parseInspectionHandoverDate_(el.value);
         const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: false }));
-        if (parsed) fp.setDate(parsed, false);
+        if (parsed) {
+          fp.setDate(parsed, false);
+          applyInspectionPickerDisplay_(el, parsed);
+        }
       });
     }
 
@@ -4115,7 +4140,7 @@
 
     function inspectionInlineDateInput_(p, field, placeholder) {
       const display = formatInspectionHandoverDate_(p[field], false);
-      return '<input type="text" class="form-control form-control-sm insp-inline insp-inline-date" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" data-last-saved="' + escHtml(display) + '" value="' + escHtml(display) + '" placeholder="' + escHtml(placeholder || 'เช่น 15 ม.ค. 2568') + '" autocomplete="off">';
+      return '<input type="text" class="form-control form-control-sm insp-inline insp-inline-date" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" data-last-saved="' + escHtml(display) + '" value="' + escHtml(display) + '" placeholder="' + escHtml(placeholder || 'เช่น 15 มกราคม 2568') + '" autocomplete="off">';
     }
 
     function renderInspectionTableCell_(p, col) {
@@ -4455,16 +4480,33 @@
       if (!p) return;
       const info = getInspectionMapLocation_(p);
       if (!info.loc) { Swal.fire({ icon: 'info', title: 'ไม่พบข้อมูลสถานที่ในฐานข้อมูล' }); return; }
+      const loc = info.loc;
+      const hasCoords = loc.lat != null && loc.lng != null;
+      const distBlock = hasCoords
+        ? '<div id="inspLocDistResult" class="mt-3 small text-start"><span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณระยะทางจากตำแหน่งของคุณ...</span></div>'
+        : '';
+      const navBtn = hasCoords
+        ? '<div class="mt-2 text-center"><button type="button" class="btn btn-outline-primary btn-sm" id="inspNavBtn"><i class="fa-brands fa-google"></i> นำทางด้วย Google Maps</button></div>'
+        : '';
       const mapBtn = info.index >= 0
         ? '<div class="mt-3 text-center"><button type="button" class="btn btn-primary btn-sm" id="inspGoMapBtn"><i class="fa-solid fa-map-location-dot me-1"></i> เปิดบนแผนที่</button></div>'
         : '';
       Swal.fire({
         title: info.name,
-        html: renderOutageLocReadonly(info.loc) + mapBtn,
+        html: renderOutageLocReadonly(info.loc) + distBlock + navBtn + mapBtn,
         width: 620,
         confirmButtonColor: '#2563eb',
         confirmButtonText: 'ปิด',
         didOpen: function() {
+          if (hasCoords) {
+            calcDistanceMyLoc(loc.lat, loc.lng, 'inspLocDistResult');
+            const navEl = document.getElementById('inspNavBtn');
+            if (navEl) {
+              navEl.onclick = function() {
+                window.open(BASE_NAV_URL + '&destination=' + loc.lat + ',' + loc.lng, '_blank');
+              };
+            }
+          }
           const btn = document.getElementById('inspGoMapBtn');
           if (btn && info.index >= 0) {
             btn.onclick = function() { Swal.close(); viewDetails(info.index); };
