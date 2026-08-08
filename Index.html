@@ -193,7 +193,6 @@
     .inspection-sheet-table .phase-pill.ph3, .inspection-sheet-table .phase-pill.ph4 { background: #dc2626; }
     .inspection-sheet-table .phase-pill.ph2 { background: #2563eb; }
     .inspection-sheet-table .phase-pill.ph1 { background: #16a34a; }
-    .inspection-sheet-table .col-seq { min-width: 52px; max-width: 64px; }
     .inspection-sheet-table .col-region { min-width: 44px; text-align: center; }
     .inspection-sheet-table .inspection-region-divider td {
       background: linear-gradient(90deg, #1e40af, #2563eb); color: #fff; font-weight: 700;
@@ -202,6 +201,8 @@
     .inspection-sheet-table textarea.insp-inline {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff; min-width: 140px; resize: vertical;
     }
+    .inspection-sheet-table .insp-file-cell { min-width: 150px; white-space: normal; }
+    .inspection-sheet-table .insp-file-cell a { word-break: break-all; }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
 .doc-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(37,99,235,0.03); transition: 0.2s; }
@@ -676,6 +677,7 @@
           </div>
         </div>
         <div id="inspectionListContainer"></div>
+        <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
       </div>
     </div>
   
@@ -935,7 +937,15 @@
           </div>
         </div>
         <div class="row g-2 mb-2">
-          <div class="col-md-8"><label class="fw-bold small text-muted">File comment (ชื่อไฟล์ PDF)</label><input type="text" id="insp_fileComment" class="form-control form-control-sm"></div>
+          <div class="col-md-8">
+            <label class="fw-bold small text-muted">File comment (PDF)</label>
+            <div id="insp_fileCommentList" class="small mb-2"></div>
+            <div class="d-flex gap-2 flex-wrap">
+              <input type="text" id="insp_fileComment" class="form-control form-control-sm" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)">
+              <button type="button" class="btn btn-sm btn-success" id="btnInspFileUpload" onclick="openInspectionFileUploadFromModal()" style="display:none;"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>
+            </div>
+            <small class="text-muted">ไฟล์จะถูกเก็บใน Google Drive แยกโฟลเดอร์ตามชื่อสถานที่</small>
+          </div>
           <div class="col-md-4"><label class="fw-bold small text-muted">ทำใบนำตัวหรือยัง?</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
         </div>
         <div class="form-check form-switch mt-2">
@@ -3366,19 +3376,17 @@
     ];
 
     const INSPECTION_TABLE_COLUMNS_ = [
-      { key: 'seq', label: 'ลำดับที่', readOnly: true, cls: 'text-center col-seq' },
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'place', label: 'สถานที่', readOnly: true, cls: 'col-place' },
       { key: 'pwaBranch', label: 'กปภ.สาขา', readOnly: true },
-      { key: 'pwaDistrict', label: 'กปภ.เขต', readOnly: true },
       { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
       { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
       { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
       { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', readOnly: true, type: 'thaiDate' },
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, placeholder: 'วางแผนวันตรวจ...' },
       { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
-      { key: 'fileComment', label: 'File comment', editable: true },
+      { key: 'fileComment', label: 'File comment', type: 'fileComment' },
       { key: 'committee', label: 'คณะกรรมการตรวจรับ', editable: true },
       { key: 'inspectLetterDate', label: 'วันตรวจงาน / หนังสือตรวจรับ', editable: true },
       { key: 'passLetterStatus', label: 'ทำใบนำตัว', editable: true },
@@ -3621,7 +3629,7 @@
           '<option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>ไปแล้ว</option>' +
           '<option value="no"' + (cur === 'no' ? ' selected' : '') + '>ยังไม่ไป</option></select>';
       }
-      const selectKeys = ['region', 'phase', 'pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'];
+      const selectKeys = ['region', 'phase', 'pwaBranch', 'peaZone', 'peaOffice'];
       if (selectKeys.indexOf(key) >= 0) {
         const vals = getInspectionUniqueValues_(key, col);
         if (vals.length && vals.length <= 60) {
@@ -3657,13 +3665,169 @@
         if (!f) continue;
         const raw = inspectionCellFilterValue_(p, col);
         if (col.type === 'visited' || col.key === 'region' || col.key === 'phase' ||
-            ['pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
+            ['pwaBranch', 'peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
           if (raw.toLowerCase() !== f.toLowerCase()) return false;
         } else if (!raw.toLowerCase().includes(f.toLowerCase())) {
           return false;
         }
       }
       return true;
+    }
+
+    function buildInspectionFileFolderName_(plan) {
+      const place = (plan.place || 'ไม่ระบุสถานที่').trim();
+      const reg = (plan.region || '').trim().toUpperCase();
+      return reg ? (reg + ' - ' + place) : place;
+    }
+
+    function parseInspectionFileCommentEntries_(raw) {
+      return String(raw || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
+        const idx = line.indexOf('|');
+        if (idx > 0 && /^https?:\/\//i.test(line.slice(idx + 1).trim())) {
+          return { name: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+        }
+        if (/^https?:\/\//i.test(line)) return { name: 'เปิดไฟล์ PDF', url: line };
+        return { name: line, url: '' };
+      });
+    }
+
+    function renderInspectionFileCommentHtml_(p) {
+      const safeId = String(p.id).replace(/'/g, "\\'");
+      const entries = parseInspectionFileCommentEntries_(p.fileComment);
+      let html = '';
+      entries.forEach(function(entry) {
+        if (entry.url) {
+          html += '<a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener" class="d-block small text-decoration-none"><i class="fa-solid fa-file-pdf text-danger"></i> ' + escHtml(entry.name) + '</a>';
+        } else if (entry.name) {
+          html += '<div class="small text-muted">' + escHtml(entry.name) + '</div>';
+        }
+      });
+      if (canEditInspection()) {
+        html += '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2 mt-1" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด</button>';
+      }
+      return html || (canEditInspection()
+        ? '<button type="button" class="btn btn-sm btn-outline-success py-0 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>'
+        : '<span class="text-muted">-</span>');
+    }
+
+    let inspectionUploadTargetId = null;
+
+    function openInspectionFileUploadById(id) {
+      const p = inspectionData.find(function(x) { return String(x.id) === String(id); });
+      if (!p) return;
+      openInspectionFileUpload_(p);
+    }
+
+    function openInspectionFileUploadFromModal() {
+      const id = document.getElementById('insp_id').value;
+      const p = id ? inspectionData.find(function(x) { return String(x.id) === String(id); }) : null;
+      openInspectionFileUpload_(p || {
+        id: id,
+        place: document.getElementById('insp_place').value.trim(),
+        region: getInspectionRegionFilter_() || 'NC',
+        fileComment: document.getElementById('insp_fileComment').value.trim()
+      });
+    }
+
+    function openInspectionFileUpload_(plan) {
+      if (!canEditInspection() || !plan) return;
+      if (!plan.id) { Swal.fire({ icon: 'warning', title: 'บันทึกรายการก่อน', text: 'กรุณาบันทึกรายการตรวจรับก่อนอัปโหลดไฟล์' }); return; }
+      const folderName = buildInspectionFileFolderName_(plan);
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      const usePopup = !!window.pwaGasCall && !!window.GAS_API_URL;
+      if (usePopup) {
+        const url = window.GAS_API_URL
+          + '?page=inspectionUpload'
+          + '&inspectionId=' + encodeURIComponent(plan.id)
+          + '&place=' + encodeURIComponent(plan.place || '')
+          + '&folder=' + encodeURIComponent(folderName)
+          + '&token=' + encodeURIComponent(auth)
+          + '&_=' + Date.now();
+        const popup = window.open(url, 'peaInspectionUpload', 'width=460,height=520,menubar=no,toolbar=no,location=yes,status=no');
+        if (!popup) {
+          Swal.fire({ icon: 'warning', title: 'อนุญาตป๊อปอัป', text: 'เบราว์เซอร์บล็อกหน้าต่างอัปโหลด — อนุญาตป๊อปอัปแล้วลองใหม่' });
+          return;
+        }
+        Swal.fire({ title: 'เลือกไฟล์ในหน้าต่างที่เปิดขึ้น', allowOutsideClick: false, showConfirmButton: false, didOpen: function() { Swal.showLoading(); } });
+        waitSiteUploadPopup(popup).then(function(res) {
+          Swal.close();
+          if (res && res.result && res.result.fileComment) {
+            const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(plan.id); });
+            if (idx > -1) inspectionData[idx].fileComment = res.result.fileComment;
+          } else {
+            google.script.run.withSuccessHandler(function(list) {
+              inspectionData = list || inspectionData;
+              filterInspections();
+            }).getInspectionPlans();
+          }
+          filterInspections();
+          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
+        }).catch(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
+        });
+        return;
+      }
+      inspectionUploadTargetId = plan.id;
+      const input = document.getElementById('inspectionFileInput');
+      if (!input) return;
+      input.onchange = function() { handleInspectionFileSelected_(plan, input); };
+      input.click();
+    }
+
+    function handleInspectionFileSelected_(plan, input) {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+      if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const payload = {
+          inspectionId: plan.id,
+          folderName: buildInspectionFileFolderName_(plan),
+          place: plan.place || '',
+          region: plan.region || '',
+          fileName: file.name,
+          fileBase64: String(e.target.result).split(',')[1],
+          mimeType: file.type || 'application/pdf'
+        };
+        google.script.run.withSuccessHandler(function(res) {
+          Swal.close();
+          const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(plan.id); });
+          if (idx > -1 && res && res.fileComment) inspectionData[idx].fileComment = res.fileComment;
+          filterInspections();
+          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว' });
+        }).withFailureHandler(function(err) {
+          Swal.close();
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+        }).saveInspectionFileComment(payload, auth);
+      };
+      reader.onerror = function() { Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' }); };
+      reader.readAsDataURL(file);
+    }
+
+    function renderInspectionFileCommentListInModal_(p) {
+      const box = document.getElementById('insp_fileCommentList');
+      if (!box) return;
+      const entries = parseInspectionFileCommentEntries_(p.fileComment);
+      if (!entries.length) { box.innerHTML = '<span class="text-muted">ยังไม่มีไฟล์</span>'; return; }
+      box.innerHTML = entries.map(function(entry) {
+        if (entry.url) {
+          return '<div><a href="' + escHtml(entry.url) + '" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf text-danger"></i> ' + escHtml(entry.name) + '</a></div>';
+        }
+        return '<div class="text-muted">' + escHtml(entry.name) + '</div>';
+      }).join('');
     }
 
     function inspectionPlanToForm_(p) {
@@ -3717,8 +3881,11 @@
         return p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<span class="text-muted">-</span>';
       }
       if (col.editable && canEditInspection()) {
-        const multiline = col.key === 'inspectors' || col.key === 'committee' || col.key === 'fileComment';
+        const multiline = col.key === 'inspectors' || col.key === 'committee';
         return inspectionInlineInput_(p, col.key, col.placeholder, multiline);
+      }
+      if (col.type === 'fileComment') {
+        return renderInspectionFileCommentHtml_(p);
       }
       if (col.type === 'thaiDate') {
         const text = formatInspectionHandoverDate_(p[col.key], true);
@@ -3789,7 +3956,7 @@
           : '';
         html += '<tr' + (p.visited ? ' style="opacity:0.85"' : '') + '>';
         INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
-          const tdCls = (col.cls ? col.cls + ' ' : '') + (col.editable ? 'insp-edit-cell ' : '') + (col.type === 'visited' ? 'text-center ' : '');
+          const tdCls = (col.cls ? col.cls + ' ' : '') + (col.editable ? 'insp-edit-cell ' : '') + (col.type === 'fileComment' ? 'insp-file-cell ' : '') + (col.type === 'visited' ? 'text-center ' : '');
           html += '<td class="' + tdCls.trim() + '">' + renderInspectionTableCell_(p, col) + '</td>';
         });
         html += '<td class="text-center">' + editBtn + '</td></tr>';
@@ -3820,7 +3987,16 @@
       updateInspectionStats();
     }
 
+    function mergeInspectionFileCommentNotes_(existingRaw, noteText) {
+      const lines = parseInspectionFileCommentEntries_(existingRaw).filter(function(e) { return e.url; })
+        .map(function(e) { return e.name + '|' + e.url; });
+      const note = (noteText || '').trim();
+      if (note) lines.push(note);
+      return lines.join('\n');
+    }
+
     function fillInspectionForm_(p) {
+      p = p || {};
       document.getElementById('insp_id').value = p.id || '';
       document.getElementById('insp_seq').value = p.seq || '';
       document.getElementById('insp_phase').value = p.phase || '';
@@ -3833,7 +4009,11 @@
       document.getElementById('insp_handoverRound').value = p.handoverRound || '';
       document.getElementById('insp_inspectSchedule').value = p.inspectSchedule || '';
       document.getElementById('insp_inspectors').value = p.inspectors || '';
-      document.getElementById('insp_fileComment').value = p.fileComment || '';
+      renderInspectionFileCommentListInModal_(p);
+      const noteOnly = parseInspectionFileCommentEntries_(p.fileComment).filter(function(e) { return !e.url; }).map(function(e) { return e.name; }).join('\n');
+      document.getElementById('insp_fileComment').value = noteOnly;
+      const uploadBtn = document.getElementById('btnInspFileUpload');
+      if (uploadBtn) uploadBtn.style.display = canEditInspection() ? 'inline-block' : 'none';
       document.getElementById('insp_committee').value = p.committee || '';
       document.getElementById('insp_inspectLetterDate').value = p.inspectLetterDate || '';
       document.getElementById('insp_passLetterStatus').value = p.passLetterStatus || '';

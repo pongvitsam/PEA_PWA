@@ -194,7 +194,6 @@
     .inspection-sheet-table .phase-pill.ph3, .inspection-sheet-table .phase-pill.ph4 { background: #dc2626; }
     .inspection-sheet-table .phase-pill.ph2 { background: #2563eb; }
     .inspection-sheet-table .phase-pill.ph1 { background: #16a34a; }
-    .inspection-sheet-table .col-seq { min-width: 52px; max-width: 64px; }
     .inspection-sheet-table .col-region { min-width: 44px; text-align: center; }
     .inspection-sheet-table .inspection-region-divider td {
       background: linear-gradient(90deg, #1e40af, #2563eb); color: #fff; font-weight: 700;
@@ -3319,12 +3318,10 @@
     ];
 
     const INSPECTION_TABLE_COLUMNS_ = [
-      { key: 'seq', label: 'ลำดับที่', readOnly: true, cls: 'text-center col-seq' },
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'place', label: 'สถานที่', readOnly: true, cls: 'col-place' },
       { key: 'pwaBranch', label: 'กปภ.สาขา', readOnly: true },
-      { key: 'pwaDistrict', label: 'กปภ.เขต', readOnly: true },
       { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
       { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
       { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
@@ -3574,7 +3571,7 @@
           '<option value="yes"' + (cur === 'yes' ? ' selected' : '') + '>ไปแล้ว</option>' +
           '<option value="no"' + (cur === 'no' ? ' selected' : '') + '>ยังไม่ไป</option></select>';
       }
-      const selectKeys = ['region', 'phase', 'pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'];
+      const selectKeys = ['region', 'phase', 'pwaBranch', 'peaZone', 'peaOffice'];
       if (selectKeys.indexOf(key) >= 0) {
         const vals = getInspectionUniqueValues_(key, col);
         if (vals.length && vals.length <= 60) {
@@ -3610,7 +3607,7 @@
         if (!f) continue;
         const raw = inspectionCellFilterValue_(p, col);
         if (col.type === 'visited' || col.key === 'region' || col.key === 'phase' ||
-            ['pwaDistrict', 'pwaBranch', 'peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
+            ['pwaBranch', 'peaZone', 'peaOffice'].indexOf(col.key) >= 0) {
           if (raw.toLowerCase() !== f.toLowerCase()) return false;
         } else if (!raw.toLowerCase().includes(f.toLowerCase())) {
           return false;
