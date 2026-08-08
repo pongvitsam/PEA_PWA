@@ -178,6 +178,10 @@
     .inspection-sheet-table .phase-pill.ph3, .inspection-sheet-table .phase-pill.ph4 { background: #dc2626; }
     .inspection-sheet-table .phase-pill.ph2 { background: #2563eb; }
     .inspection-sheet-table .phase-pill.ph1 { background: #16a34a; }
+    .inspection-sheet-table .col-seq { min-width: 52px; max-width: 64px; }
+    .inspection-sheet-table textarea.insp-inline {
+      font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff; min-width: 140px; resize: vertical;
+    }
     /* สไตล์ Project Docs */
 .doc-list { list-style: none; padding-left: 0; min-height: 50px; }
 .doc-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 8px; display: flex; align-items: center; padding: 12px 15px; box-shadow: 0 2px 4px rgba(37,99,235,0.03); transition: 0.2s; }
@@ -3289,6 +3293,27 @@
       ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatus', 'ทำใบนำตัว'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
+    const INSPECTION_TABLE_COLUMNS_ = [
+      { key: 'seq', label: 'ลำดับที่', readOnly: true, cls: 'text-center col-seq' },
+      { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
+      { key: 'place', label: 'สถานที่', readOnly: true, cls: 'col-place' },
+      { key: 'pwaBranch', label: 'กปภ.สาขา', readOnly: true },
+      { key: 'pwaDistrict', label: 'กปภ.เขต', readOnly: true },
+      { key: 'peaZone', label: 'เขตความรับผิดชอบ กฟภ.', readOnly: true },
+      { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
+      { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true },
+      { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', readOnly: true },
+      { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, placeholder: 'วางแผนวันตรวจ...' },
+      { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
+      { key: 'fileComment', label: 'File comment', editable: true },
+      { key: 'committee', label: 'คณะกรรมการตรวจรับ', editable: true },
+      { key: 'inspectLetterDate', label: 'วันตรวจงาน / หนังสือตรวจรับ', editable: true },
+      { key: 'passLetterStatus', label: 'ทำใบนำตัว', editable: true },
+      { key: 'visited', label: 'ไปแล้ว', type: 'visited' },
+      { key: 'tcCoordinator', label: 'ผู้ประสานงาน TC', editable: true },
+      { key: 'tcContact', label: 'เบอร์ติดต่อ TC', editable: true }
+    ];
+
     function applyInspectionPack(pack, opts) {
       opts = opts || {};
       if (!pack || !pack.plans) return;
@@ -3408,6 +3433,35 @@
       };
     }
 
+    function inspectionInlineInput_(p, field, placeholder, multiline) {
+      if (multiline) {
+        return '<textarea class="form-control form-control-sm insp-inline" rows="2" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" placeholder="' + escHtml(placeholder || '') + '" onchange="saveInspectionInline(this)">' + escHtml(p[field] || '') + '</textarea>';
+      }
+      return '<input type="text" class="form-control form-control-sm insp-inline" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p[field] || '') + '" placeholder="' + escHtml(placeholder || '') + '" onchange="saveInspectionInline(this)">';
+    }
+
+    function renderInspectionTableCell_(p, col) {
+      const safeId = String(p.id).replace(/'/g, "\\'");
+      if (col.type === 'phase') {
+        const ph = String(p.phase || '').trim();
+        const phCls = ph === '3' || ph === '4' ? 'ph3' : (ph === '2' ? 'ph2' : (ph === '1' ? 'ph1' : ''));
+        return '<span class="phase-pill ' + phCls + '">' + escHtml(ph || '-') + '</span>';
+      }
+      if (col.type === 'visited') {
+        if (canEditInspection()) {
+          return '<div class="form-check form-switch m-0 d-flex justify-content-center"><input class="form-check-input" type="checkbox" onchange="toggleInspectionVisited(\'' + safeId + '\', this.checked)" ' + (p.visited ? 'checked' : '') + '></div>';
+        }
+        return p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<span class="text-muted">-</span>';
+      }
+      if (col.editable && canEditInspection()) {
+        const multiline = col.key === 'inspectors' || col.key === 'committee' || col.key === 'fileComment';
+        return inspectionInlineInput_(p, col.key, col.placeholder, multiline);
+      }
+      const val = p[col.key];
+      const text = val != null && val !== '' ? String(val) : '-';
+      return '<span title="' + escHtml(text) + '">' + escHtml(text) + '</span>';
+    }
+
     function saveInspectionInline(el) {
       if (!canEditInspection() || !el) return;
       const id = el.getAttribute('data-id');
@@ -3444,40 +3498,23 @@
         if (!isNaN(pa) && !isNaN(pb) && pa !== pb) return pa - pb;
         return (a.place || '').localeCompare(b.place || '', 'th');
       });
-      let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>' +
-        '<th>Phase</th><th>สถานที่</th><th>กปภ.สาขา</th><th>กปภ.เขต</th><th>กฟภ.</th><th>กฟจ./สำนักงาน</th>' +
-        '<th>แผนส่งมอบงาน</th><th>รอบส่งมอบจริง</th>' +
-        '<th class="insp-edit-cell">กำหนดตรวจงาน</th><th class="insp-edit-cell">รายชื่อคนเข้าตรวจ</th>' +
-        '<th>ไปแล้ว</th><th></th></tr></thead><tbody>';
+      let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
+      INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
+        const thCls = col.editable ? ' class="insp-edit-cell"' : (col.cls ? ' class="' + col.cls + '"' : '');
+        html += '<th' + thCls + '>' + escHtml(col.label) + '</th>';
+      });
+      html += '<th class="text-center" style="min-width:48px;"></th></tr></thead><tbody>';
       sorted.forEach(function(p) {
         const safeId = String(p.id).replace(/'/g, "\\'");
-        const ph = String(p.phase || '').trim();
-        const phCls = ph === '3' || ph === '4' ? 'ph3' : (ph === '2' ? 'ph2' : (ph === '1' ? 'ph1' : ''));
-        const scheduleCell = canEditInspection()
-          ? '<input type="text" class="form-control form-control-sm insp-inline" data-field="inspectSchedule" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p.inspectSchedule || '') + '" placeholder="วางแผนวันตรวจ..." onchange="saveInspectionInline(this)">'
-          : escHtml(p.inspectSchedule || '-');
-        const inspectorsCell = canEditInspection()
-          ? '<input type="text" class="form-control form-control-sm insp-inline" data-field="inspectors" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(p.inspectors || '') + '" placeholder="ชื่อผู้เข้าตรวจ..." onchange="saveInspectionInline(this)">'
-          : escHtml(p.inspectors || '-');
-        const visitCell = canEditInspection()
-          ? '<div class="form-check form-switch m-0 d-flex justify-content-center"><input class="form-check-input" type="checkbox" onchange="toggleInspectionVisited(\'' + safeId + '\', this.checked)" ' + (p.visited ? 'checked' : '') + '></div>'
-          : (p.visited ? '<i class="fa-solid fa-check text-success"></i>' : '<span class="text-muted">-</span>');
         const editBtn = canEditInspection()
           ? '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="editInspection(\'' + safeId + '\')" title="แก้ไขทั้งหมด"><i class="fa-solid fa-pen"></i></button>'
           : '';
-        html += '<tr' + (p.visited ? ' style="opacity:0.85"' : '') + '>' +
-          '<td><span class="phase-pill ' + phCls + '">' + escHtml(ph || '-') + '</span></td>' +
-          '<td class="col-place">' + escHtml(p.place || '-') + '</td>' +
-          '<td title="' + escHtml(p.pwaBranch || '') + '">' + escHtml(p.pwaBranch || '-') + '</td>' +
-          '<td>' + escHtml(p.pwaDistrict || '-') + '</td>' +
-          '<td>' + escHtml(p.peaZone || '-') + '</td>' +
-          '<td title="' + escHtml(p.peaOffice || '') + '">' + escHtml(p.peaOffice || '-') + '</td>' +
-          '<td>' + escHtml(p.handoverPlan || '-') + '</td>' +
-          '<td>' + escHtml(p.handoverRound || '-') + '</td>' +
-          '<td class="insp-edit-cell">' + scheduleCell + '</td>' +
-          '<td class="insp-edit-cell">' + inspectorsCell + '</td>' +
-          '<td class="text-center">' + visitCell + '</td>' +
-          '<td class="text-center">' + editBtn + '</td></tr>';
+        html += '<tr' + (p.visited ? ' style="opacity:0.85"' : '') + '>';
+        INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
+          const tdCls = (col.cls ? col.cls + ' ' : '') + (col.editable ? 'insp-edit-cell ' : '') + (col.type === 'visited' ? 'text-center ' : '');
+          html += '<td class="' + tdCls.trim() + '">' + renderInspectionTableCell_(p, col) + '</td>';
+        });
+        html += '<td class="text-center">' + editBtn + '</td></tr>';
       });
       html += '</tbody></table></div>';
       container.innerHTML = html;
@@ -3491,7 +3528,7 @@
       const regionVal = inspectionActiveRegion || 'NC';
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
-        const blob = [p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.inspectors, p.tcCoordinator, p.tcContact, p.fileComment].join(' ').toLowerCase();
+        const blob = [p.seq, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
         const matchText = !textVal || blob.includes(textVal);
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
