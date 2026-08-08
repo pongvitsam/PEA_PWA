@@ -2749,6 +2749,13 @@
       return !!(s && e);
     }
 
+    /** เสร็จแล้ว (mark เอง) หรือเลยวันสิ้นสุดที่ตั้งไว้โดยไม่มีการเปลี่ยนแปลง */
+    function isOutageEffectivelyDone(o) {
+      if (!o) return false;
+      if (o.checkDone) return true;
+      return hasOutageDates(o) && normalizeGregorianDate_(o.end) < new Date();
+    }
+
     function formatOutageDateRange(o) {
       if (!hasOutageDates(o)) return '<span class="text-muted">ยังไม่มีกำหนดวัน</span>';
       const s = normalizeGregorianDate_(o.start);
@@ -2759,19 +2766,17 @@
     }
 
     function updateOutageStats() {
-      const now = new Date();
       const source = filteredOutageData || [];
-      let pending = 0, done = 0, past = 0;
+      let pending = 0, done = 0;
       source.forEach(o => {
-        if (o.checkDone) done++;
-        else if (hasOutageDates(o) && normalizeGregorianDate_(o.end) < now) past++;
+        if (isOutageEffectivelyDone(o)) done++;
         else pending++;
       });
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('statOutageTotal', source.length);
       set('statOutagePending', pending);
       set('statOutageDone', done);
-      set('statOutagePast', past);
+      set('statOutagePast', 0);
     }
 
     function getOutagePeaSector(o) {
@@ -2831,7 +2836,7 @@
           textColor: '#fff',
           classNames: [style.cls],
           extendedProps: {
-            status: o.checkDone ? 'done' : (normalizeGregorianDate_(o.end) < new Date() ? 'past' : 'pending'),
+            status: isOutageEffectivelyDone(o) ? 'done' : 'pending',
             sectorCls: style.cls,
             sectorBg: style.bg,
             sectorBorder: style.border
@@ -3189,20 +3194,19 @@
         const aHas = hasOutageDates(a), bHas = hasOutageDates(b);
         if (!aHas && bHas) return 1; if (aHas && !bHas) return -1;
         if (!aHas && !bHas) return (a.projectName || '').localeCompare(b.projectName || '', 'th');
-        let now = new Date(); let isAPast = normalizeGregorianDate_(a.end) < now; let isBPast = normalizeGregorianDate_(b.end) < now;
-        if(isAPast && !isBPast) return 1; if(!isAPast && isBPast) return -1;
+        let isADone = isOutageEffectivelyDone(a), isBDone = isOutageEffectivelyDone(b);
+        if (isADone && !isBDone) return 1; if (!isADone && isBDone) return -1;
         return normalizeGregorianDate_(a.start) - normalizeGregorianDate_(b.start);
       });
 
       sortedData.forEach(o => {
-        let isPast = hasOutageDates(o) && normalizeGregorianDate_(o.end) < new Date();
+        let isDone = isOutageEffectivelyDone(o);
         const safeId = String(o.id).replace(/'/g, "\\'");
-        let cardStyle = o.checkDone ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;' : 
-                        (isPast ? 'border-left: 5px solid #ced4da; opacity: 0.7;' : 'border-left: 5px solid #60a5fa;');
-                        
-        let statusBadge = o.checkDone ? '<span class="badge bg-success mb-2"><i class="fa-solid fa-check-circle"></i> ดำเนินการแล้ว</span>' : 
-                          (isPast ? '<span class="badge bg-secondary mb-2"><i class="fa-solid fa-clock-rotate-left"></i> เลยกำหนด</span>' : 
-                          '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-spinner fa-spin"></i> รอดำเนินการ</span>');
+        let cardStyle = isDone ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;' :
+                        'border-left: 5px solid #60a5fa;';
+
+        let statusBadge = isDone ? '<span class="badge bg-success mb-2"><i class="fa-solid fa-check-circle"></i> เสร็จแล้ว</span>' :
+                          '<span class="badge bg-warning text-dark mb-2"><i class="fa-solid fa-spinner fa-spin"></i> รอดำเนินการ</span>';
         if (o.fromSheet) statusBadge += ' <span class="badge bg-info text-dark mb-2"><i class="fa-solid fa-file-excel"></i> จากชีท</span>';
 
         let fileBtn = '';

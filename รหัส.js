@@ -1095,6 +1095,24 @@ function syncOutagesFromSource_(destSheet) {
   return sourceRows.length;
 }
 
+/** เลยวันสิ้นสุดที่ตั้งไว้แล้วยังไม่เคย mark เสร็จ → ตั้ง CheckDone อัตโนมัติ */
+function autoCompletePastOutages_(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return 0;
+  const now = new Date();
+  let updated = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (parseCheckbox_(data[i][10])) continue;
+    const endIso = normalizeOutageDate_(data[i][3]);
+    if (!endIso) continue;
+    const end = new Date(endIso);
+    if (isNaN(end.getTime()) || end >= now) continue;
+    sheet.getRange(i + 1, 11).setValue(true);
+    updated++;
+  }
+  return updated;
+}
+
 function readOutagesMapped_(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
@@ -1111,6 +1129,7 @@ function readOutagesMapped_(sheet) {
 function getOutages() {
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
+  autoCompletePastOutages_(sheet);
   return readOutagesMapped_(sheet);
 }
 
@@ -1140,6 +1159,7 @@ function refreshOutagesFromSource(force) {
     const sheet = ensureOutageSheet_(ss);
     try {
       const n = syncOutagesFromSource_(sheet);
+      autoCompletePastOutages_(sheet);
       cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
       return {
         synced: true,
