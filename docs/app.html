@@ -170,7 +170,11 @@
     .inspection-sheet-table tbody tr:nth-child(even) { background: #f0fdfa; }
     .inspection-sheet-table tbody tr:hover { background: #ecfeff; }
     .inspection-sheet-table .col-place { min-width: 200px; white-space: normal; font-weight: 600; color: #1e293b; }
-    .inspection-sheet-table .insp-edit-cell { background: #fffbeb; min-width: 150px; white-space: normal; }
+    .inspection-sheet-table thead th.insp-edit-cell {
+      background: linear-gradient(180deg, #ca8a04, #eab308); color: #1e293b;
+      border-color: #ca8a04 !important; font-weight: 700;
+    }
+    .inspection-sheet-table tbody td.insp-edit-cell { background: #fffbeb; min-width: 150px; white-space: normal; }
     .inspection-sheet-table .insp-edit-cell input {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff;
     }
