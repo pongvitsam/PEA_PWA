@@ -168,8 +168,9 @@
     }
     .inspection-sheet-table tbody tr:nth-child(even) { background: #f0fdfa; }
     .inspection-sheet-table tbody tr:hover { background: #ecfeff; }
-    .inspection-sheet-table .col-place { min-width: 200px; white-space: normal; font-weight: 600; color: #1e293b; }
-    .inspection-sheet-table .insp-map-loc-btn { font-weight: 600; color: #1d4ed8; text-decoration: none; line-height: 1.3; }
+    .inspection-sheet-table .col-place { min-width: 220px; white-space: normal; font-weight: 600; color: #1e293b; font-size: 0.82rem; line-height: 1.4; }
+    .inspection-sheet-table .col-place .insp-map-sub { font-size: 0.76rem; color: #64748b; margin-top: 0.2rem; line-height: 1.35; }
+    .inspection-sheet-table .insp-map-loc-btn { font-weight: 600; color: #1d4ed8; text-decoration: none; line-height: 1.35; font-size: inherit; }
     .inspection-sheet-table .insp-map-loc-btn:hover { color: #1e40af; text-decoration: underline; }
     .inspection-sheet-table thead th.insp-edit-cell {
       background: linear-gradient(180deg, #ca8a04, #eab308); color: #1e293b;
@@ -2958,7 +2959,8 @@
         index: index,
         name: (loc.name || p.place || '-').toString().trim(),
         pwaText: (p.pwaDistrict || loc.pwaRegion || p.pwaBranch || '').toString().trim(),
-        peaZone: (p.peaZone || '').toString().trim()
+        peaZone: (p.peaZone || '').toString().trim(),
+        peaOffice: (p.peaOffice || '').toString().trim()
       };
       }
       return {
@@ -2966,7 +2968,8 @@
         index: -1,
         name: (p && p.place ? p.place : '-').toString().trim(),
         pwaText: (p && (p.pwaDistrict || p.pwaBranch) ? (p.pwaDistrict || p.pwaBranch) : '').toString().trim(),
-        peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim()
+        peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim(),
+        peaOffice: (p && p.peaOffice ? p.peaOffice : '').toString().trim()
       };
     }
 
@@ -3426,13 +3429,12 @@
       ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatus', 'ทำใบนำตัว'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
-    const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'peaOffice', 'handoverPlan', 'handoverRound'];
+    const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'mapLocation', 'handoverPlan', 'handoverRound'];
 
     const INSPECTION_TABLE_COLUMNS_ = [
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'mapLocation', label: 'สถานที่', readOnly: true, cls: 'col-place', type: 'mapLocation' },
-      { key: 'peaOffice', label: 'กฟจ./สำนักงาน กฟภ.', readOnly: true },
       { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
       { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 ม.ค. 2568' },
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, placeholder: 'วางแผนวันตรวจ...' },
@@ -3536,7 +3538,8 @@
       if (col.type === 'phase') return String(p.phase || '').trim();
       if (col.type === 'mapLocation') {
         const info = getInspectionMapLocation_(p);
-        return [info.name, info.pwaText, info.peaZone].filter(Boolean).join(' ');
+        const office = info.peaOffice ? (info.peaOffice.indexOf('กฟจ') === 0 ? info.peaOffice : 'กฟจ. ' + info.peaOffice) : '';
+        return [info.name, info.pwaText, info.peaZone, office].filter(Boolean).join(' ');
       }
       if (col.type === 'thaiDate') return formatInspectionHandoverDate_(p[col.key], false);
       return String(p[col.key] || '').trim();
@@ -3664,6 +3667,11 @@
     function getInspectionUniqueValues_(key, col) {
       const set = new Set();
       (inspectionData || []).forEach(function(p) {
+        if (key === 'mapLocation') {
+          const v = String(p.peaOffice || '').trim();
+          if (v) set.add(v);
+          return;
+        }
         const c = INSPECTION_TABLE_COLUMNS_.find(function(x) { return x.key === key; }) || col;
         const v = inspectionCellFilterValue_(p, c);
         if (v) set.add(v);
@@ -3674,7 +3682,7 @@
     function renderInspectionColumnFilter_(col) {
       const key = col.key;
       const cur = inspectionColumnFilters[key] || '';
-      const selectKeys = ['region', 'phase', 'peaOffice'];
+      const selectKeys = ['region', 'phase', 'mapLocation'];
       if (selectKeys.indexOf(key) >= 0) {
         const vals = getInspectionUniqueValues_(key, col);
         if (vals.length && vals.length <= 60) {
@@ -3741,8 +3749,7 @@
         const f = (inspectionColumnFilters[col.key] || '').trim();
         if (!f) continue;
         const raw = inspectionCellFilterValue_(p, col);
-        if (col.type === 'visited' || col.type === 'mapLocation' || col.key === 'region' || col.key === 'phase' ||
-            col.key === 'peaOffice') {
+        if (col.type === 'visited' || col.key === 'region' || col.key === 'phase') {
           if (raw.toLowerCase() !== f.toLowerCase()) return false;
         } else if (!raw.toLowerCase().includes(f.toLowerCase())) {
           return false;
@@ -4016,11 +4023,15 @@
             html += ' <span class="badge text-bg-secondary" style="font-size:0.62rem;font-weight:500;">ไม่พบในแผนที่</span>';
           }
         }
-        if (info.pwaText || info.peaZone) {
+        if (info.pwaText || info.peaZone || info.peaOffice) {
           const subParts = [];
           if (info.pwaText) subParts.push('กปภ. ' + info.pwaText);
           if (info.peaZone) subParts.push('กฟภ. ' + info.peaZone);
-          html += '<div class="small text-muted mt-1"><i class="fa-solid fa-building-columns me-1"></i>' + escHtml(subParts.join(' · ')) + '</div>';
+          if (info.peaOffice) {
+            const office = info.peaOffice.indexOf('กฟจ') === 0 ? info.peaOffice : 'กฟจ. ' + info.peaOffice;
+            subParts.push(office);
+          }
+          html += '<div class="insp-map-sub"><i class="fa-solid fa-building-columns me-1"></i>' + escHtml(subParts.join(' · ')) + '</div>';
         }
         return html;
       }
