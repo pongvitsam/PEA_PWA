@@ -1095,7 +1095,7 @@ function syncOutagesFromSource_(destSheet) {
   return sourceRows.length;
 }
 
-/** เลยวันสิ้นสุดที่ตั้งไว้แล้วยังไม่เคย mark เสร็จ → ตั้ง CheckDone อัตโนมัติ */
+/** เลยวันสิ้นสุดที่ตั้งไว้แล้วยังไม่เคย mark เสร็จ → ตั้ง CheckDone อัตโนมัติ (เขียนครั้งเดียวทั้งคอลัมน์) */
 function autoCompletePastOutages_(sheet) {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return 0;
@@ -1107,8 +1107,12 @@ function autoCompletePastOutages_(sheet) {
     if (!endIso) continue;
     const end = new Date(endIso);
     if (isNaN(end.getTime()) || end >= now) continue;
-    sheet.getRange(i + 1, 11).setValue(true);
+    data[i][10] = true;
     updated++;
+  }
+  if (updated > 0) {
+    const colValues = data.slice(1).map(function(row) { return [!!parseCheckbox_(row[10])]; });
+    sheet.getRange(2, 11, data.length, 11).setValues(colValues);
   }
   return updated;
 }
@@ -1129,7 +1133,6 @@ function readOutagesMapped_(sheet) {
 function getOutages() {
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
-  autoCompletePastOutages_(sheet);
   return readOutagesMapped_(sheet);
 }
 

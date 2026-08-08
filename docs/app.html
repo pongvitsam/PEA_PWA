@@ -1345,7 +1345,8 @@
       }
     };
     let outageData = [];
-    let filteredOutageData = []; 
+    let filteredOutageData = [];
+    let outageInitialized = false; 
     let allData = [];
     let filteredData = [];
     let selectedRoute = [];
@@ -1405,7 +1406,11 @@
       if (appStarted) return;
       appStarted = true;
       fetchDocs();
-      google.script.run.withSuccessHandler(function(res) { initApp(res); }).getLocations();
+      google.script.run.withSuccessHandler(function(res) { initApp(res); })
+        .withFailureHandler(function(err) {
+          document.getElementById('loading').style.display = 'none';
+          Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
+        }).getLocations();
     }
 
     function persistAuthState(role, token, expireMs) {
@@ -1601,7 +1606,6 @@
       
       renderMap();
       renderTable();
-      initOutageSystem();
       initInspectionSystem();
     }
 
@@ -2591,6 +2595,8 @@
       }
       
       if(menuId === 'outage') {
+        if (!outageInitialized) initOutageSystem();
+        else filterOutages();
         setTimeout(() => {
           // วาดใหม่ทุกครั้งที่เปิดเมนู — กันกรณีสร้างตอนซ่อนแล้วอีเวนต์ไม่โชว์
           renderCalendar();
@@ -2667,9 +2673,10 @@
     }
 
     function initOutageSystem() {
-      // โหลดเร็วก่อน แล้วบังคับซิงก์จาก Excel พื้นหลังทุกครั้งที่เปิดเมนู
+      // โหลดเร็วก่อน แล้วบังคับซิงก์จาก Excel พื้นหลังเมื่อเปิดเมนูแผนดับไฟ
       google.script.run.withSuccessHandler(res => {
         outageData = normalizeOutageList_(res || []);
+        outageInitialized = true;
         filterOutages();
         google.script.run.withSuccessHandler(pack => {
           applyOutagePack(pack, { showError: true });
@@ -2678,6 +2685,7 @@
         }).refreshOutagesFromSource(true);
       }).withFailureHandler(err => {
         outageData = [];
+        outageInitialized = true;
         filterOutages();
         Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
       }).getOutages();
