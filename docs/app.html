@@ -115,8 +115,20 @@
       background: linear-gradient(180deg, #f8fbff, #f1f5f9);
       border: 1px solid #dbeafe; border-radius: 10px; padding: 0.75rem 0.9rem;
     }
-    .outage-sheet-details .det-row { font-size: 0.82rem; color: #334155; margin-bottom: 0.3rem; line-height: 1.45; }
-    .outage-sheet-details .det-label { color: #64748b; font-weight: 600; display: inline-block; min-width: 9.5rem; vertical-align: top; }
+    .outage-sheet-details .outage-sheet-table {
+      font-size: 0.82rem; margin: 0; background: #fff;
+      border-color: #dbeafe !important;
+    }
+    .outage-sheet-details .outage-sheet-table th {
+      width: 38%; min-width: 9rem; color: #64748b; font-weight: 600;
+      background: #f8fafc; vertical-align: top; padding: 0.35rem 0.55rem;
+      border-color: #e2e8f0 !important; line-height: 1.4; white-space: normal;
+    }
+    .outage-sheet-details .outage-sheet-table td {
+      color: #334155; vertical-align: top; padding: 0.35rem 0.55rem;
+      border-color: #e2e8f0 !important; line-height: 1.45; word-break: break-word;
+    }
+    .outage-sheet-details .outage-sheet-table tbody tr:nth-child(even) td { background: #fafcff; }
     .form-switch .form-check-input:checked { background-color: #2563eb; border-color: #2563eb; }
     /* สไตล์แผนตรวจรับงาน */
     .inspection-page-header {
@@ -1053,6 +1065,7 @@
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
     let inspectionData = [], filteredInspectionData = [];
+    let inspectionUiStash_ = null;
     let inspectionActiveRegion = '';
     let inspectionColumnFilters = {};
     let routeMap, routeMarkersLayer, routeLineLayer;
@@ -3037,15 +3050,17 @@
       OUTAGE_SHEET_DETAIL_LABELS_.forEach(function(pair) {
         const val = d[pair[0]];
         if (val == null || val === '') return;
-        rows += '<div class="det-row"><span class="det-label">' + escHtml(pair[1]) + ':</span> ' + escHtml(String(val)) + '</div>';
+        rows += '<tr><th scope="row">' + escHtml(pair[1]) + '</th><td>' + escHtml(String(val)) + '</td></tr>';
       });
       (d._extras || []).forEach(function(ex) {
         if (!ex || !ex.label || ex.value == null || ex.value === '') return;
-        rows += '<div class="det-row"><span class="det-label">' + escHtml(ex.label) + ':</span> ' + escHtml(String(ex.value)) + '</div>';
+        rows += '<tr><th scope="row">' + escHtml(ex.label) + '</th><td>' + escHtml(String(ex.value)) + '</td></tr>';
       });
       if (!rows) return '';
       const title = opts.title === false ? '' : '<div class="small fw-bold text-primary mb-2"><i class="fa-solid fa-table-list"></i> รายละเอียดจากชีท</div>';
-      return '<div class="outage-sheet-details mt-2 mb-2">' + title + rows + '</div>';
+      return '<div class="outage-sheet-details mt-2 mb-2">' + title +
+        '<div class="table-responsive"><table class="table table-sm table-bordered outage-sheet-table mb-0"><tbody>' +
+        rows + '</tbody></table></div></div>';
     }
 
     function hideOutageSheetDetailsInModal_() {
@@ -3425,7 +3440,7 @@
       inspectionData = pack.plans || [];
       setupInspectionPwaFilter(ui);
       if (ui) restoreInspectionUiState_(ui);
-      filterInspections(ui ? ui.scrollTop : undefined);
+      filterInspections(ui || undefined);
       if (pack.error && opts.showError) {
         Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่าน/เขียนได้' });
       } else if (pack.synced && opts.toast) {
@@ -3443,8 +3458,28 @@
         visited: document.getElementById('inspectionVisitedSelect')?.value || '',
         pwa: document.getElementById('inspectionPwaSelect')?.value || '',
         search: document.getElementById('inspectionSearchInput')?.value || '',
-        scrollTop: wrap ? wrap.scrollTop : 0
+        scrollTop: wrap ? wrap.scrollTop : 0,
+        windowScrollY: window.scrollY || document.documentElement.scrollTop || 0
       };
+    }
+
+    function stashInspectionUiState_() {
+      inspectionUiStash_ = captureInspectionUiState_();
+    }
+
+    function consumeInspectionUiStash_() {
+      const ui = inspectionUiStash_ || captureInspectionUiState_();
+      inspectionUiStash_ = null;
+      return ui;
+    }
+
+    function restoreInspectionScroll_(ui) {
+      if (!ui) return;
+      requestAnimationFrame(function() {
+        const wrap = document.querySelector('.inspection-table-wrap');
+        if (wrap && ui.scrollTop > 0) wrap.scrollTop = ui.scrollTop;
+        if (ui.windowScrollY > 0) window.scrollTo(0, ui.windowScrollY);
+      });
     }
 
     function restoreInspectionUiState_(ui) {
@@ -3476,7 +3511,7 @@
         inspectionData = res || [];
         setupInspectionPwaFilter(ui);
         restoreInspectionUiState_(ui);
-        filterInspections(ui.scrollTop);
+        filterInspections(ui);
       }).withFailureHandler(function(err) {
         Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
       }).getInspectionPlans();
@@ -3935,7 +3970,7 @@
     }
 
     function applyInspectionUploadSuccess_(planId, res) {
-      const ui = captureInspectionUiState_();
+      const ui = consumeInspectionUiStash_();
       const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(planId); });
       if (idx > -1) {
         if (res && res.fileComment) inspectionData[idx].fileComment = res.fileComment;
@@ -3945,7 +3980,7 @@
       const visitedEl = document.getElementById('insp_visited');
       if (visitedEl && inspIdEl && String(inspIdEl.value) === String(planId)) visitedEl.checked = true;
       restoreInspectionUiState_(ui);
-      filterInspections(ui.scrollTop);
+      filterInspections(ui);
       refreshMapInspectionFilesPanel_();
     }
 
@@ -3971,12 +4006,13 @@
     function openInspectionFileUpload_(plan) {
       if (!canEditInspection() || !plan) return;
       if (!plan.id) { Swal.fire({ icon: 'warning', title: 'บันทึกรายการก่อน', text: 'กรุณาบันทึกรายการตรวจรับก่อนอัปโหลดไฟล์' }); return; }
-      const folderName = buildInspectionFileFolderName_(plan);
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
         Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
         return;
       }
+      stashInspectionUiState_();
+      const folderName = buildInspectionFileFolderName_(plan);
       const usePopup = !!window.pwaGasCall && !!window.GAS_API_URL;
       if (usePopup) {
         const url = window.GAS_API_URL
@@ -3988,6 +4024,7 @@
           + '&_=' + Date.now();
         const popup = window.open(url, 'peaInspectionUpload', 'width=460,height=520,menubar=no,toolbar=no,location=yes,status=no');
         if (!popup) {
+          inspectionUiStash_ = null;
           Swal.fire({ icon: 'warning', title: 'อนุญาตป๊อปอัป', text: 'เบราว์เซอร์บล็อกหน้าต่างอัปโหลด — อนุญาตป๊อปอัปแล้วลองใหม่' });
           return;
         }
@@ -3997,15 +4034,18 @@
           if (res && res.result && res.result.fileComment) {
             applyInspectionUploadSuccess_(plan.id, res.result);
           } else {
+            const ui = consumeInspectionUiStash_();
             google.script.run.withSuccessHandler(function(list) {
               inspectionData = list || inspectionData;
-              filterInspections();
+              restoreInspectionUiState_(ui);
+              filterInspections(ui);
             }).getInspectionPlans();
           }
           renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
           Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
         }).catch(function(err) {
           Swal.close();
+          inspectionUiStash_ = null;
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
         });
         return;
@@ -4020,7 +4060,7 @@
     function handleInspectionFileSelected_(plan, input) {
       const file = input.files && input.files[0];
       input.value = '';
-      if (!file) return;
+      if (!file) { inspectionUiStash_ = null; return; }
       const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
       if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
       let auth;
@@ -4047,6 +4087,7 @@
           Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
         }).withFailureHandler(function(err) {
           Swal.close();
+          inspectionUiStash_ = null;
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
         }).saveInspectionFileComment(payload, auth);
       };
@@ -4086,6 +4127,7 @@
         confirmButtonColor: '#dc3545'
       }).then(function(result) {
         if (!result.isConfirmed) return;
+        stashInspectionUiState_();
         let auth;
         try { auth = gasAuthArgs(); } catch (e) {
           Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
@@ -4096,7 +4138,9 @@
           Swal.close();
           const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(inspectionId); });
           if (idx > -1 && res && res.fileComment != null) inspectionData[idx].fileComment = res.fileComment;
-          filterInspections();
+          const ui = consumeInspectionUiStash_();
+          restoreInspectionUiState_(ui);
+          filterInspections(ui);
           renderInspectionFileCommentListInModal_(inspectionData[idx] || { id: inspectionId, fileComment: res.fileComment });
           Toast.fire({ icon: 'success', title: 'ลบไฟล์แล้ว' });
         }).withFailureHandler(function(err) {
@@ -4220,14 +4264,14 @@
         const idx = inspectionData.findIndex(x => String(x.id) === String(id));
         if (idx > -1) inspectionData[idx][field] = formData[field];
         restoreInspectionUiState_(ui);
-        filterInspections(ui.scrollTop);
+        filterInspections(ui);
         Toast.fire({ icon: 'success', title: 'บันทึกแล้ว' });
       }).withFailureHandler(function(err) {
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err.message });
       }).saveInspectionPlan(formData, auth);
     }
 
-    function renderInspectionList(preserveScrollTop) {
+    function renderInspectionList(preserveUi) {
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
       if (!filteredInspectionData.length) {
@@ -4265,11 +4309,8 @@
       html += '</tbody></table></div>';
       container.innerHTML = html;
       initInspectionInlineDatePickers_();
-      if (preserveScrollTop != null && preserveScrollTop > 0) {
-        requestAnimationFrame(function() {
-          const wrap = document.querySelector('.inspection-table-wrap');
-          if (wrap) wrap.scrollTop = preserveScrollTop;
-        });
+      if (preserveUi && (preserveUi.scrollTop > 0 || preserveUi.windowScrollY > 0)) {
+        restoreInspectionScroll_(preserveUi);
       }
       if (!window._inspFilterClickBound) {
         window._inspFilterClickBound = true;
@@ -4279,7 +4320,7 @@
       }
     }
 
-    function filterInspections(preserveScrollTop) {
+    function filterInspections(preserveUi) {
       const textVal = (document.getElementById('inspectionSearchInput')?.value || '').toLowerCase().trim();
       const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
@@ -4297,7 +4338,7 @@
         return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns;
       });
 
-      renderInspectionList(preserveScrollTop);
+      renderInspectionList(preserveUi);
       updateInspectionStats();
     }
 
@@ -4421,7 +4462,7 @@
         if (!patchInspectionLocal_(formData)) reloadInspectionPlansLight_(ui);
         else {
           restoreInspectionUiState_(ui);
-          filterInspections(ui.scrollTop);
+          filterInspections(ui);
         }
       }).withFailureHandler(err => {
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
@@ -4443,7 +4484,7 @@
           const ui = captureInspectionUiState_();
           inspectionData = inspectionData.filter(x => String(x.id) !== String(id));
           restoreInspectionUiState_(ui);
-          filterInspections(ui.scrollTop);
+          filterInspections(ui);
         }).withFailureHandler(err => {
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
         }).deleteInspectionPlan(id, auth);
@@ -4467,10 +4508,10 @@
         const idx = inspectionData.findIndex(x => x.id == id);
         if (idx > -1) inspectionData[idx].visited = isChecked;
         restoreInspectionUiState_(ui);
-        filterInspections(ui.scrollTop);
+        filterInspections(ui);
       }).withFailureHandler(err => {
         restoreInspectionUiState_(ui);
-        filterInspections(ui.scrollTop);
+        filterInspections(ui);
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปเดตไม่สำเร็จ', text: err.message });
       }).saveInspectionPlan(formData, auth);
     }
