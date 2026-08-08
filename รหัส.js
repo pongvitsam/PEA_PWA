@@ -633,7 +633,9 @@ const THAI_MONTH_MAP_ = {
 function parseThaiDate_(raw) {
   if (raw == null || raw === '') return null;
   if (raw instanceof Date && !isNaN(raw.getTime())) {
-    return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+    let y = raw.getFullYear();
+    if (y > 2400) y -= 543;
+    return new Date(y, raw.getMonth(), raw.getDate());
   }
   if (typeof raw === 'number' && isFinite(raw)) {
     const ms = Math.round((raw - 25569) * 86400 * 1000);
@@ -1232,12 +1234,32 @@ const THAI_MONTHS_FULL_INSP_ = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
+function inspectionChristianYear_(d) {
+  let y = d.getFullYear();
+  if (y > 2400) y -= 543;
+  return y;
+}
+
+function inspectionNormalizeBeYear_(beYear) {
+  if (beYear >= 3000) return beYear - 543;
+  return beYear;
+}
+
 /** แสดงวันที่แผนส่งมอบ/ส่งมอบจริง: 10 สิงหาคม 2569 */
 function formatInspectionDateDisplay_(val) {
   if (val == null || val === '') return '';
+  const s = cellStr_(val).replace(/\s+/g, ' ').trim();
+  const m = s.match(/^(\d{1,2})\s+([ก-๙][ก-๙\.]*)\s+(\d{4})$/);
+  if (m) {
+    const d = parseThaiDate_(s);
+    if (d) {
+      const beYear = inspectionNormalizeBeYear_(parseInt(m[3], 10));
+      return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + beYear;
+    }
+  }
   const d = parseThaiDate_(val);
-  if (!d) return cellStr_(val);
-  return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+  if (!d) return s;
+  return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
 }
 
 function formatTimeRangeForSheet_(start, end) {

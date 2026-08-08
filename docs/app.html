@@ -3447,7 +3447,11 @@
 
     function parseInspectionHandoverDate_(raw) {
       if (raw == null || raw === '') return null;
-      if (raw instanceof Date && !isNaN(raw.getTime())) return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+      if (raw instanceof Date && !isNaN(raw.getTime())) {
+        let y = raw.getFullYear();
+        if (y > 2400) y -= 543;
+        return new Date(y, raw.getMonth(), raw.getDate());
+      }
       const s = String(raw).replace(/\u00a0/g, ' ').trim();
       if (!s) return null;
       const th = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
@@ -3483,14 +3487,32 @@
       return null;
     }
 
+    function inspectionChristianYear_(d) {
+      let y = d.getFullYear();
+      if (y > 2400) y -= 543;
+      return y;
+    }
+
+    function inspectionNormalizeBeYear_(beYear) {
+      if (beYear >= 3000) return beYear - 543;
+      return beYear;
+    }
+
     function formatInspectionHandoverDate_(raw, emptyDash) {
       if (raw == null || raw === '') return emptyDash ? '-' : '';
       const s = String(raw).replace(/\u00a0/g, ' ').trim();
       if (!s) return emptyDash ? '-' : '';
-      if (/(\d{1,2})\s+[ก-๙]{3,}\s+25\d{2}/.test(s)) return s;
+      const m = s.match(/^(\d{1,2})\s+([ก-๙][ก-๙\.]*)\s+(\d{4})$/);
+      if (m) {
+        const d = parseInspectionHandoverDate_(s);
+        if (d) {
+          const beYear = inspectionNormalizeBeYear_(parseInt(m[3], 10));
+          return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + beYear;
+        }
+      }
       const d = parseInspectionHandoverDate_(raw);
       if (!d) return s;
-      return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + (d.getFullYear() + 543);
+      return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
     }
 
     function inspectionPeaZoneSortKey_(zone) {
