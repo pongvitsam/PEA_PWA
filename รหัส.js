@@ -30,6 +30,12 @@ function getOutageSourceSs_() {
   return OUTAGE_SRC_SS_MEMO_;
 }
 
+let INSPECTION_SRC_SS_MEMO_ = null;
+function getInspectionSourceSs_() {
+  if (!INSPECTION_SRC_SS_MEMO_) INSPECTION_SRC_SS_MEMO_ = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
+  return INSPECTION_SRC_SS_MEMO_;
+}
+
 function friendlyOutageSheetError_(e) {
   const msg = (e && e.message) ? e.message : String(e || 'unknown');
   if (/permission|access denied|Authorization|ไม่มีสิทธิ์|does not have permission|Exception:\s*You do not have/i.test(msg)) {
@@ -37,6 +43,9 @@ function friendlyOutageSheetError_(e) {
   }
   if (/timed out|timeout|Service invoked too many|Exceeded maximum/i.test(msg)) {
     return 'ชีทตอบช้าเกินกำหนด ลองกด「รีเฟรชจากชีท」อีกครั้ง';
+  }
+  if (/จำนวนแถว|rows in the data|does not match the number of rows/i.test(msg)) {
+    return 'บันทึกลงชีท OutagePlan ไม่สำเร็จ (จำนวนแถวไม่ตรง) — ลองกด「รีเฟรชจากชีท」อีกครั้ง';
   }
   return msg;
 }
@@ -1203,15 +1212,16 @@ function autoCompletePastOutages_(sheet) {
   }
   if (updated > 0) {
     const colValues = data.slice(1).map(function(row) { return [!!parseCheckbox_(row[10])]; });
-    sheet.getRange(2, 11, data.length, 11).setValues(colValues);
+    sheet.getRange(2, 11, colValues.length, 1).setValues(colValues);
   }
   return updated;
 }
 
 function readOutagesMapped_(sheet) {
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
-  data.shift();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+  const numCols = Math.max(sheet.getLastColumn(), OUTAGE_HEADERS.length);
+  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   return data.map(mapOutageRow_).filter(function(o) {
     if (o.id == null || o.id === '' || !cellStr_(o.projectName)) return false;
     // ไม่แสดงงานปี 68 และเก่ากว่า
@@ -1220,11 +1230,30 @@ function readOutagesMapped_(sheet) {
   });
 }
 
+const OUTAGE_LIST_CACHE_KEY = 'outage_list_v2';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v2';
+const LIST_CACHE_TTL_SEC = 180;
+
+function invalidateOutageListCache_() {
+  try { CacheService.getScriptCache().remove(OUTAGE_LIST_CACHE_KEY); } catch (ignore) {}
+}
+
+function invalidateInspectionListCache_() {
+  try { CacheService.getScriptCache().remove(INSPECTION_LIST_CACHE_KEY); } catch (ignore) {}
+}
+
 /** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
 function getOutages() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const hit = cache.get(OUTAGE_LIST_CACHE_KEY);
+    if (hit) return JSON.parse(hit);
+  } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
-  return readOutagesMapped_(sheet);
+  const result = readOutagesMapped_(sheet);
+  try { cache.put(OUTAGE_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC); } catch (ignore) {}
+  return result;
 }
 
 const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
@@ -1284,6 +1313,7 @@ function refreshOutagesFromSource(force) {
         const n = syncOutagesFromSource_(sheet, sourceRows);
         autoCompletePastOutages_(sheet);
         cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
+        invalidateOutageListCache_();
         return {
           synced: true,
           count: n,
@@ -1354,6 +1384,7 @@ function saveOutageData(formObj, sessionToken) {
           : (data[i][11] != null ? data[i][11].toString() : '');
         sheet.getRange(i + 1, 12).setValue(sheetDetailsStr);
         logAction('แก้ไขแผนดับไฟ: ' + formObj.projectName);
+        invalidateOutageListCache_();
         return { success: true, message: isSyncedOutageId_(formObj.id) ? 'อัปเดตแล้ว (แอป + ชีทกำหนดการ)' : 'อัปเดตข้อมูลสำเร็จ' };
       }
     }
@@ -1363,6 +1394,7 @@ function saveOutageData(formObj, sessionToken) {
   if (!hasDates) throw new Error('กรุณาระบุวันเริ่มและวันสิ้นสุด');
   sheet.appendRow([new Date().getTime().toString(), formObj.projectName, startDate, endDate, formObj.remark || '', fileUrl, false, false, false, false, false, '']);
   logAction('เพิ่มแผนดับไฟ: ' + formObj.projectName);
+  invalidateOutageListCache_();
   return { success: true, message: 'บันทึกข้อมูลสำเร็จ' };
 }
 
@@ -1523,6 +1555,7 @@ function updateOutageStatus(id, field, isChecked, sessionToken) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === id.toString()) {
       sheet.getRange(i + 1, colIndex).setValue(!!isChecked);
+      invalidateOutageListCache_();
       return true;
     }
   }
@@ -1541,6 +1574,7 @@ function deleteOutage(id, sessionToken) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === id.toString()) {
       sheet.deleteRow(i + 1);
+      invalidateOutageListCache_();
       return true;
     }
   }
@@ -1573,6 +1607,13 @@ function ensureInspectionSheet_(ss) {
     sheet.insertRowBefore(1);
     sheet.getRange(1, 1, 1, INSPECTION_HEADERS.length).setValues([INSPECTION_HEADERS]);
   } else {
+    let headersOk = headers.length >= INSPECTION_HEADERS.length && headers[19] === 'Region';
+    if (headersOk) {
+      for (let i = 0; i < INSPECTION_HEADERS.length; i++) {
+        if (headers[i] !== INSPECTION_HEADERS[i]) { headersOk = false; break; }
+      }
+    }
+    if (headersOk) return sheet;
     INSPECTION_HEADERS.forEach((name, i) => {
       if (headers[i] !== name) sheet.getRange(1, i + 1).setValue(name);
     });
@@ -1640,9 +1681,11 @@ function mapInspectionRow_(row) {
 }
 
 function readInspectionsMapped_(sheet) {
-  const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
-  return data.slice(1).filter(r => r[3]).map(mapInspectionRow_);
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return [];
+  const numCols = Math.max(sheet.getLastColumn(), INSPECTION_HEADERS.length);
+  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+  return data.filter(r => r[3]).map(mapInspectionRow_);
 }
 
 function findInspectionHeaderMap_(values) {
@@ -1749,7 +1792,7 @@ function findInspectionSourceSheet_(srcSs, sheetId) {
 }
 
 function collectSourceInspectionRows_() {
-  const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
+  const srcSs = getInspectionSourceSs_();
   const collected = [];
   srcSs.getSheets().forEach(function(srcSheet) {
     const sheetName = srcSheet.getName();
@@ -1802,9 +1845,16 @@ function syncInspectionsFromSource_(destSheet, precollected) {
 }
 
 function getInspectionPlans() {
+  const cache = CacheService.getScriptCache();
+  try {
+    const hit = cache.get(INSPECTION_LIST_CACHE_KEY);
+    if (hit) return JSON.parse(hit);
+  } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
-  return readInspectionsMapped_(sheet);
+  const result = readInspectionsMapped_(sheet);
+  try { cache.put(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC); } catch (ignore) {}
+  return result;
 }
 
 const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v1';
@@ -1852,6 +1902,7 @@ function refreshInspectionPlansFromSource(force) {
       try {
         const n = syncInspectionsFromSource_(sheet, rows);
         cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
+        invalidateInspectionListCache_();
         return {
           synced: true,
           count: n,
@@ -1910,7 +1961,7 @@ function inspectionFormToFields_(formObj) {
 function writeInspectionBackToSource_(id, fields) {
   const ref = parseSyncedInspectionRowRef_(id);
   if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
-  const srcSs = SpreadsheetApp.openById(INSPECTION_SOURCE_SS_ID);
+  const srcSs = getInspectionSourceSs_();
   const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
   if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
   const lastCol = Math.max(srcSheet.getLastColumn(), 18);
@@ -1951,6 +2002,7 @@ function saveInspectionPlan(formObj, sessionToken) {
           }
         }
         logAction('แก้ไขแผนตรวจรับ: ' + fields.place);
+        invalidateInspectionListCache_();
         return { success: true, message: isSyncedInspectionId_(formObj.id) ? 'อัปเดตแล้ว (แอป + ชีท)' : 'อัปเดตข้อมูลสำเร็จ' };
       }
     }
@@ -1960,6 +2012,7 @@ function saveInspectionPlan(formObj, sessionToken) {
   const newId = new Date().getTime().toString();
   sheet.appendRow(inspectionFieldsToLocalRow_(newId, fields));
   logAction('เพิ่มแผนตรวจรับ: ' + fields.place);
+  invalidateInspectionListCache_();
   return { success: true, message: 'บันทึกข้อมูลสำเร็จ' };
 }
 
@@ -1975,6 +2028,7 @@ function deleteInspectionPlan(id, sessionToken) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === id.toString()) {
       sheet.deleteRow(i + 1);
+      invalidateInspectionListCache_();
       return true;
     }
   }
@@ -2059,6 +2113,7 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
         logAction('อัปโหลด File comment แล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
       }
     }
+    invalidateInspectionListCache_();
     return { fileComment: nextComment, visited: true };
   }
   throw new Error('ไม่พบรายการตรวจรับ');
@@ -2207,23 +2262,13 @@ function clearInspectionFormTemplateProps_() {
 
 function findInspectionFormTemplateFile_() {
   const meta = getInspectionFormTemplateProps_();
-  if (meta.fileId) {
-    try {
-      const file = DriveApp.getFileById(meta.fileId);
-      if (file && isInspectionDriveFile_(file)) {
-        return { file: file, fileName: meta.fileName || file.getName() };
-      }
-    } catch (e) {}
-  }
-  const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-  const files = parent.getFiles();
-  while (files.hasNext()) {
-    const f = files.next();
-    const name = f.getName();
-    if (name.indexOf(INSPECTION_FORM_TEMPLATE_PREFIX) === 0) {
-      return { file: f, fileName: meta.fileName || name };
+  if (!meta.fileId) return null;
+  try {
+    const file = DriveApp.getFileById(meta.fileId);
+    if (file && isInspectionDriveFile_(file)) {
+      return { file: file, fileName: meta.fileName || file.getName() };
     }
-  }
+  } catch (e) {}
   return null;
 }
 
@@ -2237,17 +2282,24 @@ function removeInspectionFormTemplateFile_() {
   clearInspectionFormTemplateProps_();
 }
 
+const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v1';
+
 /** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ */
 function getInspectionFormTemplate() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (ignore) {}
+  }
   const found = findInspectionFormTemplateFile_();
-  if (!found) return { exists: false };
-  const meta = getInspectionFormTemplateProps_();
-  return {
+  const result = found ? {
     exists: true,
     url: found.file.getUrl(),
     fileName: found.fileName || found.file.getName(),
-    updatedAt: meta.updatedAt || ''
-  };
+    updatedAt: getInspectionFormTemplateProps_().updatedAt || ''
+  } : { exists: false };
+  try { cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(result), 300); } catch (ignore) {}
+  return result;
 }
 
 /** อัปโหลด/แทนที่แบบฟอร์มตรวจ — แอดมินหลักเท่านั้น */
@@ -2273,6 +2325,7 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
     } catch (shareErr) {}
     finalUrl = file.getUrl();
     setInspectionFormTemplateProps_(file.getId(), fileName);
+    try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
   } catch (e) {
     const msg = (e && e.message) ? e.message : String(e);
     if (/Access denied|permission|ไม่มีสิทธิ์|Authorization/i.test(msg)) {
@@ -2294,6 +2347,7 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
 function deleteInspectionFormTemplate(sessionToken) {
   assertAdminFromSession_(sessionToken);
   removeInspectionFormTemplateFile_();
+  try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
   logAction('ลบแบบฟอร์มตรวจ');
   return { success: true, exists: false };
 }

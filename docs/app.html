@@ -670,7 +670,7 @@
             </div>
             <div class="row g-2 mb-3">
               <div class="col-md-7">
-                <input type="text" id="outageSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาชื่อสถานที่..." onkeyup="filterOutages()">
+                <input type="text" id="outageSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาชื่อสถานที่..." onkeyup="filterOutagesDebounced_()">
               </div>
               <div class="col-md-5">
                 <select id="outageRegionSelect" class="form-select form-select-sm" onchange="filterOutages()">
@@ -730,7 +730,7 @@
         </div>
         <div class="row g-2 mb-3">
           <div class="col-md-4">
-            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspections()">
+            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspectionsDebounced_()">
           </div>
           <div class="col-md-2">
             <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="inspectionOnRegionFilterChange()">
@@ -1118,6 +1118,7 @@
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
     let currentDbLocationIndex = -1;
     let inspectionData = [], filteredInspectionData = [];
+    let inspectionInitialized = false;
     let inspectionUiStash_ = null;
     let inspectionActiveRegion = '';
     let inspectionColumnFilters = {};
@@ -1471,7 +1472,75 @@
     let dashboardEverOpened = false;
     let provinceBordersLoaded = false;
     const LOC_LS_KEY = 'pwa_locations_v1';
+    const OUTAGE_LS_KEY = 'pwa_outages_v1';
+    const INSPECTION_LS_KEY = 'pwa_inspection_v1';
     const _assetLoadPromises_ = {};
+    let _locationLookupCache_ = null;
+    let _outageRegionCache_ = {};
+    let _inspMapLocCache_ = {};
+    let _inspRenderRaf_ = 0;
+
+    function debounce_(fn, ms) {
+      let t;
+      return function() {
+        const args = arguments;
+        const self = this;
+        clearTimeout(t);
+        t = setTimeout(function() { fn.apply(self, args); }, ms);
+      };
+    }
+
+    function readCachedOutages_() {
+      try {
+        const c = JSON.parse(localStorage.getItem(OUTAGE_LS_KEY) || 'null');
+        if (c && Array.isArray(c.data) && c.data.length) return c.data;
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+
+    function writeCachedOutages_(data) {
+      try {
+        localStorage.setItem(OUTAGE_LS_KEY, JSON.stringify({ at: Date.now(), data: data || [] }));
+      } catch (e) { /* quota */ }
+    }
+
+    function readCachedInspections_() {
+      try {
+        const c = JSON.parse(localStorage.getItem(INSPECTION_LS_KEY) || 'null');
+        if (c && Array.isArray(c.data) && c.data.length) return c.data;
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+
+    function writeCachedInspections_(data) {
+      try {
+        localStorage.setItem(INSPECTION_LS_KEY, JSON.stringify({ at: Date.now(), data: data || [] }));
+      } catch (e) { /* quota */ }
+    }
+
+    function rebuildLocationLookup_() {
+      _locationLookupCache_ = { exact: new Map(), list: [] };
+      (allData || []).forEach(function(d) {
+        const nameOnly = normalizeNameForMatch(d.name);
+        const label = normalizeNameForMatch(getLocLabel(d));
+        if (nameOnly) _locationLookupCache_.exact.set(nameOnly, d);
+        if (label && label !== nameOnly) _locationLookupCache_.exact.set(label, d);
+        _locationLookupCache_.list.push({ d: d, nameOnly: nameOnly });
+      });
+      _outageRegionCache_ = {};
+      _inspMapLocCache_ = {};
+    }
+
+    function clearOutageRegionCache_() {
+      _outageRegionCache_ = {};
+      _inspMapLocCache_ = {};
+    }
+
+    function indexInspectionData_(rows) {
+      (rows || []).forEach(function(p) {
+        p._searchBlob = [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
+      });
+    }
 
     function loadScriptOnce_(src) {
       if (_assetLoadPromises_[src]) return _assetLoadPromises_[src];
@@ -1519,6 +1588,7 @@
     function refreshLocationsData_(data) {
       allData = data || [];
       filteredData = allData.slice();
+      rebuildLocationLookup_();
       setupFiltersAndSelect();
       applyFilters();
       try { renderTable(); } catch (e) {}
@@ -1724,6 +1794,7 @@
     function initApp(data) {
       allData = data || [];
       filteredData = allData.slice();
+      rebuildLocationLookup_();
       document.getElementById('loading').style.display = 'none';
       
       setupFiltersAndSelect();
@@ -2946,17 +3017,18 @@
         ensureFlatpickr_().catch(function() {});
         if (!outageInitialized) initOutageSystem();
         else filterOutages();
-        setTimeout(() => {
-          // วาดใหม่ทุกครั้งที่เปิดเมนู — กันกรณีสร้างตอนซ่อนแล้วอีเวนต์ไม่โชว์
-          renderCalendar();
-          window.dispatchEvent(new Event('resize'));
-        }, 200);
+        setTimeout(function() {
+          if (calendar) {
+            calendar.updateSize();
+            window.dispatchEvent(new Event('resize'));
+          }
+        }, 250);
       }
 
       if (menuId === 'inspection') {
         startMapGpsTracking();
         ensureFlatpickr_().catch(function() {});
-        if (!inspectionData.length) initInspectionSystem();
+        if (!inspectionInitialized) initInspectionSystem();
         else filterInspections();
       }
     }
@@ -3015,37 +3087,51 @@
       opts = opts || {};
       if (!pack || !pack.outages) return;
       outageData = normalizeOutageList_(pack.outages);
+      writeCachedOutages_(pack.outages);
       filterOutages();
       if (pack.error && opts.showError) {
-        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่านได้' });
+        const shareHint = /ไม่มีสิทธิ์|permission|แชร์ชีท/i.test(pack.error)
+          ? ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่านได้'
+          : '';
+        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + shareHint });
       } else if (pack.synced && opts.toast) {
         Toast.fire({ icon: 'success', title: 'อัปเดตจากชีทแล้ว (' + (pack.count != null ? pack.count : pack.outages.length) + ' รายการ)' });
       }
     }
 
+    function scheduleOutageBackgroundSync_() {
+      if (window._outageSyncTimer_) return;
+      window._outageSyncTimer_ = setTimeout(function() {
+        window._outageSyncTimer_ = null;
+        google.script.run.withSuccessHandler(function(pack) {
+          applyOutagePack(pack, { showError: false });
+        }).withFailureHandler(function(err) {
+          const msg = (err && err.message) ? err.message : String(err || '');
+          if (/timeout|API timeout/i.test(msg)) return;
+        }).refreshOutagesFromSource(false);
+      }, 2500);
+    }
+
     function initOutageSystem() {
-      // โหลดจาก OutagePlan ก่อน (เร็ว) แล้วค่อยซิงก์พื้นหลังแบบใช้ cache TTL — ไม่บังคับทุกครั้ง
+      const cached = readCachedOutages_();
+      if (cached) {
+        outageData = normalizeOutageList_(cached);
+        outageInitialized = true;
+        filterOutages();
+      }
       google.script.run.withSuccessHandler(res => {
         outageData = normalizeOutageList_(res || []);
         outageInitialized = true;
+        writeCachedOutages_(res || []);
         filterOutages();
-        setTimeout(function() {
-          google.script.run.withSuccessHandler(pack => {
-            applyOutagePack(pack, { showError: true });
-          }).withFailureHandler(err => {
-            const msg = (err && err.message) ? err.message : String(err || '');
-            if (/timeout|API timeout/i.test(msg)) {
-              Toast.fire({ icon: 'info', title: 'ซิงก์ชีทยังไม่เสร็จ', text: 'ข้อมูลในแอปพร้อมใช้แล้ว กดรีเฟรชจากชีทได้ภายหลัง' });
-              return;
-            }
-            Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทไม่สำเร็จ', text: msg });
-          }).refreshOutagesFromSource(false);
-        }, 50);
+        scheduleOutageBackgroundSync_();
       }).withFailureHandler(err => {
-        outageData = [];
-        outageInitialized = true;
-        filterOutages();
-        Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
+        if (!cached) {
+          outageData = [];
+          outageInitialized = true;
+          filterOutages();
+          Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
+        }
       }).getOutages();
     }
 
@@ -3205,8 +3291,8 @@
       const focusDate = getOutageCalendarFocusDate();
       if (calendar) {
         calendar.setOption('height', calHeight);
-        calendar.removeAllEvents();
-        events.forEach(ev => calendar.addEvent(ev));
+        calendar.getEventSources().forEach(function(src) { src.remove(); });
+        calendar.addEventSource(events);
         calendar.gotoDate(focusDate);
         calendar.updateSize();
         setTimeout(function() {
@@ -3277,41 +3363,56 @@
 
     function findLocationForOutage(projectName) {
       if (!projectName || !allData) return null;
+      if (!_locationLookupCache_) rebuildLocationLookup_();
       const q = normalizeNameForMatch(projectName);
       if (!q) return null;
-      let exact = allData.find(d => {
-        const nameOnly = normalizeNameForMatch(d.name);
-        const label = normalizeNameForMatch(getLocLabel(d));
-        return nameOnly === q || label === q;
-      });
+      const exact = _locationLookupCache_.exact.get(q);
       if (exact) return exact;
-      return allData.find(d => {
-        const nameOnly = normalizeNameForMatch(d.name);
-        return nameOnly.includes(q) || q.includes(nameOnly);
-      }) || null;
+      for (let i = 0; i < _locationLookupCache_.list.length; i++) {
+        const item = _locationLookupCache_.list[i];
+        const nameOnly = item.nameOnly;
+        if (!nameOnly) continue;
+        if (nameOnly.includes(q) || q.includes(nameOnly)) return item.d;
+      }
+      return null;
+    }
+
+    function getOutageRegionCached_(projectName) {
+      if (!projectName) return '';
+      if (_outageRegionCache_[projectName] !== undefined) return _outageRegionCache_[projectName];
+      const loc = findLocationForOutage(projectName);
+      const region = loc ? (loc.peaRegion || '') : '';
+      _outageRegionCache_[projectName] = region;
+      return region;
     }
 
     function getInspectionMapLocation_(p) {
+      const cacheKey = String((p && p.id) || (p && p.place) || '');
+      if (cacheKey && _inspMapLocCache_[cacheKey]) return _inspMapLocCache_[cacheKey];
       const loc = findLocationForOutage(p && p.place);
+      let result;
       if (loc) {
         const index = allData.findIndex(function(d) { return d.row === loc.row; });
-      return {
-        loc: loc,
-        index: index,
-        name: (loc.name || p.place || '-').toString().trim(),
-        pwaText: (p.pwaDistrict || loc.pwaRegion || p.pwaBranch || '').toString().trim(),
-        peaZone: (p.peaZone || '').toString().trim(),
-        peaOffice: (p.peaOffice || '').toString().trim()
-      };
+        result = {
+          loc: loc,
+          index: index,
+          name: (loc.name || p.place || '-').toString().trim(),
+          pwaText: (p.pwaDistrict || loc.pwaRegion || p.pwaBranch || '').toString().trim(),
+          peaZone: (p.peaZone || '').toString().trim(),
+          peaOffice: (p.peaOffice || '').toString().trim()
+        };
+      } else {
+        result = {
+          loc: null,
+          index: -1,
+          name: (p && p.place ? p.place : '-').toString().trim(),
+          pwaText: (p && (p.pwaDistrict || p.pwaBranch) ? (p.pwaDistrict || p.pwaBranch) : '').toString().trim(),
+          peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim(),
+          peaOffice: (p && p.peaOffice ? p.peaOffice : '').toString().trim()
+        };
       }
-      return {
-        loc: null,
-        index: -1,
-        name: (p && p.place ? p.place : '-').toString().trim(),
-        pwaText: (p && (p.pwaDistrict || p.pwaBranch) ? (p.pwaDistrict || p.pwaBranch) : '').toString().trim(),
-        peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim(),
-        peaOffice: (p && p.peaOffice ? p.peaOffice : '').toString().trim()
-      };
+      if (cacheKey) _inspMapLocCache_[cacheKey] = result;
+      return result;
     }
 
     function findInspectionPlansForLocation_(loc) {
@@ -3518,8 +3619,8 @@
     }
 
     function renderOutageList() {
-      const container = document.getElementById('outageListContainer'); 
-      container.innerHTML = '';
+      const container = document.getElementById('outageListContainer');
+      if (!container) return;
       
       let sortedData = [...filteredOutageData].sort((a,b) => {
         const aHas = hasOutageDates(a), bHas = hasOutageDates(b);
@@ -3530,7 +3631,7 @@
         return normalizeGregorianDate_(a.start) - normalizeGregorianDate_(b.start);
       });
 
-      sortedData.forEach(o => {
+      const parts = sortedData.map(function(o) {
         let isDone = isOutageEffectivelyDone(o);
         const safeId = String(o.id).replace(/'/g, "\\'");
         let cardStyle = isDone ? 'border-left: 5px solid #2563eb; background-color: #f8fbff;' :
@@ -3560,7 +3661,7 @@
         let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>` : '';
         let locHint = findLocationForOutage(o.projectName) ? `<button class="btn btn-sm btn-outline-info rounded-pill mt-1" onclick="viewOutageLocation('${safeId}')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>` : '';
 
-        container.innerHTML += `
+        return `
           <div class="card border-0 shadow-sm mb-3" style="border-radius: 12px; ${cardStyle} transition: 0.3s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
             <div class="card-body p-3">
               <div class="d-flex justify-content-between align-items-start">
@@ -3578,6 +3679,7 @@
             </div>
           </div>`;
       });
+      container.innerHTML = parts.join('');
     }
 
     function viewOutageLocation(id) {
@@ -3781,7 +3883,7 @@
 
       filteredOutageData = outageData.filter(o => {
         let matchText = (o.projectName || '').toLowerCase().includes(textVal);
-        let region = getOutageRegion(o.projectName);
+        let region = getOutageRegionCached_(o.projectName);
         let matchRegion = (regionVal === "" || region === regionVal);
         
         return matchText && matchRegion;
@@ -3791,6 +3893,8 @@
       renderOutageList();
       updateOutageStats();
     }
+
+    const filterOutagesDebounced_ = debounce_(filterOutages, 120);
 
     const INSPECTION_SOURCE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit?gid=0#gid=0';
     const INSPECTION_SOURCE_SHEET_TITLE = 'แผนการเข้าตรวจรับงานเฟส3-4';
@@ -3820,18 +3924,34 @@
 
     function applyInspectionPack(pack, opts) {
       opts = opts || {};
-      if (!pack || !pack.plans) return;
+      if (!pack) return;
       const ui = opts.preserveUi ? captureInspectionUiState_() : null;
-      inspectionData = pack.plans || [];
-      setupInspectionPwaFilter(ui);
-      if (ui) restoreInspectionUiState_(ui);
-      filterInspections(ui || undefined);
+      const shouldUpdate = !!(pack.synced || !(inspectionData && inspectionData.length));
+      if (shouldUpdate && pack.plans) {
+        inspectionData = pack.plans || [];
+        indexInspectionData_(inspectionData);
+        _inspMapLocCache_ = {};
+        writeCachedInspections_(pack.plans);
+        setupInspectionPwaFilter(ui);
+        if (ui) restoreInspectionUiState_(ui);
+        filterInspections(ui || undefined);
+      }
       if (pack.error && opts.showError) {
-        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่าน/เขียนได้' });
+        const shareHint = /ไม่มีสิทธิ์|permission|แชร์ชีท/i.test(pack.error)
+          ? ' — ตรวจว่าแชร์ชีทให้บัญชี Apps Script อ่าน/เขียนได้'
+          : '';
+        Swal.fire({ icon: 'warning', title: 'ซิงก์จากชีทไม่สำเร็จ', text: pack.error + shareHint });
       } else if (pack.synced && opts.toast) {
         Toast.fire({ icon: 'success', title: 'อัปเดตจากชีทแล้ว (' + (pack.count != null ? pack.count : pack.plans.length) + ' รายการ)' });
       }
       refreshMapInspectionFilesPanel_();
+    }
+
+    function showInspectionLoading_() {
+      const container = document.getElementById('inspectionListContainer');
+      if (container) {
+        container.innerHTML = '<div class="text-center text-muted py-5"><div class="spinner-border text-primary mb-3"></div><p class="mb-0">กำลังโหลดแผนตรวจรับ...</p></div>';
+      }
     }
 
     function captureInspectionUiState_() {
@@ -3894,12 +4014,28 @@
       ui = ui || captureInspectionUiState_();
       google.script.run.withSuccessHandler(function(res) {
         inspectionData = res || [];
+        indexInspectionData_(inspectionData);
+        _inspMapLocCache_ = {};
+        writeCachedInspections_(res || []);
         setupInspectionPwaFilter(ui);
         restoreInspectionUiState_(ui);
         filterInspections(ui);
       }).withFailureHandler(function(err) {
         Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
       }).getInspectionPlans();
+    }
+
+    function scheduleInspectionBackgroundSync_() {
+      if (window._inspectionSyncTimer_) return;
+      window._inspectionSyncTimer_ = setTimeout(function() {
+        window._inspectionSyncTimer_ = null;
+        google.script.run.withSuccessHandler(function(pack) {
+          applyInspectionPack(pack, { showError: false, preserveUi: true });
+        }).withFailureHandler(function(err) {
+          const msg = (err && err.message) ? err.message : String(err || '');
+          if (/timeout|API timeout/i.test(msg)) return;
+        }).refreshInspectionPlansFromSource(false);
+      }, 2500);
     }
 
     function patchInspectionLocal_(formData) {
@@ -3911,27 +4047,33 @@
     }
 
     function initInspectionSystem() {
-      loadInspectionFormTemplate();
-      google.script.run.withSuccessHandler(res => {
-        inspectionData = res || [];
+      if (inspectionInitialized) return;
+      const cached = readCachedInspections_();
+      if (cached) {
+        inspectionData = cached;
+        indexInspectionData_(inspectionData);
+        inspectionInitialized = true;
         setupInspectionPwaFilter();
         filterInspections();
-        setTimeout(function() {
-          google.script.run.withSuccessHandler(pack => {
-            applyInspectionPack(pack, { showError: true, preserveUi: true });
-          }).withFailureHandler(err => {
-            const msg = (err && err.message) ? err.message : String(err || '');
-            if (/timeout|API timeout/i.test(msg)) {
-              Toast.fire({ icon: 'info', title: 'ซิงก์ชีทตรวจรับยังไม่เสร็จ', text: 'ข้อมูลในแอปพร้อมใช้แล้ว' });
-              return;
-            }
-            Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทตรวจรับไม่สำเร็จ', text: msg });
-          }).refreshInspectionPlansFromSource(false);
-        }, 200);
-      }).withFailureHandler(err => {
-        inspectionData = [];
+      } else {
+        showInspectionLoading_();
+      }
+      google.script.run.withSuccessHandler(res => {
+        inspectionData = res || [];
+        indexInspectionData_(inspectionData);
+        inspectionInitialized = true;
+        writeCachedInspections_(res || []);
+        setupInspectionPwaFilter();
         filterInspections();
-        Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
+        setTimeout(function() { loadInspectionFormTemplate(); }, 800);
+        scheduleInspectionBackgroundSync_();
+      }).withFailureHandler(err => {
+        if (!cached) {
+          inspectionData = [];
+          inspectionInitialized = true;
+          filterInspections();
+          Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
+        }
       }).getInspectionPlans();
     }
 
@@ -4169,19 +4311,35 @@
       document.querySelectorAll('.inspection-sheet-table .insp-inline').forEach(syncInspInlineFilledClass_);
     }
 
-    function initInspectionInlineDatePickers_() {
-      if (typeof flatpickr === 'undefined') return;
-      document.querySelectorAll('.insp-inline-date').forEach(function(el) {
-        if (el._flatpickr) el._flatpickr.destroy();
-        const parsed = parseInspectionHandoverDate_(el.value);
-        const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: true }));
-        if (parsed) {
-          fp.setDate(parsed, false);
-          applyInspectionPickerDisplay_(el, parsed);
-        }
-        el.setAttribute('data-last-saved', el.value.trim());
-        syncInspInlineFilledClass_(el);
+    function ensureInspectionInlineDatePicker_(el) {
+      if (!el || el._flatpickr || typeof flatpickr === 'undefined') return;
+      const parsed = parseInspectionHandoverDate_(el.value);
+      const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: true }));
+      if (parsed) {
+        fp.setDate(parsed, false);
+        applyInspectionPickerDisplay_(el, parsed);
+      }
+      el.setAttribute('data-last-saved', el.value.trim());
+      syncInspInlineFilledClass_(el);
+    }
+
+    function bindInspectionLazyDatePickers_() {
+      if (window._inspDatePickerBound) return;
+      window._inspDatePickerBound = true;
+      const container = document.getElementById('inspectionListContainer');
+      if (!container) return;
+      container.addEventListener('focusin', function(e) {
+        const el = e.target;
+        if (el && el.classList && el.classList.contains('insp-inline-date')) ensureInspectionInlineDatePicker_(el);
       });
+      container.addEventListener('click', function(e) {
+        const el = e.target;
+        if (el && el.classList && el.classList.contains('insp-inline-date')) ensureInspectionInlineDatePicker_(el);
+      });
+    }
+
+    function initInspectionInlineDatePickers_() {
+      initInspectionInlineFilledState_();
     }
 
     function initInspectionModalDatePickers_() {
@@ -4260,16 +4418,28 @@
       const cur = inspectionColumnFilters[key] || '';
       const selectKeys = ['region', 'phase', 'mapLocation', 'peaZone'];
       if (selectKeys.indexOf(key) >= 0) {
-        const vals = getInspectionUniqueValues_(key, col);
-        if (vals.length && vals.length <= 60) {
-          let opts = '<option value="">ทั้งหมด</option>';
-          vals.forEach(function(v) {
-            opts += '<option value="' + escHtml(v) + '"' + (cur === v ? ' selected' : '') + '>' + escHtml(v) + '</option>';
-          });
-          return '<select class="form-select form-select-sm insp-col-filter" data-col="' + key + '" onchange="onInspectionColumnFilterChange(this)">' + opts + '</select>';
-        }
+        return '<select class="form-select form-select-sm insp-col-filter" data-col="' + key + '" data-lazy-select="1" onclick="populateInspectionColumnFilterOptions(this, event)" onchange="onInspectionColumnFilterChange(this)">' +
+          '<option value="">' + (cur ? escHtml(cur) : 'ทั้งหมด') + '</option></select>';
       }
       return '<input type="text" class="form-control form-control-sm insp-col-filter" data-col="' + key + '" value="' + escHtml(cur) + '" placeholder="กรอง..." oninput="onInspectionColumnFilterChange(this)">';
+    }
+
+    function populateInspectionColumnFilterOptions(el, ev) {
+      if (ev) ev.stopPropagation();
+      if (!el || el.getAttribute('data-populated') === '1') return;
+      const key = el.getAttribute('data-col');
+      const col = INSPECTION_TABLE_COLUMNS_.find(function(x) { return x.key === key; });
+      const cur = inspectionColumnFilters[key] || el.value || '';
+      const vals = getInspectionUniqueValues_(key, col);
+      if (vals.length && vals.length <= 60) {
+        let opts = '<option value="">ทั้งหมด</option>';
+        vals.forEach(function(v) {
+          opts += '<option value="' + escHtml(v) + '"' + (cur === v ? ' selected' : '') + '>' + escHtml(v) + '</option>';
+        });
+        el.innerHTML = opts;
+        el.setAttribute('data-populated', '1');
+        if (cur) el.value = cur;
+      }
     }
 
     function renderInspectionHeaderCell_(col) {
@@ -4680,6 +4850,14 @@
     }
 
     function renderInspectionList(preserveUi) {
+      if (_inspRenderRaf_) cancelAnimationFrame(_inspRenderRaf_);
+      _inspRenderRaf_ = requestAnimationFrame(function() {
+        _inspRenderRaf_ = 0;
+        renderInspectionListNow_(preserveUi);
+      });
+    }
+
+    function renderInspectionListNow_(preserveUi) {
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
       if (!filteredInspectionData.length) {
@@ -4716,8 +4894,8 @@
       });
       html += '</tbody></table></div>';
       container.innerHTML = html;
+      bindInspectionLazyDatePickers_();
       initInspectionInlineDatePickers_();
-      initInspectionInlineFilledState_();
       if (preserveUi && (preserveUi.scrollTop > 0 || preserveUi.windowScrollY > 0)) {
         restoreInspectionScroll_(preserveUi);
       }
@@ -4737,7 +4915,7 @@
       const regionVal = getInspectionRegionFilter_();
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
-        const blob = [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
+        const blob = p._searchBlob || [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
         const matchText = !textVal || blob.includes(textVal);
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
@@ -4750,6 +4928,8 @@
       renderInspectionList(preserveUi);
       updateInspectionStats();
     }
+
+    const filterInspectionsDebounced_ = debounce_(filterInspections, 120);
 
     function mergeInspectionFileCommentNotes_(existingRaw, noteText) {
       const lines = parseInspectionFileCommentEntries_(existingRaw).filter(function(e) { return e.url; })
