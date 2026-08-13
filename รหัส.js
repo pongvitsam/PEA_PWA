@@ -416,8 +416,53 @@ function validateHttpUrl_(url) {
   return url;
 }
 
-// ดึงข้อมูลทั้งหมด
-function getLocations() {
+const LOCATIONS_CACHE_KEY = 'loc_v2';
+const LOCATIONS_CACHE_TTL = 180; // 3 นาที — มือถือได้ข้อมูลเร็วขึ้นมาก
+
+function cachePutChunks_(baseKey, json, ttl) {
+  const cache = CacheService.getScriptCache();
+  const size = 90000;
+  const n = Math.ceil(json.length / size);
+  if (n < 1 || n > 25) return false;
+  const payload = {};
+  payload[baseKey + '_n'] = String(n);
+  for (let i = 0; i < n; i++) {
+    payload[baseKey + '_' + i] = json.substring(i * size, (i + 1) * size);
+  }
+  cache.putAll(payload, ttl);
+  return true;
+}
+
+function cacheGetChunks_(baseKey) {
+  const cache = CacheService.getScriptCache();
+  const nStr = cache.get(baseKey + '_n');
+  if (!nStr) return null;
+  const n = parseInt(nStr, 10);
+  if (!n || n < 1) return null;
+  const keys = [];
+  for (let i = 0; i < n; i++) keys.push(baseKey + '_' + i);
+  const parts = cache.getAll(keys);
+  let json = '';
+  for (let i = 0; i < n; i++) {
+    const p = parts[baseKey + '_' + i];
+    if (p == null) return null;
+    json += p;
+  }
+  return json;
+}
+
+function invalidateLocationsCache_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const nStr = cache.get(LOCATIONS_CACHE_KEY + '_n');
+    const keys = [LOCATIONS_CACHE_KEY + '_n'];
+    const n = parseInt(nStr, 10) || 0;
+    for (let i = 0; i < n; i++) keys.push(LOCATIONS_CACHE_KEY + '_' + i);
+    cache.removeAll(keys);
+  } catch (e) { /* ignore */ }
+}
+
+function getLocationsUncached_() {
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
   const data = sheet.getDataRange().getValues();
@@ -442,6 +487,19 @@ function getLocations() {
       linkPEA: row[20] || ''
     };
   }).filter(loc => loc.lat !== null && loc.lng !== null);
+}
+
+/** ดึงข้อมูลทั้งหมด — มี cache ฝั่งเซิร์ฟเวอร์เพื่อมือถือโหลดเร็ว */
+function getLocations() {
+  try {
+    const raw = cacheGetChunks_(LOCATIONS_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* fall through */ }
+  const result = getLocationsUncached_();
+  try {
+    cachePutChunks_(LOCATIONS_CACHE_KEY, JSON.stringify(result), LOCATIONS_CACHE_TTL);
+  } catch (e) { /* ignore cache write */ }
+  return result;
 }
 
 function authenticate(username, password) {
@@ -495,6 +553,7 @@ function updateLocation(data, sessionToken) {
   ];
 
   sheet.getRange(data.row, 1, 1, 21).setValues([rowData]);
+  invalidateLocationsCache_();
   logAction('แก้ไขข้อมูล: ' + data.name + ' (แถวที่ ' + data.row + ')');
   return true;
 }

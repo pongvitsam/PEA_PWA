@@ -5,18 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PWA Project Dashboard</title>
   
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="dns-prefetch" href="https://script.google.com">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script><script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="icon" href="data:,">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=10"></script>
-  <script src="https://npmcdn.com/flatpickr/dist/l10n/th.js"></script>
+  <script src="js/pwa-gas-api.js?v=11"></script>
+  <!-- chart / fullcalendar / sortable / flatpickr: โหลดเมื่อเปิดเมนูที่เกี่ยวข้อง (มือถือเร็วขึ้น) -->
   <style>
     :root {
       --pwa-primary: #2563eb;
@@ -1466,16 +1467,99 @@
     }
 
     let appStarted = false;
+    let mapInitialized = false;
+    let dashboardEverOpened = false;
+    let provinceBordersLoaded = false;
+    const LOC_LS_KEY = 'pwa_locations_v1';
+    const _assetLoadPromises_ = {};
+
+    function loadScriptOnce_(src) {
+      if (_assetLoadPromises_[src]) return _assetLoadPromises_[src];
+      _assetLoadPromises_[src] = new Promise(function(resolve, reject) {
+        const existing = document.querySelector('script[data-src="' + src + '"],script[src="' + src + '"]');
+        if (existing) {
+          if (existing.getAttribute('data-loaded') === '1' || existing.readyState === 'complete') resolve();
+          else { existing.addEventListener('load', resolve); existing.addEventListener('error', reject); }
+          return;
+        }
+        const s = document.createElement('script');
+        s.src = src;
+        s.async = true;
+        s.setAttribute('data-src', src);
+        s.onload = function() { s.setAttribute('data-loaded', '1'); resolve(); };
+        s.onerror = function() { reject(new Error('โหลดสคริปต์ไม่สำเร็จ: ' + src)); };
+        document.head.appendChild(s);
+      });
+      return _assetLoadPromises_[src];
+    }
+
+    function ensureChartJs_() { return loadScriptOnce_('https://cdn.jsdelivr.net/npm/chart.js'); }
+    function ensureFullCalendar_() { return loadScriptOnce_('https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'); }
+    function ensureSortable_() { return loadScriptOnce_('https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js'); }
+    function ensureFlatpickr_() {
+      return loadScriptOnce_('https://cdn.jsdelivr.net/npm/flatpickr').then(function() {
+        return loadScriptOnce_('https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js');
+      });
+    }
+
+    function readCachedLocations_() {
+      try {
+        const cached = JSON.parse(localStorage.getItem(LOC_LS_KEY) || 'null');
+        if (cached && Array.isArray(cached.data) && cached.data.length) return cached.data;
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+
+    function writeCachedLocations_(data) {
+      try {
+        localStorage.setItem(LOC_LS_KEY, JSON.stringify({ at: Date.now(), data: data || [] }));
+      } catch (e) { /* quota */ }
+    }
+
+    function refreshLocationsData_(data) {
+      allData = data || [];
+      filteredData = allData.slice();
+      setupFiltersAndSelect();
+      applyFilters();
+      try { renderTable(); } catch (e) {}
+      if (dashboardEverOpened) {
+        try { generateDashboard(); } catch (e) {}
+      }
+    }
 
     function startAppAfterAuth() {
       if (appStarted) return;
       appStarted = true;
-      fetchDocs();
-      google.script.run.withSuccessHandler(function(res) { initApp(res); })
-        .withFailureHandler(function(err) {
-          document.getElementById('loading').style.display = 'none';
-          Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
-        }).getLocations();
+      const cached = readCachedLocations_();
+      const usedCache = !!(cached && cached.length);
+      if (usedCache) initApp(cached);
+
+      google.script.run.withSuccessHandler(function(res) {
+        writeCachedLocations_(res);
+        if (usedCache) refreshLocationsData_(res);
+        else initApp(res);
+      }).withFailureHandler(function(err) {
+        if (usedCache) {
+          Toast.fire({ icon: 'info', title: 'ใช้ข้อมูลในเครื่องชั่วคราว', text: 'อัปเดตจากเซิร์ฟเวอร์ไม่สำเร็จ' });
+          return;
+        }
+        document.getElementById('loading').style.display = 'none';
+        Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
+      }).getLocations();
+    }
+
+    function loadProvinceBordersLazy_() {
+      if (provinceBordersLoaded || !map) return;
+      if (navigator.connection && navigator.connection.saveData) return;
+      if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) return;
+      provinceBordersLoaded = true;
+      fetch('https://cdn.jsdelivr.net/gh/apisit/thailand.json@master/thailand.json')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          L.geoJSON(data, {
+            style: { color: "#4dabf7", weight: 1.5, opacity: 0.6, fillOpacity: 0.02 }
+          }).addTo(map);
+        }).catch(function() { provinceBordersLoaded = false; });
     }
 
     function persistAuthState(role, token, expireMs) {
@@ -1527,7 +1611,7 @@
       toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true
     });
 
-    const iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-';
+    const iconUrl = 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-';
     const icons = {
       green: new L.Icon({ iconUrl: iconUrl+'green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }),
       blue: new L.Icon({ iconUrl: iconUrl+'blue.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }),
@@ -1632,47 +1716,33 @@
         });
       });
       
-      flatpickr(".datepicker", {
-        enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
-        onChange: function(selectedDates, dateStr, instance) {
-          if(selectedDates[0]) {
-            instance.input.value = formatOutagePickerDisplay_(selectedDates[0]);
-          }
-        }
-      });
-      
+      // flatpickr โหลดเมื่อเปิดแผนดับไฟ/ตรวจรับ — ไม่บล็อกมือถือตอนเปิดแอป
       checkAuthToken();
     });
 
     // 🟢 แก้ไข: ย้าย initOutageSystem() มาต่อท้ายตรงนี้ เพื่อให้แน่ใจว่า allData โหลดเสร็จก่อน
     function initApp(data) {
-      allData = data;
-      filteredData = [...allData];
+      allData = data || [];
+      filteredData = allData.slice();
       document.getElementById('loading').style.display = 'none';
       
       setupFiltersAndSelect();
-      generateDashboard();
       switchMenu('map');
       
-      let streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' });
-      let satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: 'Google Satellite' });
+      if (!mapInitialized) {
+        mapInitialized = true;
+        let streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' });
+        let satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: 'Google Satellite' });
 
-      map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
-      L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
-      markersLayer = L.layerGroup().addTo(map);
-      startMapGpsTracking();
-
-      fetch('https://raw.githubusercontent.com/apisit/thailand.json/master/thailand.json')
-        .then(res => res.json())
-        .then(data => {
-          L.geoJSON(data, {
-            style: { color: "#4dabf7", weight: 1.5, opacity: 0.6, fillOpacity: 0.02 }
-          }).addTo(map);
-        }).catch(err => console.log('โหลดแผนที่จังหวัดล้มเหลว', err));
+        map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
+        L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
+        markersLayer = L.layerGroup().addTo(map);
+        setTimeout(function() { startMapGpsTracking(); }, 1000);
+        setTimeout(loadProvinceBordersLazy_, 5000);
+      }
       
       renderMap();
-      renderTable();
-      initInspectionSystem();
+      setTimeout(function() { try { renderTable(); } catch (e) {} }, 50);
     }
 
     function checkAuthToken() {
@@ -1686,15 +1756,19 @@
         if (token.role === 'guest' || !token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
           redirectToLogin(); return;
         }
+        // มือถือ: เริ่มโหลดแอปทันทีจาก token ในเครื่อง — validate พื้นหลัง
+        persistAuthState(token.role, token.sessionToken, token.expire);
+        updateUIByRole();
+        startAppAfterAuth();
         google.script.run.withSuccessHandler(function(res) {
           if (!res || !res.valid) {
-            redirectToLogin(); return;
+            redirectToLogin();
+            return;
           }
           persistAuthState(res.role, token.sessionToken, token.expire);
           updateUIByRole();
-          startAppAfterAuth();
         }).withFailureHandler(function() {
-          redirectToLogin();
+          // คงสถานะเดิมถ้าเน็ตหลุดชั่วคราว
         }).validateClientSession(token.sessionToken);
       } catch (e) {
         redirectToLogin();
@@ -2083,6 +2157,10 @@
     }
 
     function generateDashboard() {
+      if (typeof Chart === 'undefined') {
+        ensureChartJs_().then(generateDashboard).catch(function() {});
+        return;
+      }
       let totalSites = allData.length;
       let totalKwp = allData.reduce((sum, loc) => sum + (parseFloat(loc.kwp) || 0), 0);
       let pwaSet = new Set(), peaSet = new Set();
@@ -2815,10 +2893,11 @@
           Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ!', text: 'อัปเดตข้อมูลลงฐานข้อมูลแล้ว', confirmButtonColor: '#2563eb', timer: 2000});
           
           setupFiltersAndSelect();
-          generateDashboard(); 
+          if (dashboardEverOpened) generateDashboard(); 
           applyFilters();
           renderTable();
           refreshActiveLocationView(index);
+          writeCachedLocations_(allData);
         })
         .withFailureHandler((err) => {
           btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึกข้อมูล';
@@ -2846,6 +2925,15 @@
         startMapGpsTracking();
       }
 
+      if (menuId === 'dash') {
+        dashboardEverOpened = true;
+        generateDashboard();
+      }
+
+      if (menuId === 'docs') {
+        if (!projectDocs.length) fetchDocs();
+      }
+
       if (menuId === 'route') {
         setTimeout(function () {
           initRouteMapIfNeeded();
@@ -2855,6 +2943,7 @@
       }
       
       if(menuId === 'outage') {
+        ensureFlatpickr_().catch(function() {});
         if (!outageInitialized) initOutageSystem();
         else filterOutages();
         setTimeout(() => {
@@ -2866,6 +2955,7 @@
 
       if (menuId === 'inspection') {
         startMapGpsTracking();
+        ensureFlatpickr_().catch(function() {});
         if (!inspectionData.length) initInspectionSystem();
         else filterInspections();
       }
@@ -3131,8 +3221,16 @@
     }
 
     function renderCalendar() {
+      ensureFullCalendar_().then(function() {
+        renderCalendarNow_();
+      }).catch(function(err) {
+        Toast.fire({ icon: 'warning', title: 'โหลดปฏิทินไม่สำเร็จ', text: (err && err.message) ? err.message : '' });
+      });
+    }
+
+    function renderCalendarNow_() {
       let calendarEl = document.getElementById('calendar');
-      if (!calendarEl) return;
+      if (!calendarEl || typeof FullCalendar === 'undefined') return;
       let events = buildOutageCalendarEvents();
       const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
       const focusDate = getOutageCalendarFocusDate();
@@ -3500,6 +3598,20 @@
       outageModalObj.show();
     }
 
+    function ensureOutageDatepickersReady_() {
+      return ensureFlatpickr_().then(function() {
+        const opts = {
+          enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
+          onChange: function(selectedDates, dateStr, instance) {
+            if (selectedDates[0]) instance.input.value = formatOutagePickerDisplay_(selectedDates[0]);
+          }
+        };
+        document.querySelectorAll('#outageModal .datepicker').forEach(function(el) {
+          if (!el._flatpickr) flatpickr(el, opts);
+        });
+      });
+    }
+
     function setOutageModalSheetMode(fromSheet) {
       const note = document.getElementById('o_sheetSourceNote');
       if (note) note.style.display = fromSheet ? 'block' : 'none';
@@ -3517,20 +3629,24 @@
 
     function openOutageModal() {
       if (!canEditOutage()) return;
-      document.getElementById('o_id').value = '';
-      document.getElementById('o_project').value = '';
-      document.getElementById('o_project').readOnly = false;
-      document.getElementById('o_remark').value = '';
-      document.getElementById('o_remark').readOnly = false;
-      document.getElementById('o_peaUrl').value = '';
-      document.getElementById('o_locationPanel').style.display = 'none';
-      document.getElementById('o_locationPanel').innerHTML = '';
-      document.getElementById('btnDelOutage').style.display = 'none';
-      document.getElementById('o_start')._flatpickr.clear();
-      document.getElementById('o_end')._flatpickr.clear();
-      hideOutageSheetDetailsInModal_();
-      setOutageModalSheetMode(false);
-      showOutageModalSafe();
+      ensureOutageDatepickersReady_().then(function() {
+        document.getElementById('o_id').value = '';
+        document.getElementById('o_project').value = '';
+        document.getElementById('o_project').readOnly = false;
+        document.getElementById('o_remark').value = '';
+        document.getElementById('o_remark').readOnly = false;
+        document.getElementById('o_peaUrl').value = '';
+        document.getElementById('o_locationPanel').style.display = 'none';
+        document.getElementById('o_locationPanel').innerHTML = '';
+        document.getElementById('btnDelOutage').style.display = 'none';
+        document.getElementById('o_start')._flatpickr.clear();
+        document.getElementById('o_end')._flatpickr.clear();
+        hideOutageSheetDetailsInModal_();
+        setOutageModalSheetMode(false);
+        showOutageModalSafe();
+      }).catch(function(err) {
+        Swal.fire({ icon: 'error', title: 'โหลดตัวเลือกวันไม่สำเร็จ', text: (err && err.message) ? err.message : '' });
+      });
     }
 
     function editOutage(id) {
@@ -3548,30 +3664,42 @@
         });
         return;
       }
-      const fromSheet = !!(o.fromSheet || String(o.id).indexOf('ext-') === 0);
-      document.getElementById('o_id').value = o.id;
-      document.getElementById('o_project').value = o.projectName;
-      document.getElementById('o_project').readOnly = false;
-      document.getElementById('o_remark').value = o.remark || (o.sheetDetails && o.sheetDetails.remark) || '';
-      document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
-      if (hasOutageDates(o)) {
-        document.getElementById('o_start')._flatpickr.setDate(normalizeGregorianDate_(o.start));
-        document.getElementById('o_end')._flatpickr.setDate(normalizeGregorianDate_(o.end));
-      } else {
-        document.getElementById('o_start')._flatpickr.clear();
-        document.getElementById('o_end')._flatpickr.clear();
-      }
-      onOutageProjectChange();
-      if (fromSheet) document.getElementById('o_locationPanel').style.display = 'none';
-      document.getElementById('btnDelOutage').style.display = fromSheet ? 'none' : 'block';
-      if (fromSheet) showOutageSheetDetailsInModal_(o);
-      else hideOutageSheetDetailsInModal_();
-      setOutageModalSheetMode(fromSheet);
-      showOutageModalSafe();
+      ensureOutageDatepickersReady_().then(function() {
+        const fromSheet = !!(o.fromSheet || String(o.id).indexOf('ext-') === 0);
+        document.getElementById('o_id').value = o.id;
+        document.getElementById('o_project').value = o.projectName;
+        document.getElementById('o_project').readOnly = false;
+        document.getElementById('o_remark').value = o.remark || (o.sheetDetails && o.sheetDetails.remark) || '';
+        document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
+        if (hasOutageDates(o)) {
+          document.getElementById('o_start')._flatpickr.setDate(normalizeGregorianDate_(o.start));
+          document.getElementById('o_end')._flatpickr.setDate(normalizeGregorianDate_(o.end));
+        } else {
+          document.getElementById('o_start')._flatpickr.clear();
+          document.getElementById('o_end')._flatpickr.clear();
+        }
+        onOutageProjectChange();
+        if (fromSheet) document.getElementById('o_locationPanel').style.display = 'none';
+        document.getElementById('btnDelOutage').style.display = fromSheet ? 'none' : 'block';
+        if (fromSheet) showOutageSheetDetailsInModal_(o);
+        else hideOutageSheetDetailsInModal_();
+        setOutageModalSheetMode(fromSheet);
+        showOutageModalSafe();
+      }).catch(function(err) {
+        Swal.fire({ icon: 'error', title: 'โหลดตัวเลือกวันไม่สำเร็จ', text: (err && err.message) ? err.message : '' });
+      });
     }
 
     function saveOutage() {
       if (!canEditOutage()) return;
+      ensureOutageDatepickersReady_().then(function() {
+        saveOutageAfterPickers_();
+      }).catch(function(err) {
+        Swal.fire({ icon: 'error', title: 'โหลดตัวเลือกวันไม่สำเร็จ', text: (err && err.message) ? err.message : '' });
+      });
+    }
+
+    function saveOutageAfterPickers_() {
       let id = document.getElementById('o_id').value;
       let fromSheet = id && String(id).indexOf('ext-') === 0;
       let project = document.getElementById('o_project').value.trim();
@@ -5331,20 +5459,22 @@ function createDocElement(item) {
 
 function initSortable() {
   if (!canEditAll()) return;
-
-  const lists = document.querySelectorAll('.doc-list');
-  lists.forEach(el => {
-    new Sortable(el, {
-      group: 'nested', // อนุญาตให้ลากข้ามกลุ่มได้
-      animation: 150,
-      handle: '.doc-drag-handle',
-      fallbackOnBody: true,
-      swapThreshold: 0.65,
-      onEnd: function (evt) {
-        saveNewOrder(); // บันทึกลำดับลง Database เมื่อลากเสร็จ
-      }
+  ensureSortable_().then(function() {
+    if (typeof Sortable === 'undefined') return;
+    const lists = document.querySelectorAll('.doc-list');
+    lists.forEach(el => {
+      new Sortable(el, {
+        group: 'nested', // อนุญาตให้ลากข้ามกลุ่มได้
+        animation: 150,
+        handle: '.doc-drag-handle',
+        fallbackOnBody: true,
+        swapThreshold: 0.65,
+        onEnd: function (evt) {
+          saveNewOrder(); // บันทึกลำดับลง Database เมื่อลากเสร็จ
+        }
+      });
     });
-  });
+  }).catch(function() {});
 }
 
 function saveNewOrder() {
