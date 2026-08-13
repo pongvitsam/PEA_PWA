@@ -193,8 +193,8 @@
     .inspection-sheet-table { font-size: 0.72rem; margin: 0; white-space: normal; width: 100%; }
     .inspection-sheet-table thead th {
       background: linear-gradient(180deg, #0f766e, #0d9488); color: #fff; font-weight: 600;
-      border-color: #0f766e !important; vertical-align: middle; padding: 0.5rem 0.4rem;
-      white-space: normal; line-height: 1.25; font-size: 0.67rem;
+      border-color: #0f766e !important; vertical-align: middle; padding: 0.55rem 0.45rem;
+      white-space: normal; line-height: 1.35; font-size: 0.85rem;
       position: sticky; top: 0; z-index: 3;
     }
     .inspection-sheet-table tbody td {
@@ -214,9 +214,9 @@
     .inspection-sheet-table thead th .insp-th-inner {
       display: flex; align-items: center; justify-content: space-between; gap: 0.25rem;
     }
-    .inspection-sheet-table thead th .insp-th-label { flex: 1; min-width: 0; }
+    .inspection-sheet-table thead th .insp-th-label { flex: 1; min-width: 0; font-size: inherit; line-height: inherit; }
     .inspection-sheet-table .insp-col-filter-wrap { position: relative; flex-shrink: 0; }
-    .inspection-sheet-table .insp-filter-btn { color: rgba(255,255,255,0.65); font-size: 0.6rem; line-height: 1; }
+    .inspection-sheet-table .insp-filter-btn { color: rgba(255,255,255,0.65); font-size: 0.75rem; line-height: 1; }
     .inspection-sheet-table .insp-filter-btn:hover { color: #fff; }
     .inspection-sheet-table .insp-filter-btn-active { color: #fbbf24 !important; }
     .inspection-sheet-table thead th.insp-edit-cell .insp-filter-btn { color: #78716c; }
@@ -308,6 +308,8 @@
     .info-card { background: linear-gradient(180deg, #fff, #f8fbff); border-radius: 12px; padding: 15px; margin-bottom: 15px; border-left: 4px solid var(--pwa-primary); border: 1px solid var(--pwa-border); border-left-width: 4px; }
     .info-card h6 { color: #334155; font-weight: 600; font-size: 0.95rem; }
     .site-docs-wrap { margin-top: 10px; }
+    .db-row-clickable { cursor: pointer; }
+    .db-row-clickable:hover { background-color: #f0f7ff !important; }
     .map-insp-files-wrap { margin-top: 8px; padding: 8px 10px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; }
     .map-insp-files-wrap .map-insp-files-title { font-size: 0.8rem; font-weight: 700; color: #9a3412; margin-bottom: 6px; }
     .map-insp-files-wrap .map-insp-files-list { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -383,11 +385,11 @@
         <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-1 ms-3">
           <li class="nav-item"><a class="nav-link active" id="tab-map" onclick="switchMenu('map')"><i class="fa-solid fa-map-location-dot"></i> แผนที่โครงการ</a></li>
           <li class="nav-item"><a class="nav-link" id="tab-route" onclick="switchMenu('route')"><i class="fa-solid fa-route"></i> นำทางหลายจุด</a></li>
-          <li class="nav-item"><a class="nav-link" id="tab-db" onclick="switchMenu('db')"><i class="fa-solid fa-database"></i> ฐานข้อมูล</a></li>
           <li class="nav-item"><a class="nav-link" id="tab-dash" onclick="switchMenu('dash')"><i class="fa-solid fa-chart-pie"></i> แดชบอร์ดสรุป</a></li>
           <li class="nav-item"><a class="nav-link" id="tab-outage" onclick="switchMenu('outage')"><i class="fa-solid fa-calendar-days"></i> แผนดับไฟ</a></li>
           <li class="nav-item"><a class="nav-link" id="tab-inspection" onclick="switchMenu('inspection')"><i class="fa-solid fa-clipboard-check"></i> แผนตรวจรับ 3-4</a></li>
           <li class="nav-item"><a class="nav-link" id="tab-docs" onclick="switchMenu('docs')"><i class="fa-solid fa-folder-open"></i> ข้อมูลโครงการ</a></li>
+          <li class="nav-item"><a class="nav-link" id="tab-db" onclick="switchMenu('db')"><i class="fa-solid fa-database"></i> ฐานข้อมูล</a></li>
         </ul>
         
         <div class="d-flex align-items-center">
@@ -914,6 +916,18 @@
     </div>
   </div>
 
+  <div class="modal fade" id="dbLocationModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content" style="border-radius: 16px; border: none;">
+        <div class="modal-header bg-light">
+          <h5 class="modal-title fw-bold" id="dbLocationModalTitle"><i class="fa-solid fa-building"></i> รายละเอียดโครงการ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="dbLocationModalBody"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal fade" id="drilldownModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content" style="border-radius: 16px; border: none;">
@@ -1100,7 +1114,8 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   
   <script>
-    let map, markersLayer, editModalObj, drilldownModalObj, outageModalObj, inspectionModalObj, calendar;
+    let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
+    let currentDbLocationIndex = -1;
     let inspectionData = [], filteredInspectionData = [];
     let inspectionUiStash_ = null;
     let inspectionActiveRegion = '';
@@ -1592,6 +1607,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       editModalObj = new bootstrap.Modal(document.getElementById('editModal'));
       drilldownModalObj = new bootstrap.Modal(document.getElementById('drilldownModal'));
+      dbLocationModalObj = new bootstrap.Modal(document.getElementById('dbLocationModal'));
       outageModalObj = new bootstrap.Modal(document.getElementById('outageModal'), { focus: false });
       const outageModalEl = document.getElementById('outageModal');
       outageModalEl.addEventListener('show.bs.modal', blurOutageModalFocus_);
@@ -2235,6 +2251,7 @@
     }
 
     function viewDetails(index) {
+      if (dbLocationModalObj) { try { dbLocationModalObj.hide(); } catch (e) {} }
       switchMenu('map');
       let loc = allData[index];
       if(loc && loc.lat && loc.lng) {
@@ -2346,62 +2363,105 @@
       });
     };
 
-    function showDetailsPanel(index) {
+    function buildLocationDetailsHtml(index, opts) {
+      opts = opts || {};
       let loc = allData[index];
-      let panel = document.getElementById('detailsPanel');
-      currentSiteDocIndex = index;
-      
-      let linkAsbuilt = loc.link ? '<a href="' + loc.link + '" target="_blank" class="btn btn-sm btn-outline-primary mb-2 me-2"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>' : '';
-      let linkPEA = loc.linkPEA ? '<a href="' + loc.linkPEA + '" target="_blank" class="btn btn-sm btn-outline-success mb-2"><i class="fa-solid fa-file-signature"></i> SLD PEA Approved</a>' : '';
+      if (!loc) return '';
+      let siteDocsId = opts.siteDocsId || 'siteDocsContainer';
+      let distResultId = opts.distResultId || 'distMeResult';
+      let inspFilesId = opts.inspFilesId || 'mapInspectionFilesContainer';
+      let showOpenOnMap = !!opts.showOpenOnMap;
+
+      let linkAsbuilt = loc.link ? '<a href="' + escHtml(loc.link) + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mb-2 me-2"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>' : '';
+      let linkPEA = loc.linkPEA ? '<a href="' + escHtml(loc.linkPEA) + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mb-2"><i class="fa-solid fa-file-signature"></i> SLD PEA Approved</a>' : '';
       let combinedLinks = (linkAsbuilt || linkPEA) ? '<div class="mt-2">' + linkAsbuilt + linkPEA + '</div>' : '';
       let inspFilesInner = renderMapInspectionFilesInnerHtml_(loc);
       let inspFilesBlock = inspFilesInner
-        ? '<div id="mapInspectionFilesContainer" class="map-insp-files-wrap">' + inspFilesInner + '</div>'
-        : '<div id="mapInspectionFilesContainer" class="map-insp-files-wrap" style="display:none;"></div>';
+        ? '<div id="' + inspFilesId + '" class="map-insp-files-wrap">' + inspFilesInner + '</div>'
+        : '<div id="' + inspFilesId + '" class="map-insp-files-wrap" style="display:none;"></div>';
 
       let editBtn = userRole === 'admin' ? '<button class="btn btn-custom-secondary w-100 mt-3" onclick="openEdit(' + index + ')"><i class="fa-solid fa-pen"></i> แก้ไขข้อมูลนี้</button>' : '';
       let uploadBtn = canEditSiteDocs()
         ? '<button type="button" class="btn btn-success w-100 mt-2 fw-bold" onclick="openSiteDocModal(' + index + ')"><i class="fa-solid fa-file-arrow-up"></i> เพิ่มไฟล์ PDF</button>'
         : '';
+      let mapLinkBtn = showOpenOnMap
+        ? '<div class="d-flex gap-2 mt-2"><button class="btn btn-outline-primary flex-grow-1" onclick="viewDetails(' + index + ')"><i class="fa-solid fa-map-location-dot"></i> เปิดบนแผนที่</button></div>'
+        : '';
+      let distBtn = (loc.lat && loc.lng)
+        ? '<div class="d-flex gap-2 mt-3"><button class="btn btn-outline-info flex-grow-1" onclick="calcDistanceMyLoc(' + loc.lat + ',' + loc.lng + ',\'' + distResultId + '\')"><i class="fa-solid fa-crosshairs"></i> คำนวณระยะทางจากฉัน</button></div>'
+        : '';
+      let navBtn = (loc.lat && loc.lng)
+        ? '<div class="d-flex gap-2 mt-2"><button class="btn btn-custom-primary flex-grow-1" onclick="navTo(' + index + ')"><i class="fa-brands fa-google"></i> เริ่มนำทางจากจุดที่ฉันอยู่</button></div>'
+        : '';
 
-      panel.innerHTML = 
-        '<h5 class="fw-bold" style="color:#2563eb;">' + (loc.name || 'ไม่มีชื่อ') + '</h5>' +
-        '<div class="badge bg-secondary mb-3">เฟส ' + (loc.phase || '-') + '</div>' +
-        '<div class="badge bg-info text-dark mb-3 ms-1">ลำดับ ' + (loc.seq || '-') + '</div>' +
-        
+      return '' +
+        '<h5 class="fw-bold" style="color:#2563eb;">' + escHtml(loc.name || 'ไม่มีชื่อ') + '</h5>' +
+        '<div class="badge bg-secondary mb-3">เฟส ' + escHtml(loc.phase || '-') + '</div>' +
+        '<div class="badge bg-info text-dark mb-3 ms-1">ลำดับ ' + escHtml(loc.seq || '-') + '</div>' +
         '<div class="info-card">' +
           '<h6><i class="fa-solid fa-building-circle-check"></i> ข้อมูลโครงการ</h6>' +
-          '<small class="text-muted d-block"><b>กฟภ. เขต:</b> ' + (loc.peaRegion || '-') + ' | <b>กปภ. เขต:</b> ' + (loc.pwaRegion || '-') + '</small>' +
-          '<small class="text-muted d-block"><b>kWp:</b> ' + (loc.kwp || '-') + ' | <b>CA:</b> ' + (loc.caNum || '-') + '</small>' +
-          '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + (loc.meterNum || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>กฟภ. เขต:</b> ' + escHtml(loc.peaRegion || '-') + ' | <b>กปภ. เขต:</b> ' + escHtml(loc.pwaRegion || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>kWp:</b> ' + escHtml(loc.kwp || '-') + ' | <b>CA:</b> ' + escHtml(loc.caNum || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + escHtml(loc.meterNum || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>พิกัด:</b> ' + escHtml(loc.lat || '-') + ', ' + escHtml(loc.lng || '-') + '</small>' +
           combinedLinks +
           inspFilesBlock +
-          '<div id="siteDocsContainer" class="site-docs-wrap"><div class="text-muted small"><i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดไฟล์...</div></div>' +
+          '<div id="' + siteDocsId + '" class="site-docs-wrap"><div class="text-muted small"><i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดไฟล์...</div></div>' +
           uploadBtn +
         '</div>' +
         '<div class="info-card" style="border-left-color: #3b82f6;">' +
           '<h6><i class="fa-solid fa-user-tie"></i> กฟภ. ผู้ดูแล</h6>' +
-          '<small class="text-muted d-block">1. ' + (loc.pea1Name||'-') + ' (' + (loc.pea1Phone||'-') + ') ' + (loc.pea1Pos||'') + '</small>' +
-          '<small class="text-muted d-block mt-1">2. ' + (loc.pea2Name||'-') + ' (' + (loc.pea2Phone||'-') + ') ' + (loc.pea2Pos||'') + '</small>' +
+          '<small class="text-muted d-block">1. ' + escHtml(loc.pea1Name || '-') + ' (' + escHtml(loc.pea1Phone || '-') + ') ' + escHtml(loc.pea1Pos || '') + '</small>' +
+          '<small class="text-muted d-block mt-1">2. ' + escHtml(loc.pea2Name || '-') + ' (' + escHtml(loc.pea2Phone || '-') + ') ' + escHtml(loc.pea2Pos || '') + '</small>' +
         '</div>' +
         '<div class="info-card" style="border-left-color: #6366f1;">' +
           '<h6><i class="fa-solid fa-helmet-safety"></i> บริษัท ผู้ประสานงาน</h6>' +
-          '<small class="text-muted d-block">1. ' + (loc.comp1Name||'-') + ' (' + (loc.comp1Phone||'-') + ')</small>' +
-          '<small class="text-muted d-block mt-1">2. ' + (loc.comp2Name||'-') + ' (' + (loc.comp2Phone||'-') + ')</small>' +
+          '<small class="text-muted d-block">1. ' + escHtml(loc.comp1Name || '-') + ' (' + escHtml(loc.comp1Phone || '-') + ')</small>' +
+          '<small class="text-muted d-block mt-1">2. ' + escHtml(loc.comp2Name || '-') + ' (' + escHtml(loc.comp2Phone || '-') + ')</small>' +
         '</div>' +
-        '<div class="d-flex gap-2 mt-3">' +
-          '<button class="btn btn-outline-info flex-grow-1" onclick="calcDistanceMyLoc(' + loc.lat + ',' + loc.lng + ')"><i class="fa-solid fa-crosshairs"></i> คำนวณระยะทางจากฉัน</button>' +
-        '</div>' +
-        '<div class="d-flex gap-2 mt-2">' +
-          '<button class="btn btn-custom-primary flex-grow-1" onclick="navTo(' + index + ')"><i class="fa-brands fa-google"></i> เริ่มนำทางจากจุดที่ฉันอยู่</button>' +
-        '</div>' +
-        '<div id="distMeResult" class="mt-3 text-primary small"></div>' + editBtn;
+        distBtn +
+        navBtn +
+        mapLinkBtn +
+        '<div id="' + distResultId + '" class="mt-3 text-primary small"></div>' + editBtn;
+    }
 
-      loadSiteDocsForPanel(loc.row);
-
-      if(loc && loc.lat && loc.lng) {
+    function showDetailsPanel(index) {
+      let loc = allData[index];
+      let panel = document.getElementById('detailsPanel');
+      currentSiteDocIndex = index;
+      panel.innerHTML = buildLocationDetailsHtml(index);
+      loadSiteDocsForPanel(loc.row, 'siteDocsContainer');
+      if (loc && loc.lat && loc.lng) {
         calcDistanceMyLoc(loc.lat, loc.lng);
       }
+    }
+
+    function viewDbLocation(index) {
+      let loc = allData[index];
+      if (!loc) return;
+      currentDbLocationIndex = index;
+      currentSiteDocIndex = index;
+      document.getElementById('dbLocationModalTitle').innerHTML = '<i class="fa-solid fa-building"></i> ' + escHtml(loc.name || 'รายละเอียดโครงการ');
+      document.getElementById('dbLocationModalBody').innerHTML = buildLocationDetailsHtml(index, {
+        siteDocsId: 'dbSiteDocsContainer',
+        distResultId: 'dbDistResult',
+        inspFilesId: 'dbInspectionFilesContainer',
+        showOpenOnMap: true
+      });
+      loadSiteDocsForPanel(loc.row, 'dbSiteDocsContainer');
+      if (loc.lat && loc.lng) {
+        calcDistanceMyLoc(loc.lat, loc.lng, 'dbDistResult');
+      }
+      dbLocationModalObj.show();
+    }
+
+    function refreshActiveLocationView(index) {
+      if (index == null || index < 0) return;
+      let dbModalEl = document.getElementById('dbLocationModal');
+      if (dbModalEl && dbModalEl.classList.contains('show') && currentDbLocationIndex === index) {
+        viewDbLocation(index);
+      }
+      showDetailsPanel(index);
     }
 
     function navTo(index) {
@@ -2690,10 +2750,10 @@
       tbody.innerHTML = '';
       allData.forEach((loc, i) => {
         let actionBtn = userRole === 'admin' 
-            ? '<button class="btn btn-sm btn-outline-info me-1" onclick="viewDetails(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-primary" onclick="openEdit(' + i + ')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>' 
-            : '<button class="btn btn-sm btn-outline-info me-1" onclick="viewDetails(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-secondary" disabled title="Admin เท่านั้น"><i class="fa-solid fa-lock"></i></button>';
+            ? '<button class="btn btn-sm btn-outline-info me-1" onclick="event.stopPropagation(); viewDbLocation(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); openEdit(' + i + ')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>' 
+            : '<button class="btn btn-sm btn-outline-info me-1" onclick="event.stopPropagation(); viewDbLocation(' + i + ')" title="ดูข้อมูล"><i class="fa-solid fa-eye"></i></button><button class="btn btn-sm btn-outline-secondary" disabled title="Admin เท่านั้น"><i class="fa-solid fa-lock"></i></button>';
         tbody.insertAdjacentHTML('beforeend', 
-          '<tr>' +
+          '<tr class="db-row-clickable" onclick="viewDbLocation(' + i + ')">' +
             '<td><span class="badge bg-secondary">' + (loc.phase || '-') + '</span></td>' +
             '<td class="fw-bold">' + (loc.name || '-') + '</td>' +
             '<td>' + (loc.peaRegion || '-') + '</td>' +
@@ -2758,7 +2818,7 @@
           generateDashboard(); 
           applyFilters();
           renderTable();
-          showDetailsPanel(index);
+          refreshActiveLocationView(index);
         })
         .withFailureHandler((err) => {
           btn.innerHTML = '<i class="fa-solid fa-save"></i> บันทึกข้อมูล';
@@ -2874,16 +2934,23 @@
     }
 
     function initOutageSystem() {
-      // โหลดเร็วก่อน แล้วบังคับซิงก์จาก Excel พื้นหลังเมื่อเปิดเมนูแผนดับไฟ
+      // โหลดจาก OutagePlan ก่อน (เร็ว) แล้วค่อยซิงก์พื้นหลังแบบใช้ cache TTL — ไม่บังคับทุกครั้ง
       google.script.run.withSuccessHandler(res => {
         outageData = normalizeOutageList_(res || []);
         outageInitialized = true;
         filterOutages();
-        google.script.run.withSuccessHandler(pack => {
-          applyOutagePack(pack, { showError: true });
-        }).withFailureHandler(err => {
-          Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทไม่สำเร็จ', text: err.message });
-        }).refreshOutagesFromSource(true);
+        setTimeout(function() {
+          google.script.run.withSuccessHandler(pack => {
+            applyOutagePack(pack, { showError: true });
+          }).withFailureHandler(err => {
+            const msg = (err && err.message) ? err.message : String(err || '');
+            if (/timeout|API timeout/i.test(msg)) {
+              Toast.fire({ icon: 'info', title: 'ซิงก์ชีทยังไม่เสร็จ', text: 'ข้อมูลในแอปพร้อมใช้แล้ว กดรีเฟรชจากชีทได้ภายหลัง' });
+              return;
+            }
+            Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทไม่สำเร็จ', text: msg });
+          }).refreshOutagesFromSource(false);
+        }, 50);
       }).withFailureHandler(err => {
         outageData = [];
         outageInitialized = true;
@@ -3721,11 +3788,18 @@
         inspectionData = res || [];
         setupInspectionPwaFilter();
         filterInspections();
-        google.script.run.withSuccessHandler(pack => {
-          applyInspectionPack(pack, { showError: true, preserveUi: true });
-        }).withFailureHandler(err => {
-          Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทตรวจรับไม่สำเร็จ', text: err.message });
-        }).refreshInspectionPlansFromSource(true);
+        setTimeout(function() {
+          google.script.run.withSuccessHandler(pack => {
+            applyInspectionPack(pack, { showError: true, preserveUi: true });
+          }).withFailureHandler(err => {
+            const msg = (err && err.message) ? err.message : String(err || '');
+            if (/timeout|API timeout/i.test(msg)) {
+              Toast.fire({ icon: 'info', title: 'ซิงก์ชีทตรวจรับยังไม่เสร็จ', text: 'ข้อมูลในแอปพร้อมใช้แล้ว' });
+              return;
+            }
+            Toast.fire({ icon: 'warning', title: 'ซิงก์ชีทตรวจรับไม่สำเร็จ', text: msg });
+          }).refreshInspectionPlansFromSource(false);
+        }, 200);
       }).withFailureHandler(err => {
         inspectionData = [];
         filterInspections();
@@ -4857,14 +4931,15 @@ function getSiteKeyForLoc(loc) {
   return loc && loc.row != null ? String(loc.row) : '';
 }
 
-function loadSiteDocsForPanel(siteRow) {
-  const container = document.getElementById('siteDocsContainer');
+function loadSiteDocsForPanel(siteRow, containerId) {
+  containerId = containerId || 'siteDocsContainer';
+  const container = document.getElementById(containerId);
   if (!container) return;
   const siteKey = String(siteRow);
   google.script.run
     .withSuccessHandler(docs => {
       currentSiteDocsCache = docs || [];
-      renderSiteDocsList(currentSiteDocsCache);
+      renderSiteDocsList(currentSiteDocsCache, containerId);
     })
     .withFailureHandler(() => {
       container.innerHTML = '<div class="text-muted small">โหลดไฟล์ไม่สำเร็จ</div>';
@@ -4872,8 +4947,9 @@ function loadSiteDocsForPanel(siteRow) {
     .getSiteDocs(siteKey);
 }
 
-function renderSiteDocsList(docs) {
-  const container = document.getElementById('siteDocsContainer');
+function renderSiteDocsList(docs, containerId) {
+  containerId = containerId || 'siteDocsContainer';
+  const container = document.getElementById(containerId);
   if (!container) return;
   if (!docs || docs.length === 0) {
     container.innerHTML = '';
@@ -5058,7 +5134,7 @@ function submitSiteDoc() {
       btn.disabled = false;
       try { siteDocModalObj.hide(); } catch (e) {}
       Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
-      if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+      if (currentSiteDocIndex >= 0) refreshActiveLocationView(currentSiteDocIndex);
     }).catch(function (err) {
       btn.disabled = false;
       if (!handleOutageAuthError(err)) {
@@ -5100,7 +5176,7 @@ function submitSiteDoc() {
         btn.disabled = false;
         try { siteDocModalObj.hide(); } catch (err) {}
         Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
-        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+        if (currentSiteDocIndex >= 0) refreshActiveLocationView(currentSiteDocIndex);
       })
       .withFailureHandler(err => {
         btn.disabled = false;
@@ -5162,7 +5238,7 @@ function deleteSiteDocItem(id) {
     google.script.run
       .withSuccessHandler(() => {
         Toast.fire({ icon: 'success', title: 'ลบแล้ว' });
-        if (currentSiteDocIndex >= 0) showDetailsPanel(currentSiteDocIndex);
+        if (currentSiteDocIndex >= 0) refreshActiveLocationView(currentSiteDocIndex);
       })
       .withFailureHandler(err => {
         if (!handleOutageAuthError(err)) {

@@ -18,8 +18,27 @@ const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1_SRxF0_obGuzFCo9NDcA3QPiZDn7or-P';
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
+let SS_MEMO_MAIN_ = null;
 function getSpreadsheet_() {
-  return SpreadsheetApp.openById(SHEET_ID);
+  if (!SS_MEMO_MAIN_) SS_MEMO_MAIN_ = SpreadsheetApp.openById(SHEET_ID);
+  return SS_MEMO_MAIN_;
+}
+
+let OUTAGE_SRC_SS_MEMO_ = null;
+function getOutageSourceSs_() {
+  if (!OUTAGE_SRC_SS_MEMO_) OUTAGE_SRC_SS_MEMO_ = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  return OUTAGE_SRC_SS_MEMO_;
+}
+
+function friendlyOutageSheetError_(e) {
+  const msg = (e && e.message) ? e.message : String(e || 'unknown');
+  if (/permission|access denied|Authorization|ไม่มีสิทธิ์|does not have permission|Exception:\s*You do not have/i.test(msg)) {
+    return 'ไม่มีสิทธิ์อ่านชีทกำหนดการ — แชร์ชีทให้บัญชีเจ้าของ Apps Script เป็น Viewer อย่างน้อย';
+  }
+  if (/timed out|timeout|Service invoked too many|Exceeded maximum/i.test(msg)) {
+    return 'ชีทตอบช้าเกินกำหนด ลองกด「รีเฟรชจากชีท」อีกครั้ง';
+  }
+  return msg;
 }
 
 function getOrCreateSheet_(ss, name, headers) {
@@ -910,7 +929,7 @@ function buildSyncedOutageId_(sheetId, rowIndex1Based) {
 }
 
 function collectSourceOutageRows_() {
-  const srcSs = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  const srcSs = getOutageSourceSs_();
   const sheets = srcSs.getSheets();
   const collected = [];
   const seenIds = {};
@@ -920,8 +939,17 @@ function collectSourceOutageRows_() {
     const lastRow = srcSheet.getLastRow();
     const lastCol = srcSheet.getLastColumn();
     if (lastRow < 2 || lastCol < 3) return;
-    const values = srcSheet.getRange(1, 1, lastRow, Math.max(lastCol, 35)).getValues();
-    if (!looksLikeOutageSourceSheet_(values)) return;
+
+    // ดูหัวตารางก่อน — ข้ามแท็บที่ไม่ใช่แผนดับไฟ โดยไม่โหลดทั้งชีท
+    const peekRows = Math.min(lastRow, 12);
+    const peekCols = Math.min(Math.max(lastCol, 3), 40);
+    const peek = srcSheet.getRange(1, 1, peekRows, peekCols).getValues();
+    if (!looksLikeOutageSourceSheet_(peek)) return;
+
+    const useCol = Math.min(Math.max(lastCol, 3), 40);
+    const values = (lastRow <= peekRows && useCol <= peekCols)
+      ? peek
+      : srcSheet.getRange(1, 1, lastRow, useCol).getValues();
 
     const map = findOutageHeaderMap_(values);
     const sheetId = srcSheet.getSheetId();
@@ -970,7 +998,7 @@ function collectSourceOutageRows_() {
 
 /** ตรวจแท็บชีทต้นทาง — ใช้หาว่าอ่านแท็บไหนอยู่ */
 function debugOutageSourceSheets_() {
-  const srcSs = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  const srcSs = getOutageSourceSs_();
   const sheets = srcSs.getSheets();
   const findNames = ['ชัยบาดาล', 'บ้านหมี่', 'ลพบุรี', 'กุดตาเพชร', 'เกาะขนุน', 'บ้านบอน'];
   const found = {};
@@ -1024,9 +1052,11 @@ function debugOutageSourceSheets_() {
  * ซิงก์ชีทกำหนดการ → OutagePlan
  * ชีทชนะชื่อ/วัน/หมายเหตุ; คง FileURL + checkbox ของแอป
  * รวมแถวที่เคยสร้างในแอปถ้าชื่อสถานที่ตรงกัน (คง checkbox)
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} destSheet
+ * @param {Array=} precollected ถ้าส่งมาแล้วจะไม่เปิดชีทต้นทางซ้ำ
  */
-function syncOutagesFromSource_(destSheet) {
-  const sourceRows = collectSourceOutageRows_();
+function syncOutagesFromSource_(destSheet, precollected) {
+  const sourceRows = precollected || collectSourceOutageRows_();
   const data = destSheet.getDataRange().getValues();
   const byId = {};
   const manualByPlace = {};
@@ -1050,7 +1080,6 @@ function syncOutagesFromSource_(destSheet) {
   });
 
   const newData = [OUTAGE_HEADERS];
-  const usedIds = {};
   const usedManual = {};
 
   sourceRows.forEach(function(src) {
@@ -1062,7 +1091,6 @@ function syncOutagesFromSource_(destSheet) {
     if (!old && src.placeKey && legacyByPlace[src.placeKey]) {
       old = legacyByPlace[src.placeKey];
     }
-    usedIds[src.id] = true;
     newData.push([
       src.id,
       src.projectName,
@@ -1141,11 +1169,13 @@ function getOutages() {
 }
 
 const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
-const OUTAGE_SYNC_TTL_SEC = 60; // 1 นาที — แก้ใน Excel แล้วเปิดเมนูใหม่จะดึงเร็วขึ้น
+const OUTAGE_SYNC_TTL_SEC = 300; // 5 นาที — ลดการเปิดชีทภายนอกซ้ำ; กด「รีเฟรชจากชีท」ได้ทันที
+const OUTAGE_SYNC_SOFT_LOCK_KEY = 'outage_src_sync_running';
 
 /**
  * ซิงก์จากชีทกำหนดการแล้วคืนรายการ
  * force=true บังคับซิงก์; ถ้าไม่บังคับและเพิ่งซิงก์ภายใน TTL จะข้าม
+ * อ่านชีทต้นทางนอก lock — ถือ ScriptLock เฉพาะตอนเขียน OutagePlan เพื่อไม่ชนกับซิงก์อื่นนานๆ
  */
 function refreshOutagesFromSource(force) {
   const wantForce = !!force;
@@ -1154,40 +1184,70 @@ function refreshOutagesFromSource(force) {
     return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
   }
 
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) {
-    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL, error: 'ระบบกำลังซิงก์อยู่ ลองใหม่ในอีกสักครู่' };
+  // soft-lock กันเรียกซ้ำซ้อนจากหลายแท็บ (ไม่ใช้ error หลอกผู้ใช้)
+  if (cache.get(OUTAGE_SYNC_SOFT_LOCK_KEY)) {
+    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
   }
+  cache.put(OUTAGE_SYNC_SOFT_LOCK_KEY, '1', 120);
+
   try {
     if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
       return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
     }
-    const ss = getSpreadsheet_();
-    const sheet = ensureOutageSheet_(ss);
+
+    let sourceRows;
     try {
-      const n = syncOutagesFromSource_(sheet);
-      autoCompletePastOutages_(sheet);
-      cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
-      return {
-        synced: true,
-        count: n,
-        outages: readOutagesMapped_(sheet),
-        sourceTitle: OUTAGE_SOURCE_TITLE,
-        sourceUrl: OUTAGE_SOURCE_URL
-      };
+      sourceRows = collectSourceOutageRows_();
     } catch (e) {
-      Logger.log('outage sync failed: ' + e.message);
-      try { logAction('ซิงก์แผนดับไฟล้มเหลว: ' + e.message); } catch (ignore) {}
+      Logger.log('outage sync read failed: ' + e.message);
+      try { logAction('ซิงก์แผนดับไฟล้มเหลว (อ่านชีท): ' + e.message); } catch (ignore) {}
       return {
         synced: false,
-        error: e.message,
-        outages: readOutagesMapped_(sheet),
+        error: friendlyOutageSheetError_(e),
+        outages: getOutages(),
         sourceTitle: OUTAGE_SOURCE_TITLE,
         sourceUrl: OUTAGE_SOURCE_URL
       };
     }
+
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) {
+      // ระบบอื่นกำลังเขียนชีทหลัก — คืนข้อมูลเดิมโดยไม่โชว์ error
+      return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+    }
+    try {
+      if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
+        return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+      }
+      const ss = getSpreadsheet_();
+      const sheet = ensureOutageSheet_(ss);
+      try {
+        const n = syncOutagesFromSource_(sheet, sourceRows);
+        autoCompletePastOutages_(sheet);
+        cache.put(OUTAGE_SYNC_CACHE_KEY, String(Date.now()), OUTAGE_SYNC_TTL_SEC);
+        return {
+          synced: true,
+          count: n,
+          outages: readOutagesMapped_(sheet),
+          sourceTitle: OUTAGE_SOURCE_TITLE,
+          sourceUrl: OUTAGE_SOURCE_URL
+        };
+      } catch (e) {
+        Logger.log('outage sync write failed: ' + e.message);
+        try { logAction('ซิงก์แผนดับไฟล้มเหลว: ' + e.message); } catch (ignore) {}
+        return {
+          synced: false,
+          error: friendlyOutageSheetError_(e),
+          outages: readOutagesMapped_(sheet),
+          sourceTitle: OUTAGE_SOURCE_TITLE,
+          sourceUrl: OUTAGE_SOURCE_URL
+        };
+      }
+    } finally {
+      lock.releaseLock();
+    }
   } finally {
-    lock.releaseLock();
+    try { cache.remove(OUTAGE_SYNC_SOFT_LOCK_KEY); } catch (ignore) {}
   }
 }
 
@@ -1349,7 +1409,7 @@ function writeOutageBackToSource_(id, formObj, startDate, endDate) {
   const ref = parseSyncedOutageRowRef_(id);
   if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
 
-  const srcSs = SpreadsheetApp.openById(OUTAGE_SOURCE_SS_ID);
+  const srcSs = getOutageSourceSs_();
   const sheets = srcSs.getSheets();
   let srcSheet = null;
   for (let i = 0; i < sheets.length; i++) {
@@ -1360,7 +1420,7 @@ function writeOutageBackToSource_(id, formObj, startDate, endDate) {
   }
   if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
 
-  const lastCol = Math.max(srcSheet.getLastColumn(), 35);
+  const lastCol = Math.min(Math.max(srcSheet.getLastColumn(), 3), 40);
   const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 12));
   const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
   const map = findOutageHeaderMap_(values);
@@ -1657,8 +1717,8 @@ function collectSourceInspectionRows_() {
   return collected;
 }
 
-function syncInspectionsFromSource_(destSheet) {
-  const rows = collectSourceInspectionRows_();
+function syncInspectionsFromSource_(destSheet, precollected) {
+  const rows = precollected || collectSourceInspectionRows_();
   const oldData = destSheet.getDataRange().getValues();
   const oldById = {};
   for (let i = 1; i < oldData.length; i++) {
@@ -1689,7 +1749,8 @@ function getInspectionPlans() {
 }
 
 const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v1';
-const INSPECTION_SYNC_TTL_SEC = 60;
+const INSPECTION_SYNC_TTL_SEC = 300;
+const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
 
 function refreshInspectionPlansFromSource(force) {
   const wantForce = !!force;
@@ -1697,39 +1758,64 @@ function refreshInspectionPlansFromSource(force) {
   if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
     return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
   }
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(15000)) {
-    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL, error: 'ระบบกำลังซิงก์อยู่ ลองใหม่ในอีกสักครู่' };
+  if (cache.get(INSPECTION_SYNC_SOFT_LOCK_KEY)) {
+    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
   }
+  cache.put(INSPECTION_SYNC_SOFT_LOCK_KEY, '1', 120);
   try {
     if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
       return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
     }
-    const ss = getSpreadsheet_();
-    const sheet = ensureInspectionSheet_(ss);
+    let rows;
     try {
-      const n = syncInspectionsFromSource_(sheet);
-      cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
-      return {
-        synced: true,
-        count: n,
-        plans: readInspectionsMapped_(sheet),
-        sourceTitle: INSPECTION_SOURCE_TITLE,
-        sourceUrl: INSPECTION_SOURCE_URL
-      };
+      rows = collectSourceInspectionRows_();
     } catch (e) {
-      Logger.log('inspection sync failed: ' + e.message);
-      try { logAction('ซิงก์แผนตรวจรับล้มเหลว: ' + e.message); } catch (ignore) {}
+      Logger.log('inspection sync read failed: ' + e.message);
+      try { logAction('ซิงก์แผนตรวจรับล้มเหลว (อ่านชีท): ' + e.message); } catch (ignore) {}
       return {
         synced: false,
         error: e.message,
-        plans: readInspectionsMapped_(sheet),
+        plans: getInspectionPlans(),
         sourceTitle: INSPECTION_SOURCE_TITLE,
         sourceUrl: INSPECTION_SOURCE_URL
       };
     }
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) {
+      return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+    }
+    try {
+      if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
+        return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+      }
+      const ss = getSpreadsheet_();
+      const sheet = ensureInspectionSheet_(ss);
+      try {
+        const n = syncInspectionsFromSource_(sheet, rows);
+        cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
+        return {
+          synced: true,
+          count: n,
+          plans: readInspectionsMapped_(sheet),
+          sourceTitle: INSPECTION_SOURCE_TITLE,
+          sourceUrl: INSPECTION_SOURCE_URL
+        };
+      } catch (e) {
+        Logger.log('inspection sync failed: ' + e.message);
+        try { logAction('ซิงก์แผนตรวจรับล้มเหลว: ' + e.message); } catch (ignore) {}
+        return {
+          synced: false,
+          error: e.message,
+          plans: readInspectionsMapped_(sheet),
+          sourceTitle: INSPECTION_SOURCE_TITLE,
+          sourceUrl: INSPECTION_SOURCE_URL
+        };
+      }
+    } finally {
+      lock.releaseLock();
+    }
   } finally {
-    lock.releaseLock();
+    try { cache.remove(INSPECTION_SYNC_SOFT_LOCK_KEY); } catch (ignore) {}
   }
 }
 
