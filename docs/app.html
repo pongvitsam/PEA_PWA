@@ -1046,7 +1046,8 @@
             </div>
             <small class="text-muted">ไฟล์จะถูกเก็บใน Google Drive แยกโฟลเดอร์ตามชื่อสถานที่</small>
           </div>
-          <div class="col-md-4"><label class="fw-bold small text-muted">ทำใบนำตัวหรือยัง?</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจงาน)</label><input type="text" id="insp_passLetterStatusWork" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจรับ)</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
         </div>
         <div class="form-check form-switch mt-2">
           <input class="form-check-input" type="checkbox" id="insp_visited">
@@ -1538,7 +1539,7 @@
 
     function indexInspectionData_(rows) {
       (rows || []).forEach(function(p) {
-        p._searchBlob = [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
+        p._searchBlob = [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatusWork, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
       });
     }
 
@@ -3903,7 +3904,7 @@
       ['pwaBranch', 'กปภ. สาขา'], ['pwaDistrict', 'กปภ. เขต'], ['peaZone', 'เขต กฟภ.'], ['peaOffice', 'กฟจ./สำนักงาน กฟภ.'],
       ['handoverPlan', 'แผนส่งมอบงาน'], ['handoverRound', 'รอบส่งมอบงานจริง'], ['inspectSchedule', 'กำหนดตรวจงาน'],
       ['inspectors', 'รายชื่อคนเข้าตรวจ'], ['fileComment', 'File comment'], ['committee', 'คณะกรรมการตรวจรับ'],
-      ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatus', 'ทำใบนำตัว'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
+      ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatusWork', 'ใบนำตัว (ตรวจงาน)'], ['passLetterStatus', 'ใบนำตัว (ตรวจรับ)'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
     const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'mapLocation', 'peaZone', 'handoverPlan', 'handoverRound'];
@@ -4748,6 +4749,7 @@
         fileComment: p.fileComment || '',
         committee: p.committee || '',
         inspectLetterDate: p.inspectLetterDate || '',
+        passLetterStatusWork: p.passLetterStatusWork || '',
         passLetterStatus: p.passLetterStatus || '',
         visited: !!p.visited,
         tcCoordinator: p.tcCoordinator || '',
@@ -4829,6 +4831,19 @@
       return '<span title="' + escHtml(text) + '">' + escHtml(text) + '</span>';
     }
 
+    function handleInspectionSaveResult_(res, onOk) {
+      const msg = (res && res.message) ? String(res.message) : '';
+      const sheetWarn = msg.indexOf('เขียนกลับชีทไม่สำเร็จ') >= 0;
+      if (typeof onOk === 'function') onOk(res);
+      if (sheetWarn) {
+        Swal.fire({ icon: 'warning', title: 'บันทึกในแอปแล้ว', text: msg });
+      } else if (msg) {
+        Toast.fire({ icon: 'success', title: msg.length > 40 ? 'บันทึกแล้ว' : msg });
+      } else {
+        Toast.fire({ icon: 'success', title: 'บันทึกแล้ว' });
+      }
+    }
+
     function saveInspectionInline(el) {
       if (!canEditInspection() || !el) return;
       const id = el.getAttribute('data-id');
@@ -4849,12 +4864,13 @@
       }
       Toast.fire({ icon: 'info', title: 'กำลังบันทึก...' });
       const ui = captureInspectionUiState_();
-      google.script.run.withSuccessHandler(function() {
-        const idx = inspectionData.findIndex(x => String(x.id) === String(id));
-        if (idx > -1) inspectionData[idx][field] = formData[field];
-        restoreInspectionUiState_(ui);
-        filterInspections(ui);
-        Toast.fire({ icon: 'success', title: 'บันทึกแล้ว' });
+      google.script.run.withSuccessHandler(function(res) {
+        handleInspectionSaveResult_(res, function() {
+          const idx = inspectionData.findIndex(x => String(x.id) === String(id));
+          if (idx > -1) inspectionData[idx][field] = formData[field];
+          restoreInspectionUiState_(ui);
+          filterInspections(ui);
+        });
       }).withFailureHandler(function(err) {
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err.message });
       }).saveInspectionPlan(formData, auth);
@@ -4926,7 +4942,7 @@
       const regionVal = getInspectionRegionFilter_();
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
-        const blob = p._searchBlob || [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
+        const blob = p._searchBlob || [p.seq, p.region, p.place, p.pwaBranch, p.pwaDistrict, p.peaZone, p.peaOffice, p.handoverPlan, p.handoverRound, p.inspectSchedule, p.inspectors, p.fileComment, p.committee, p.inspectLetterDate, p.passLetterStatusWork, p.passLetterStatus, p.tcCoordinator, p.tcContact].join(' ').toLowerCase();
         const matchText = !textVal || blob.includes(textVal);
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
@@ -4971,6 +4987,7 @@
       if (uploadBtn) uploadBtn.style.display = canEditInspection() ? 'inline-block' : 'none';
       document.getElementById('insp_committee').value = p.committee || '';
       document.getElementById('insp_inspectLetterDate').value = p.inspectLetterDate || '';
+      document.getElementById('insp_passLetterStatusWork').value = p.passLetterStatusWork || '';
       document.getElementById('insp_passLetterStatus').value = p.passLetterStatus || '';
       document.getElementById('insp_tcCoordinator').value = p.tcCoordinator || '';
       document.getElementById('insp_tcContact').value = p.tcContact || '';
@@ -4999,6 +5016,7 @@
         })(),
         committee: document.getElementById('insp_committee').value.trim(),
         inspectLetterDate: document.getElementById('insp_inspectLetterDate').value.trim(),
+        passLetterStatusWork: document.getElementById('insp_passLetterStatusWork').value.trim(),
         passLetterStatus: document.getElementById('insp_passLetterStatus').value.trim(),
         visited: document.getElementById('insp_visited').checked,
         tcCoordinator: document.getElementById('insp_tcCoordinator').value.trim(),
@@ -5056,8 +5074,14 @@
       if (document.activeElement) document.activeElement.blur();
       if (inspectionModalObj) inspectionModalObj.hide();
       Swal.fire({ title: 'กำลังบันทึก...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
-      google.script.run.withSuccessHandler(() => {
-        Swal.fire({ icon: 'success', title: 'สำเร็จ', timer: 1500 });
+      google.script.run.withSuccessHandler(function(res) {
+        const msg = (res && res.message) ? String(res.message) : '';
+        const sheetWarn = msg.indexOf('เขียนกลับชีทไม่สำเร็จ') >= 0;
+        if (sheetWarn) {
+          Swal.fire({ icon: 'warning', title: 'บันทึกในแอปแล้ว', text: msg });
+        } else {
+          Swal.fire({ icon: 'success', title: 'สำเร็จ', timer: 1500 });
+        }
         const ui = captureInspectionUiState_();
         if (!patchInspectionLocal_(formData)) reloadInspectionPlansLight_(ui);
         else {
@@ -5104,11 +5128,13 @@
       }
       Toast.fire({ icon: 'info', title: 'กำลังอัปเดต...' });
       const ui = captureInspectionUiState_();
-      google.script.run.withSuccessHandler(() => {
-        const idx = inspectionData.findIndex(x => x.id == id);
-        if (idx > -1) inspectionData[idx].visited = isChecked;
-        restoreInspectionUiState_(ui);
-        filterInspections(ui);
+      google.script.run.withSuccessHandler(function(res) {
+        handleInspectionSaveResult_(res, function() {
+          const idx = inspectionData.findIndex(x => x.id == id);
+          if (idx > -1) inspectionData[idx].visited = isChecked;
+          restoreInspectionUiState_(ui);
+          filterInspections(ui);
+        });
       }).withFailureHandler(err => {
         restoreInspectionUiState_(ui);
         filterInspections(ui);

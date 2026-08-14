@@ -179,6 +179,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
     case 'getInspectionPlans': return getInspectionPlans();
     case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
+    case 'debugInspectionSourceSheets': return debugInspectionSourceSheets_();
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
     case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
@@ -1459,13 +1460,34 @@ function formatInspectionDateDisplay_(val) {
   return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
 }
 
-/** ค่าวันที่สำหรับเขียนกลับชีทต้นทาง — ใช้ Date ถ้า parse ได้ (Sheets รู้จัก) ไม่งั้นใช้ข้อความไทย */
+/** ค่าวันที่สำหรับเขียนกลับชีทต้นทาง — ใช้ข้อความไทยให้ตรงที่แสดงในชีท */
 function formatInspectionDateForSheetWrite_(val) {
   if (val == null || val === '') return '';
   const d = parseThaiDate_(val);
-  if (d) return d;
+  if (d) {
+    return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+  }
   const text = formatInspectionDateDisplay_(val);
   return text || cellStr_(val);
+}
+
+function findInspectScheduleColumnFallback_(values) {
+  const best = { col: null, score: 0, label: '' };
+  if (!values || !values.length) return best;
+  for (let r = 0; r < Math.min(values.length, 20); r++) {
+    const row = values[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
+      const h = normInspectionHeader_(t);
+      const score = scoreInspectionScheduleHeader_(h, t);
+      if (score > 0 && (score > best.score || (score === best.score && best.col != null && c > best.col) || best.col == null)) {
+        best.col = c;
+        best.score = score;
+        best.label = t;
+      }
+    }
+  }
+  return best;
 }
 
 function formatTimeRangeForSheet_(start, end) {
@@ -1599,14 +1621,25 @@ function deleteOutage(id, sessionToken) {
 const INSPECTION_HEADERS = [
   'ID', 'Seq', 'Phase', 'Place', 'PwaBranch', 'PwaDistrict', 'PeaZone', 'PeaOffice',
   'HandoverPlan', 'HandoverRound', 'InspectSchedule', 'Inspectors', 'FileComment',
-  'Committee', 'InspectLetterDate', 'PassLetterStatus', 'Visited', 'TcCoordinator', 'TcContact', 'Region'
+  'Committee', 'InspectLetterDate', 'PassLetterStatusWork', 'PassLetterStatus', 'Visited', 'TcCoordinator', 'TcContact', 'Region'
 ];
 
 const INSPECTION_SOURCE_COL_KEYS_ = [
   'seq', 'phase', 'place', 'pwaBranch', 'pwaDistrict', 'peaZone', 'peaOffice',
   'handoverPlan', 'handoverRound', 'inspectSchedule', 'inspectors', 'fileComment',
-  'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'tcCoordinator', 'tcContact'
+  'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'tcCoordinator', 'tcContact'
 ];
+
+function migrateInspectionSheetSchema_(sheet) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return (h || '').toString().trim(); });
+  if (headers[0] !== 'ID') return;
+  if (headers.length >= INSPECTION_HEADERS.length && headers[15] === 'PassLetterStatusWork') return;
+  if (headers.length >= 20 && headers[15] === 'PassLetterStatus' && headers[19] === 'Region') {
+    sheet.insertColumnBefore(16);
+    sheet.getRange(1, 16).setValue('PassLetterStatusWork');
+  }
+}
 
 function ensureInspectionSheet_(ss) {
   let sheet = ss.getSheetByName(INSPECTION_SHEET);
@@ -1615,13 +1648,14 @@ function ensureInspectionSheet_(ss) {
     sheet.appendRow(INSPECTION_HEADERS);
     return sheet;
   }
+  migrateInspectionSheetSchema_(sheet);
   const lastCol = Math.max(sheet.getLastColumn(), 1);
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => (h || '').toString().trim());
   if (headers[0] !== 'ID') {
     sheet.insertRowBefore(1);
     sheet.getRange(1, 1, 1, INSPECTION_HEADERS.length).setValues([INSPECTION_HEADERS]);
   } else {
-    let headersOk = headers.length >= INSPECTION_HEADERS.length && headers[19] === 'Region';
+    let headersOk = headers.length >= INSPECTION_HEADERS.length && headers[20] === 'Region';
     if (headersOk) {
       for (let i = 0; i < INSPECTION_HEADERS.length; i++) {
         if (headers[i] !== INSPECTION_HEADERS[i]) { headersOk = false; break; }
@@ -1632,11 +1666,11 @@ function ensureInspectionSheet_(ss) {
       if (headers[i] !== name) sheet.getRange(1, i + 1).setValue(name);
     });
   }
-  if (headers.length < INSPECTION_HEADERS.length || headers[19] !== 'Region') {
+  if (headers.length < INSPECTION_HEADERS.length || headers[20] !== 'Region') {
     if (sheet.getLastColumn() < INSPECTION_HEADERS.length) {
       sheet.insertColumnsAfter(sheet.getLastColumn(), INSPECTION_HEADERS.length - sheet.getLastColumn());
     }
-    sheet.getRange(1, 20).setValue('Region');
+    sheet.getRange(1, 21).setValue('Region');
   }
   return sheet;
 }
@@ -1683,11 +1717,12 @@ function mapInspectionRow_(row) {
     fileComment: cellStr_(row[12]),
     committee: cellStr_(row[13]),
     inspectLetterDate: cellStr_(row[14]),
-    passLetterStatus: cellStr_(row[15]),
-    visited: parseInspectionVisited_(row[16]),
-    tcCoordinator: cellStr_(row[17]),
-    tcContact: cellStr_(row[18]),
-    region: cellStr_(row[19]) || '',
+    passLetterStatusWork: cellStr_(row[15]),
+    passLetterStatus: cellStr_(row[16]),
+    visited: parseInspectionVisited_(row[17]),
+    tcCoordinator: cellStr_(row[18]),
+    tcContact: cellStr_(row[19]),
+    region: cellStr_(row[20]) || '',
     fromSheet: fromSheet,
     sourceTitle: fromSheet ? INSPECTION_SOURCE_TITLE : '',
     sourceUrl: fromSheet ? INSPECTION_SOURCE_URL : ''
@@ -1702,45 +1737,129 @@ function readInspectionsMapped_(sheet) {
   return data.filter(r => r[3]).map(mapInspectionRow_);
 }
 
+function normInspectionHeader_(t) {
+  return cellStr_(t).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** กรองเซลล์ข้อมูล (เช่น "กปภ.เขต 9") ไม่ให้ไปทับ map หัวคอลัมน์ */
+function isLikelyInspectionHeaderCell_(t) {
+  const s = cellStr_(t).replace(/\s+/g, ' ').trim();
+  if (!s) return false;
+  if (s.length > 40) return false;
+  if (/^\d+$/.test(s)) return false;
+  if (/^\d{1,2}\s+[ก-๙][ก-๙\.]*\s+\d{4}$/.test(s)) return false;
+  if (/^กปภ\.?\s*(สาขา|เขต)\s+\d/.test(s)) return false;
+  if (/^กปภ\.?\s*เขต\s*\d/.test(s)) return false;
+  return true;
+}
+
+function scoreInspectionScheduleHeader_(h, t) {
+  if (!h || !t) return 0;
+  if (h.indexOf('หนังสือ') >= 0 || h.indexOf('คณะกรรมการ') >= 0) return 0;
+  if (h.indexOf('วันตรวจงาน') >= 0 && h.indexOf('กำหนด') < 0) return 0;
+  if (h === 'กำหนดตรวจงาน' || t === 'กำหนดตรวจงาน') return 100;
+  if (h.indexOf('กำหนดตรวจงาน') >= 0) return 95;
+  if (h.indexOf('กำหนดวันตรวจ') >= 0 || h.indexOf('กำหนดวัน') >= 0 && h.indexOf('ตรวจ') >= 0) return 92;
+  if (h.indexOf('กำหนด') >= 0 && h.indexOf('ตรวจ') >= 0 && h.indexOf('หนังสือ') < 0) return 85;
+  if (h.indexOf('นัดตรวจ') >= 0 || h.indexOf('วันนัด') >= 0) return 80;
+  if (h.indexOf('ตรวจงาน') >= 0 && h.indexOf('วันที่') < 0 && h.indexOf('หนังสือ') < 0) return 55;
+  return 0;
+}
+
+function mapInspectionHeaderCell_(map, t, h, c, scheduleBest) {
+  if (!t) return;
+  const headerLike = isLikelyInspectionHeaderCell_(t);
+  if (headerLike) {
+    if (t === 'ลำดับที่' || h.indexOf('ลำดับ') === 0) map.cols.seq = c;
+    else if (h === 'phase' || t === 'Phase') map.cols.phase = c;
+    else if (t === 'สถานที่' || h.indexOf('ชื่อสถานที่') >= 0) map.cols.place = c;
+    else if (h.indexOf('กปภ') >= 0 && h.indexOf('สาขา') >= 0 && h.indexOf('เขต') < 0) map.cols.pwaBranch = c;
+    else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0 && h.indexOf('สาขา') < 0) map.cols.pwaDistrict = c;
+    else if (map.cols.peaZone == null && ((h.indexOf('กฟภ') >= 0 && (h.indexOf('เขต') >= 0 || h.indexOf('ความรับผิดชอบ') >= 0)) || h.indexOf('pea') >= 0)) map.cols.peaZone = c;
+    else if (h.indexOf('แผนส่งมอบงาน') >= 0 && h.indexOf('รอบ') < 0) map.cols.handoverPlan = c;
+    else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || h.indexOf('รอบส่งมอบ') >= 0) map.cols.handoverRound = c;
+    else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
+    else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
+    else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
+    else if (h.indexOf('หนังสือตรวจรับ') >= 0 || (h.indexOf('วันตรวจงาน') >= 0 && h.indexOf('กำหนด') < 0)) {
+      if (scheduleBest.col == null || scheduleBest.col !== c) map.cols.inspectLetterDate = c;
+    }
+    else if (h.indexOf('ใบนำตัว') >= 0) {
+      if (h.indexOf('ตรวจงาน') >= 0) map.cols.passLetterStatusWork = c;
+      else if (h.indexOf('ตรวจรับ') >= 0) map.cols.passLetterStatus = c;
+      else if (map.cols.passLetterStatus == null) map.cols.passLetterStatus = c;
+    }
+    else if (h.indexOf('ไปแล้ว') >= 0) map.cols.visited = c;
+    else if (h.indexOf('ผู้ประสานงาน tc') >= 0) map.cols.tcCoordinator = c;
+    else if (h.indexOf('เบอร์ติดต่อ tc') >= 0) map.cols.tcContact = c;
+    else if (h.indexOf('กฟจ') >= 0 || h.indexOf('กฟน') >= 0) {
+      if (map.cols.peaOffice == null && map.cols.peaZone != null && c === map.cols.peaZone + 1) map.cols.peaOffice = c;
+    }
+  }
+  const schedScore = scoreInspectionScheduleHeader_(h, t);
+  if (schedScore > 0 && (schedScore > scheduleBest.score || (schedScore === scheduleBest.score && scheduleBest.col != null && c > scheduleBest.col) || scheduleBest.col == null)) {
+    scheduleBest.score = schedScore;
+    scheduleBest.col = c;
+    scheduleBest.label = t;
+  }
+}
+
 function findInspectionHeaderMap_(values) {
   const fallback = {
     headerRow: 0,
     cols: { seq: 0, phase: 1, place: 2, pwaBranch: 3, pwaDistrict: 4, peaZone: 5, peaOffice: 6,
       handoverPlan: 7, handoverRound: 8, inspectSchedule: 9, inspectors: 10, fileComment: 11,
-      committee: 12, inspectLetterDate: 13, passLetterStatus: 14, visited: 15, tcCoordinator: 16, tcContact: 17 }
+      committee: 12, inspectLetterDate: 13, passLetterStatusWork: 14, passLetterStatus: 15, visited: 16, tcCoordinator: 17, tcContact: 18 },
+    headerLabels: []
   };
   if (!values || !values.length) return fallback;
-  for (let r = 0; r < Math.min(values.length, 8); r++) {
-    const row = values[r];
-    const map = { headerRow: r, cols: {} };
-    for (let c = 0; c < row.length; c++) {
-      const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
-      const h = t.toLowerCase();
-      if (!t) continue;
-      if (t === 'ลำดับที่' || h.indexOf('ลำดับ') === 0) map.cols.seq = c;
-      else if (h === 'phase' || t === 'Phase') map.cols.phase = c;
-      else if (t === 'สถานที่') map.cols.place = c;
-      else if (h.indexOf('กปภ') >= 0 && h.indexOf('สาขา') >= 0) map.cols.pwaBranch = c;
-      else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0) map.cols.pwaDistrict = c;
-      else if (map.cols.peaZone == null && ((h.indexOf('กฟภ') >= 0 && (h.indexOf('เขต') >= 0 || h.indexOf('ความรับผิดชอบ') >= 0)) || h.indexOf('pea') >= 0)) map.cols.peaZone = c;
-      else if (h.indexOf('แผนส่งมอบงาน') >= 0 && h.indexOf('รอบ') < 0) map.cols.handoverPlan = c;
-      else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || h.indexOf('รอบส่งมอบ') >= 0) map.cols.handoverRound = c;
-      else if (h.indexOf('กำหนดตรวจงาน') >= 0 || (h.indexOf('ตรวจงาน') >= 0 && h.indexOf('หนังสือ') < 0 && h.indexOf('วันที่') < 0 && map.cols.inspectSchedule == null)) map.cols.inspectSchedule = c;
-      else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
-      else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
-      else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
-      else if (h.indexOf('วันตรวจงาน') >= 0 || h.indexOf('หนังสือตรวจรับ') >= 0) map.cols.inspectLetterDate = c;
-      else if (h.indexOf('ใบนำตัว') >= 0) map.cols.passLetterStatus = c;
-      else if (h.indexOf('ไปแล้ว') >= 0) map.cols.visited = c;
-      else if (h.indexOf('ผู้ประสานงาน tc') >= 0) map.cols.tcCoordinator = c;
-      else if (h.indexOf('เบอร์ติดต่อ tc') >= 0) map.cols.tcContact = c;
-      else if (h.indexOf('กฟจ') >= 0 || h.indexOf('กฟน') >= 0) {
-        if (map.cols.peaOffice == null && map.cols.peaZone != null && c === map.cols.peaZone + 1) map.cols.peaOffice = c;
+
+  for (let r = 0; r < Math.min(values.length, 15); r++) {
+    const anchor = values[r];
+    let hasPlace = false;
+    for (let c = 0; c < anchor.length; c++) {
+      const ht = normInspectionHeader_(cellStr_(anchor[c]));
+      if (ht === 'สถานที่' || ht.indexOf('ชื่อสถานที่') >= 0) { hasPlace = true; break; }
+    }
+    if (!hasPlace) continue;
+
+    const map = { headerRow: r, cols: {}, headerLabels: anchor.map(function(cell) { return cellStr_(cell); }) };
+    const scheduleBest = { col: null, score: 0, label: '' };
+
+    for (let dr = -2; dr <= 2; dr++) {
+      const ri = r + dr;
+      if (ri < 0 || ri >= values.length) continue;
+      const row = values[ri];
+      for (let c = 0; c < row.length; c++) {
+        const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
+        const h = normInspectionHeader_(t);
+        mapInspectionHeaderCell_(map, t, h, c, scheduleBest);
       }
     }
+
+    if (scheduleBest.col != null) map.cols.inspectSchedule = scheduleBest.col;
     if (map.cols.place != null) {
       if (map.cols.peaOffice == null && map.cols.peaZone != null) map.cols.peaOffice = map.cols.peaZone + 1;
+      if (map.cols.inspectSchedule == null) {
+        const fb = findInspectScheduleColumnFallback_(values);
+        if (fb.col != null) {
+          map.cols.inspectSchedule = fb.col;
+          map.inspectScheduleHeader = fb.label;
+        }
+      } else {
+        map.inspectScheduleHeader = scheduleBest.label || '';
+      }
+      if (map.cols.inspectSchedule != null && map.cols.inspectLetterDate === map.cols.inspectSchedule) {
+        delete map.cols.inspectLetterDate;
+      }
       return map;
+    }
+  }
+  if (fallback && fallback.cols) {
+    const fb = findInspectScheduleColumnFallback_(values);
+    if (fb.col != null) {
+      fallback.cols.inspectSchedule = fb.col;
+      fallback.inspectScheduleHeader = fb.label;
     }
   }
   return fallback;
@@ -1784,6 +1903,7 @@ function inspectionFieldsToLocalRow_(id, fields) {
     fields.fileComment || '',
     fields.committee || '',
     fields.inspectLetterDate || '',
+    fields.passLetterStatusWork || '',
     fields.passLetterStatus || '',
     !!fields.visited,
     fields.tcCoordinator || '',
@@ -1813,7 +1933,7 @@ function collectSourceInspectionRows_() {
     if (!isInspectionRegionSheet_(sheetName)) return;
     const region = sheetName.trim().toUpperCase();
     const lastRow = srcSheet.getLastRow();
-    const lastCol = Math.max(srcSheet.getLastColumn(), 18);
+    const lastCol = Math.max(srcSheet.getLastColumn(), 25);
     if (lastRow < 2) return;
     const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
     const map = findInspectionHeaderMap_(values);
@@ -1833,6 +1953,39 @@ function collectSourceInspectionRows_() {
   return collected;
 }
 
+/** ตรวจแท็บชีทตรวจรับ NC/NE/S — ดู map คอลัมน์ โดยเฉพาะกำหนดตรวจงาน */
+function debugInspectionSourceSheets_() {
+  const srcSs = getInspectionSourceSs_();
+  const sheets = srcSs.getSheets().filter(function(s) { return isInspectionRegionSheet_(s.getName()); });
+  const out = { spreadsheetName: srcSs.getName(), sheets: [] };
+  sheets.forEach(function(srcSheet) {
+    const lastRow = srcSheet.getLastRow();
+    const lastCol = Math.max(srcSheet.getLastColumn(), 25);
+    const scanRows = Math.min(Math.max(lastRow, 1), 15);
+    const values = lastRow >= 1 ? srcSheet.getRange(1, 1, scanRows, lastCol).getValues() : [];
+    const map = findInspectionHeaderMap_(values);
+    const headers = [];
+    for (let c = 0; c < lastCol; c++) {
+      const labels = [];
+      for (let r = 0; r < scanRows; r++) {
+        const t = cellStr_(values[r][c]).replace(/\s+/g, ' ').trim();
+        if (t) labels.push('R' + (r + 1) + ':' + t);
+      }
+      if (labels.length) headers.push({ col: c + 1, labels: labels });
+    }
+    out.sheets.push({
+      name: srcSheet.getName(),
+      sheetId: srcSheet.getSheetId(),
+      headerRow: map.headerRow + 1,
+      inspectScheduleCol: map.cols.inspectSchedule != null ? map.cols.inspectSchedule + 1 : null,
+      inspectScheduleHeader: map.inspectScheduleHeader || '',
+      cols: map.cols,
+      headers: headers
+    });
+  });
+  return out;
+}
+
 function syncInspectionsFromSource_(destSheet, precollected) {
   const rows = precollected || collectSourceInspectionRows_();
   const oldData = destSheet.getDataRange().getValues();
@@ -1841,7 +1994,7 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     const id = oldData[i][0];
     if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
   }
-  const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
   const newData = [INSPECTION_HEADERS];
   rows.forEach(function(item) {
     const old = oldById[item.id];
@@ -1964,6 +2117,7 @@ function inspectionFormToFields_(formObj) {
     fileComment: (formObj.fileComment || '').toString().trim(),
     committee: (formObj.committee || '').toString().trim(),
     inspectLetterDate: (formObj.inspectLetterDate || '').toString().trim(),
+    passLetterStatusWork: (formObj.passLetterStatusWork || '').toString().trim(),
     passLetterStatus: (formObj.passLetterStatus || '').toString().trim(),
     visited: !!formObj.visited,
     tcCoordinator: (formObj.tcCoordinator || '').toString().trim(),
@@ -1978,19 +2132,34 @@ function writeInspectionBackToSource_(id, fields) {
   const srcSs = getInspectionSourceSs_();
   const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
   if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
-  const lastCol = Math.max(srcSheet.getLastColumn(), 20);
-  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 12));
+  const lastCol = Math.max(srcSheet.getLastColumn(), 30);
+  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 15));
   const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
   const map = findInspectionHeaderMap_(values);
   const cols = map.cols;
+  if (cols.inspectSchedule == null && fields.inspectSchedule) {
+    const fb = findInspectScheduleColumnFallback_(values);
+    if (fb.col != null) cols.inspectSchedule = fb.col;
+  }
+  const skipColForKey_ = {};
   INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
     const col = cols[key];
-    if (col == null) return;
+    if (col == null) {
+      if (key === 'inspectSchedule' && fields.inspectSchedule) {
+        throw new Error('ไม่พบคอลัมน์กำหนดตรวจงานในแท็บชีทต้นทาง');
+      }
+      return;
+    }
+    if (skipColForKey_[col] && skipColForKey_[col] !== key) return;
     let val = fields[key];
     if (key === 'visited') val = val ? 'TRUE' : '';
     else if (INSPECTION_DATE_FIELD_KEYS_[key]) val = formatInspectionDateForSheetWrite_(val);
     srcSheet.getRange(ref.row, col + 1).setValue(val == null ? '' : val);
+    if (key === 'inspectSchedule') skipColForKey_[col] = key;
+    else if (key === 'inspectLetterDate' && skipColForKey_[col] === 'inspectSchedule') return;
+    else skipColForKey_[col] = key;
   });
+  SpreadsheetApp.flush();
   return true;
 }
 
@@ -2113,6 +2282,7 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
       fileComment: nextComment,
       committee: row.committee,
       inspectLetterDate: row.inspectLetterDate,
+      passLetterStatusWork: row.passLetterStatusWork,
       passLetterStatus: row.passLetterStatus,
       visited: true,
       tcCoordinator: row.tcCoordinator,
@@ -2215,6 +2385,7 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
       fileComment: nextComment,
       committee: row.committee,
       inspectLetterDate: row.inspectLetterDate,
+      passLetterStatusWork: row.passLetterStatusWork,
       passLetterStatus: row.passLetterStatus,
       visited: row.visited,
       tcCoordinator: row.tcCoordinator,
