@@ -179,7 +179,9 @@ function dispatchApi_(action, args, sessionToken) {
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
     case 'getInspectionPlans': return getInspectionPlans();
     case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
+    case 'pushInspectionPlansToSource': return pushInspectionPlansToSource(args[0] || tok);
     case 'debugInspectionSourceSheets': return debugInspectionSourceSheets_();
+    case 'debugInspectionSourceRow': return debugInspectionSourceRow_(args[0]);
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
     case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
@@ -1460,24 +1462,64 @@ function formatInspectionDateDisplay_(val) {
   return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
 }
 
-/** ค่าวันที่สำหรับเขียนกลับชีทต้นทาง — ใช้ข้อความไทยให้ตรงที่แสดงในชีท */
+/** ค่าวันที่สำหรับเขียนกลับชีทต้นทาง */
 function formatInspectionDateForSheetWrite_(val) {
   if (val == null || val === '') return '';
-  const d = parseThaiDate_(val);
+  const s = cellStr_(val).replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  const d = parseThaiDate_(s);
   if (d) {
     return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
   }
-  const text = formatInspectionDateDisplay_(val);
-  return text || cellStr_(val);
+  return formatInspectionDateDisplay_(s) || s;
+}
+
+function friendlyInspectionSheetWriteError_(e) {
+  const msg = (e && e.message) ? e.message : String(e || 'unknown');
+  if (/permission|access denied|Authorization|ไม่มีสิทธิ์|does not have permission|Exception:\s*You do not have/i.test(msg)) {
+    return 'ไม่มีสิทธิ์แก้ไขชีทต้นทาง — แชร์ชีท "' + INSPECTION_SOURCE_TITLE + '" ให้บัญชีเจ้าของ Apps Script เป็น Editor';
+  }
+  if (/protected cell|protected/i.test(msg)) {
+    return 'ชีทมีการป้องกันเซลล์ — ยกเลิก protection คอลัมน์กำหนดตรวจงาน';
+  }
+  return msg;
+}
+
+function writeInspectionSourceCellValue_(sheet, row1, col0, val) {
+  if (col0 == null) return;
+  const text = val == null ? '' : String(val).trim();
+  const range = sheet.getRange(row1, col0 + 1);
+  try {
+    const formula = range.getFormula();
+    if (formula) range.clearContent();
+  } catch (ignore) {}
+  range.setValue(text);
+}
+
+function verifyInspectionSourceCellWrite_(sheet, row1, col0, expected) {
+  SpreadsheetApp.flush();
+  Utilities.sleep(150);
+  const read = cellStr_(sheet.getRange(row1, col0 + 1).getDisplayValue());
+  const want = cellStr_(expected);
+  if (!want) return read;
+  if (read === want) return read;
+  const d = parseThaiDate_(want);
+  if (d) {
+    const alt = d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+    if (read === alt) return read;
+  }
+  if (read && want && read.replace(/\s+/g, ' ') === want.replace(/\s+/g, ' ')) return read;
+  throw new Error('เขียนชีทแล้วแต่ค่าไม่ตรง — คาด "' + want + '" ได้ "' + read + '" (แถว ' + row1 + ' คอล ' + (col0 + 1) + ')');
 }
 
 function findInspectScheduleColumnFallback_(values) {
   const best = { col: null, score: 0, label: '' };
   if (!values || !values.length) return best;
-  for (let r = 0; r < Math.min(values.length, 20); r++) {
+  for (let r = 0; r < Math.min(values.length, 4); r++) {
     const row = values[r] || [];
     for (let c = 0; c < row.length; c++) {
       const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
+      if (!isLikelyInspectionHeaderCell_(t)) continue;
       const h = normInspectionHeader_(t);
       const score = scoreInspectionScheduleHeader_(h, t);
       if (score > 0 && (score > best.score || (score === best.score && best.col != null && c > best.col) || best.col == null)) {
@@ -1741,16 +1783,21 @@ function normInspectionHeader_(t) {
   return cellStr_(t).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-/** กรองเซลล์ข้อมูล (เช่น "กปภ.เขต 9") ไม่ให้ไปทับ map หัวคอลัมน์ */
+/** กรองเซลล์ข้อมูล (เช่น "กปภ.เขต 9", "แด sam") ไม่ให้ไปทับ map หัวคอลัมน์ */
 function isLikelyInspectionHeaderCell_(t) {
   const s = cellStr_(t).replace(/\s+/g, ' ').trim();
-  if (!s) return false;
-  if (s.length > 40) return false;
+  if (!s || s.length > 45) return false;
   if (/^\d+$/.test(s)) return false;
   if (/^\d{1,2}\s+[ก-๙][ก-๙\.]*\s+\d{4}$/.test(s)) return false;
+  if (/^\d{1,2}\s*[-–\/]\s*\d{1,2}\s*[-–\/]\s*\d{2,4}/.test(s)) return false;
   if (/^กปภ\.?\s*(สาขา|เขต)\s+\d/.test(s)) return false;
-  if (/^กปภ\.?\s*เขต\s*\d/.test(s)) return false;
-  return true;
+  const h = normInspectionHeader_(s);
+  const hints = ['ลำดับ', 'phase', 'สถานที่', 'กปภ', 'กฟภ', 'แผน', 'ส่งมอบ', 'รอบ', 'กำหนด', 'ตรวจ', 'file comment',
+    'คณะกรรมการ', 'หนังสือ', 'ใบนำตัว', 'ไปแล้ว', 'ผู้ประสาน', 'tc', 'เบอร์'];
+  for (let i = 0; i < hints.length; i++) {
+    if (h.indexOf(hints[i]) >= 0) return true;
+  }
+  return false;
 }
 
 function scoreInspectionScheduleHeader_(h, t) {
@@ -1797,7 +1844,7 @@ function mapInspectionHeaderCell_(map, t, h, c, scheduleBest) {
     }
   }
   const schedScore = scoreInspectionScheduleHeader_(h, t);
-  if (schedScore > 0 && (schedScore > scheduleBest.score || (schedScore === scheduleBest.score && scheduleBest.col != null && c > scheduleBest.col) || scheduleBest.col == null)) {
+  if (headerLike && schedScore > 0 && (schedScore > scheduleBest.score || (schedScore === scheduleBest.score && scheduleBest.col != null && c > scheduleBest.col) || scheduleBest.col == null)) {
     scheduleBest.score = schedScore;
     scheduleBest.col = c;
     scheduleBest.label = t;
@@ -1826,12 +1873,13 @@ function findInspectionHeaderMap_(values) {
     const map = { headerRow: r, cols: {}, headerLabels: anchor.map(function(cell) { return cellStr_(cell); }) };
     const scheduleBest = { col: null, score: 0, label: '' };
 
-    for (let dr = -2; dr <= 2; dr++) {
+    for (let dr = -1; dr <= 1; dr++) {
       const ri = r + dr;
       if (ri < 0 || ri >= values.length) continue;
       const row = values[ri];
       for (let c = 0; c < row.length; c++) {
         const t = cellStr_(row[c]).replace(/\s+/g, ' ').trim();
+        if (!t) continue;
         const h = normInspectionHeader_(t);
         mapInspectionHeaderCell_(map, t, h, c, scheduleBest);
       }
@@ -1841,7 +1889,7 @@ function findInspectionHeaderMap_(values) {
     if (map.cols.place != null) {
       if (map.cols.peaOffice == null && map.cols.peaZone != null) map.cols.peaOffice = map.cols.peaZone + 1;
       if (map.cols.inspectSchedule == null) {
-        const fb = findInspectScheduleColumnFallback_(values);
+        const fb = findInspectScheduleColumnFallback_(values.slice(0, Math.min(values.length, 4)));
         if (fb.col != null) {
           map.cols.inspectSchedule = fb.col;
           map.inspectScheduleHeader = fb.label;
@@ -1986,6 +2034,29 @@ function debugInspectionSourceSheets_() {
   return out;
 }
 
+/** อ่านค่าจริงในแถวชีทต้นทาง (debug) */
+function debugInspectionSourceRow_(id) {
+  const ref = parseSyncedInspectionRowRef_(id);
+  if (!ref) throw new Error('รหัสรายการไม่ถูกต้อง');
+  const srcSs = getInspectionSourceSs_();
+  const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
+  if (!srcSheet) throw new Error('ไม่พบแท็บชีท');
+  const lastCol = Math.max(srcSheet.getLastColumn(), 15);
+  const map = findInspectionHeaderMap_(srcSheet.getRange(1, 1, Math.min(srcSheet.getLastRow(), 15), lastCol).getValues());
+  const rowVals = srcSheet.getRange(ref.row, 1, 1, lastCol).getValues()[0];
+  const schedCol = map.cols.inspectSchedule;
+  return {
+    id: id,
+    sheet: srcSheet.getName(),
+    row: ref.row,
+    inspectScheduleCol: schedCol != null ? schedCol + 1 : null,
+    inspectScheduleValue: schedCol != null ? cellStr_(rowVals[schedCol]) : '',
+    inspectScheduleDisplay: schedCol != null ? cellStr_(srcSheet.getRange(ref.row, schedCol + 1).getDisplayValue()) : '',
+    handoverRoundCol: map.cols.handoverRound != null ? map.cols.handoverRound + 1 : null,
+    handoverRoundValue: map.cols.handoverRound != null ? cellStr_(rowVals[map.cols.handoverRound]) : ''
+  };
+}
+
 function syncInspectionsFromSource_(destSheet, precollected) {
   const rows = precollected || collectSourceInspectionRows_();
   const oldData = destSheet.getDataRange().getValues();
@@ -2126,23 +2197,52 @@ function inspectionFormToFields_(formObj) {
   };
 }
 
-function writeInspectionBackToSource_(id, fields) {
-  const ref = parseSyncedInspectionRowRef_(id);
-  if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
+function getInspectionSourceWriteCtx_(sheetCtx, sheetId) {
+  if (sheetCtx[sheetId]) return sheetCtx[sheetId];
   const srcSs = getInspectionSourceSs_();
-  const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
+  const srcSheet = findInspectionSourceSheet_(srcSs, sheetId);
   if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
   const lastCol = Math.max(srcSheet.getLastColumn(), 30);
-  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 15));
+  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), 1), 15);
   const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
   const map = findInspectionHeaderMap_(values);
-  const cols = map.cols;
-  if (cols.inspectSchedule == null && fields.inspectSchedule) {
+  const cols = Object.assign({}, map.cols);
+  if (cols.inspectSchedule == null) {
     const fb = findInspectScheduleColumnFallback_(values);
     if (fb.col != null) cols.inspectSchedule = fb.col;
   }
+  sheetCtx[sheetId] = { sheet: srcSheet, cols: cols };
+  return sheetCtx[sheetId];
+}
+
+function planNeedsInspectionBackfill_(plan) {
+  if (!plan) return false;
+  if (plan.visited === true) return true;
+  const keys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate',
+    'passLetterStatusWork', 'passLetterStatus', 'tcCoordinator', 'tcContact'];
+  for (let i = 0; i < keys.length; i++) {
+    const v = plan[keys[i]];
+    if (v != null && String(v).trim() !== '') return true;
+  }
+  return false;
+}
+
+function writeInspectionBackToSource_(id, fields, opts) {
+  opts = opts || {};
+  const verify = opts.verify !== false;
+  const ref = parseSyncedInspectionRowRef_(id);
+  if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
+  const sheetCtx = opts.sheetCtx || {};
+  const ctx = getInspectionSourceWriteCtx_(sheetCtx, ref.sheetId);
+  const srcSheet = ctx.sheet;
+  const cols = Object.assign({}, ctx.cols);
+  if (cols.inspectSchedule == null && fields.inspectSchedule) {
+    throw new Error('ไม่พบคอลัมน์กำหนดตรวจงานในแท็บชีทต้นทาง');
+  }
   const skipColForKey_ = {};
-  INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
+  const dateWriteInfo = {};
+
+  function writeKey_(key) {
     const col = cols[key];
     if (col == null) {
       if (key === 'inspectSchedule' && fields.inspectSchedule) {
@@ -2154,13 +2254,67 @@ function writeInspectionBackToSource_(id, fields) {
     let val = fields[key];
     if (key === 'visited') val = val ? 'TRUE' : '';
     else if (INSPECTION_DATE_FIELD_KEYS_[key]) val = formatInspectionDateForSheetWrite_(val);
-    srcSheet.getRange(ref.row, col + 1).setValue(val == null ? '' : val);
+    writeInspectionSourceCellValue_(srcSheet, ref.row, col, val);
+    if (key === 'inspectSchedule' || key === 'handoverRound') {
+      dateWriteInfo[key] = { row: ref.row, col: col + 1, value: val };
+      if (key === 'inspectSchedule' && val && verify) {
+        verifyInspectionSourceCellWrite_(srcSheet, ref.row, col, val);
+      }
+    }
     if (key === 'inspectSchedule') skipColForKey_[col] = key;
     else if (key === 'inspectLetterDate' && skipColForKey_[col] === 'inspectSchedule') return;
     else skipColForKey_[col] = key;
+  }
+
+  ['handoverRound', 'inspectSchedule'].forEach(writeKey_);
+  INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
+    if (key === 'handoverRound' || key === 'inspectSchedule') return;
+    writeKey_(key);
   });
+  if (verify) SpreadsheetApp.flush();
+  return dateWriteInfo;
+}
+
+/** เขียนข้อมูลในแอปที่แก้แล้ว กลับชีทต้นทางทุกแถว (sync ย้อนหลัง) */
+function pushInspectionPlansToSource(sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  const sheet = ensureInspectionSheet_(getSpreadsheet_());
+  const plans = readInspectionsMapped_(sheet);
+  const sheetCtx = {};
+  const out = { pushed: 0, skipped: 0, failed: 0, withSchedule: 0, errors: [] };
+
+  plans.forEach(function(plan) {
+    if (!isSyncedInspectionId_(plan.id)) {
+      out.skipped++;
+      return;
+    }
+    if (!planNeedsInspectionBackfill_(plan)) {
+      out.skipped++;
+      return;
+    }
+    const fields = inspectionFormToFields_(plan);
+    try {
+      writeInspectionBackToSource_(plan.id, fields, { verify: false, sheetCtx: sheetCtx });
+      out.pushed++;
+      if (fields.inspectSchedule) out.withSchedule++;
+    } catch (e) {
+      out.failed++;
+      if (out.errors.length < 25) {
+        out.errors.push({
+          id: plan.id,
+          place: plan.place,
+          region: plan.region,
+          error: friendlyInspectionSheetWriteError_(e)
+        });
+      }
+    }
+  });
+
   SpreadsheetApp.flush();
-  return true;
+  CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
+  invalidateInspectionListCache_();
+  logAction('pushInspectionPlansToSource: pushed=' + out.pushed + ' schedule=' + out.withSchedule + ' fail=' + out.failed);
+  return out;
 }
 
 function saveInspectionPlan(formObj, sessionToken) {
@@ -2178,11 +2332,17 @@ function saveInspectionPlan(formObj, sessionToken) {
         sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(formObj.id, fields)]);
         if (isSyncedInspectionId_(formObj.id)) {
           try {
-            writeInspectionBackToSource_(formObj.id, fields);
+            const writeInfo = writeInspectionBackToSource_(formObj.id, fields);
             CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
+            const sched = writeInfo && writeInfo.inspectSchedule;
+            logAction('แก้ไขแผนตรวจรับ: ' + fields.place + (sched ? (' → ชีท แถว' + sched.row + ' คอล' + sched.col) : ''));
+            invalidateInspectionListCache_();
+            const schedMsg = sched && sched.value ? (' (กำหนดตรวจงาน → แถว ' + sched.row + ' คอล ' + sched.col + ')') : '';
+            return { success: true, message: 'อัปเดตแล้ว (แอป + ชีท)' + schedMsg, sheetWrite: writeInfo };
           } catch (e) {
-            logAction('บันทึกแผนตรวจรับแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message);
-            return { success: true, message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + e.message };
+            const errMsg = friendlyInspectionSheetWriteError_(e);
+            logAction('บันทึกแผนตรวจรับแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg);
+            return { success: true, message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg };
           }
         }
         logAction('แก้ไขแผนตรวจรับ: ' + fields.place);

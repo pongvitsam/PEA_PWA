@@ -697,6 +697,9 @@
             <button class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm" onclick="refreshInspectionFromSheet()" id="btnRefreshInspectionSheet" title="ดึงข้อมูลล่าสุดจากชีท">
               <i class="fa-solid fa-rotate"></i> รีเฟรชจากชีท
             </button>
+            <button class="btn btn-warning fw-bold rounded-pill px-3 shadow-sm text-dark" onclick="pushInspectionBackToSource()" id="btnPushInspectionSheet" title="ส่งวันที่และข้อมูลที่แก้ในแอป กลับไปชีทต้นทาง" style="display:none;">
+              <i class="fa-solid fa-cloud-arrow-up"></i> ส่งกลับชีท
+            </button>
             <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openInspectionModal()" id="btnAddInspectionTop" disabled>
               <i class="fa-solid fa-plus text-success"></i> เพิ่มรายการ
             </button>
@@ -1938,6 +1941,8 @@
   if (btnInsp) btnInsp.disabled = !inspectionEditable;
   const btnInspTop = document.getElementById('btnAddInspectionTop');
   if (btnInspTop) btnInspTop.disabled = !inspectionEditable;
+  const btnPushInsp = document.getElementById('btnPushInspectionSheet');
+  if (btnPushInsp) btnPushInsp.style.display = inspectionEditable ? 'inline-block' : 'none';
   const btnUsers = document.getElementById('btnManageUsers');
   if (btnUsers) btnUsers.style.display = canEditAll() ? 'inline-block' : 'none';
 
@@ -4136,6 +4141,53 @@
       }).refreshInspectionPlansFromSource(true);
     }
 
+    function pushInspectionBackToSource() {
+      if (!canEditInspection()) return;
+      Swal.fire({
+        title: 'ส่งข้อมูลกลับชีทต้นทาง?',
+        html: 'จะเขียน <b>กำหนดตรวจงาน</b> และข้อมูลที่แก้ในแอป กลับไป Google Sheet ทุกแถวที่มีข้อมูล<br><small class="text-muted">ใช้ครั้งนี้เพื่อ sync ย้อนหลัง</small>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'ส่งกลับชีท',
+        cancelButtonText: 'ยกเลิก'
+      }).then(function(res) {
+        if (!res.isConfirmed) return;
+        let auth;
+        try { auth = gasAuthArgs(); } catch (e) {
+          Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+          return;
+        }
+        const btn = document.getElementById('btnPushInspectionSheet');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังส่ง...'; }
+        Swal.fire({ title: 'กำลังส่งกลับชีท...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+        google.script.run.withSuccessHandler(function(out) {
+          Swal.close();
+          if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> ส่งกลับชีท'; }
+          const pushed = out && out.pushed != null ? out.pushed : 0;
+          const sched = out && out.withSchedule != null ? out.withSchedule : 0;
+          const failed = out && out.failed != null ? out.failed : 0;
+          let html = 'ส่งสำเร็จ <b>' + pushed + '</b> แถว (กำหนดตรวจงาน ' + sched + ' รายการ)';
+          if (failed > 0) html += '<br><span class="text-danger">ล้มเหลว ' + failed + ' แถว</span>';
+          if (out && out.errors && out.errors.length) {
+            html += '<hr class="my-2"><small>' + out.errors.slice(0, 5).map(function(e) {
+              return escHtml((e.place || e.id) + ': ' + e.error);
+            }).join('<br>') + '</small>';
+          }
+          Swal.fire({
+            icon: failed ? 'warning' : 'success',
+            title: failed ? 'ส่งกลับชีทบางส่วน' : 'ส่งกลับชีทแล้ว',
+            html: html
+          });
+          try { localStorage.removeItem(INSPECTION_LS_KEY); } catch (e) {}
+          reloadInspectionPlansLight_(captureInspectionUiState_());
+        }).withFailureHandler(function(err) {
+          Swal.close();
+          if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> ส่งกลับชีท'; }
+          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ส่งกลับชีทไม่สำเร็จ', text: err.message });
+        }).pushInspectionPlansToSource(auth);
+      });
+    }
+
     function setupInspectionPwaFilter(ui) {
       const sel = document.getElementById('inspectionPwaSelect');
       if (!sel) return;
@@ -4878,9 +4930,12 @@
     function handleInspectionSaveResult_(res, onOk) {
       const msg = (res && res.message) ? String(res.message) : '';
       const sheetWarn = msg.indexOf('เขียนกลับชีทไม่สำเร็จ') >= 0;
+      const noSheetPerm = /ไม่มีสิทธิ์แก้ไขชีทต้นทาง|Editor/i.test(msg);
       if (typeof onOk === 'function') onOk(res);
       if (sheetWarn) {
-        Swal.fire({ icon: 'warning', title: 'บันทึกในแอปแล้ว', text: msg });
+        Swal.fire({ icon: 'warning', title: 'บันทึกในแอปแล้ว', text: msg, confirmButtonText: noSheetPerm ? 'เข้าใจแล้ว' : 'ตกลง' });
+      } else if (msg && msg.indexOf('อัปเดตแล้ว (แอป + ชีท)') >= 0) {
+        Toast.fire({ icon: 'success', title: msg.length > 55 ? 'บันทึกลงชีทแล้ว' : msg });
       } else if (msg) {
         Toast.fire({ icon: 'success', title: msg.length > 40 ? 'บันทึกแล้ว' : msg });
       } else {
