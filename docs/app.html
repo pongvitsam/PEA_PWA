@@ -4043,6 +4043,7 @@
       const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(formData.id); });
       if (idx < 0) return false;
       Object.assign(inspectionData[idx], formData);
+      indexInspectionData_([inspectionData[idx]]);
       return true;
     }
 
@@ -4230,6 +4231,11 @@
       const d = parseInspectionHandoverDate_(raw);
       if (!d) return s;
       return d.getDate() + ' ' + INSPECTION_THAI_MONTHS_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+    }
+
+    function normalizeInspectionDateField_(raw) {
+      if (raw == null || raw === '') return '';
+      return formatInspectionHandoverDate_(raw, false) || String(raw).trim();
     }
 
     function setInspectionThaiYear_(fp) {
@@ -4830,7 +4836,12 @@
       const p = inspectionData.find(x => String(x.id) === String(id));
       if (!p || !field) return;
       const formData = inspectionPlanToForm_(p);
-      formData[field] = el.value.trim();
+      const rawVal = el.value.trim();
+      if (field === 'handoverRound' || field === 'inspectSchedule') {
+        formData[field] = normalizeInspectionDateField_(rawVal);
+      } else {
+        formData[field] = rawVal;
+      }
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
         Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
@@ -4978,8 +4989,8 @@
         peaZone: document.getElementById('insp_peaZone').value.trim(),
         peaOffice: document.getElementById('insp_peaOffice').value.trim(),
         handoverPlan: document.getElementById('insp_handoverPlan').value.trim(),
-        handoverRound: document.getElementById('insp_handoverRound').value.trim(),
-        inspectSchedule: document.getElementById('insp_inspectSchedule').value.trim(),
+        handoverRound: normalizeInspectionDateField_(document.getElementById('insp_handoverRound').value.trim()),
+        inspectSchedule: normalizeInspectionDateField_(document.getElementById('insp_inspectSchedule').value.trim()),
         inspectors: document.getElementById('insp_inspectors').value.trim(),
         fileComment: (function() {
           const id = document.getElementById('insp_id').value;

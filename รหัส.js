@@ -1430,9 +1430,14 @@ function inspectionNormalizeBeYear_(beYear) {
   return beYear;
 }
 
+const INSPECTION_DATE_FIELD_KEYS_ = { handoverPlan: true, handoverRound: true, inspectSchedule: true };
+
 /** แสดงวันที่แผนส่งมอบ/ส่งมอบจริง: 10 สิงหาคม 2569 */
 function formatInspectionDateDisplay_(val) {
   if (val == null || val === '') return '';
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[val.getMonth()] + ' ' + (inspectionChristianYear_(val) + 543);
+  }
   const s = cellStr_(val).replace(/\s+/g, ' ').trim();
   const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) {
@@ -1452,6 +1457,15 @@ function formatInspectionDateDisplay_(val) {
   const d = parseThaiDate_(val);
   if (!d) return s;
   return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+}
+
+/** ค่าวันที่สำหรับเขียนกลับชีทต้นทาง — ใช้ Date ถ้า parse ได้ (Sheets รู้จัก) ไม่งั้นใช้ข้อความไทย */
+function formatInspectionDateForSheetWrite_(val) {
+  if (val == null || val === '') return '';
+  const d = parseThaiDate_(val);
+  if (d) return d;
+  const text = formatInspectionDateDisplay_(val);
+  return text || cellStr_(val);
 }
 
 function formatTimeRangeForSheet_(start, end) {
@@ -1708,10 +1722,10 @@ function findInspectionHeaderMap_(values) {
       else if (t === 'สถานที่') map.cols.place = c;
       else if (h.indexOf('กปภ') >= 0 && h.indexOf('สาขา') >= 0) map.cols.pwaBranch = c;
       else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0) map.cols.pwaDistrict = c;
-      else if (h.indexOf('กฟภ') >= 0 && h.indexOf('ความรับผิดชอบ') >= 0) map.cols.peaZone = c;
-      else if (h.indexOf('แผนส่งมอบงาน') >= 0) map.cols.handoverPlan = c;
-      else if (h.indexOf('รอบส่งมอบงานจริง') >= 0) map.cols.handoverRound = c;
-      else if (h.indexOf('กำหนดตรวจงาน') >= 0) map.cols.inspectSchedule = c;
+      else if (map.cols.peaZone == null && ((h.indexOf('กฟภ') >= 0 && (h.indexOf('เขต') >= 0 || h.indexOf('ความรับผิดชอบ') >= 0)) || h.indexOf('pea') >= 0)) map.cols.peaZone = c;
+      else if (h.indexOf('แผนส่งมอบงาน') >= 0 && h.indexOf('รอบ') < 0) map.cols.handoverPlan = c;
+      else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || h.indexOf('รอบส่งมอบ') >= 0) map.cols.handoverRound = c;
+      else if (h.indexOf('กำหนดตรวจงาน') >= 0 || (h.indexOf('ตรวจงาน') >= 0 && h.indexOf('หนังสือ') < 0 && h.indexOf('วันที่') < 0 && map.cols.inspectSchedule == null)) map.cols.inspectSchedule = c;
       else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
       else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
       else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
@@ -1827,7 +1841,7 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     const id = oldData[i][0];
     if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
   }
-  const preserveKeys = ['inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
   const newData = [INSPECTION_HEADERS];
   rows.forEach(function(item) {
     const old = oldById[item.id];
@@ -1964,8 +1978,8 @@ function writeInspectionBackToSource_(id, fields) {
   const srcSs = getInspectionSourceSs_();
   const srcSheet = findInspectionSourceSheet_(srcSs, ref.sheetId);
   if (!srcSheet) throw new Error('ไม่พบแท็บชีทต้นทาง');
-  const lastCol = Math.max(srcSheet.getLastColumn(), 18);
-  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 8));
+  const lastCol = Math.max(srcSheet.getLastColumn(), 20);
+  const headerScanRows = Math.min(Math.max(srcSheet.getLastRow(), ref.row), Math.max(ref.row, 12));
   const values = srcSheet.getRange(1, 1, headerScanRows, lastCol).getValues();
   const map = findInspectionHeaderMap_(values);
   const cols = map.cols;
@@ -1974,6 +1988,7 @@ function writeInspectionBackToSource_(id, fields) {
     if (col == null) return;
     let val = fields[key];
     if (key === 'visited') val = val ? 'TRUE' : '';
+    else if (INSPECTION_DATE_FIELD_KEYS_[key]) val = formatInspectionDateForSheetWrite_(val);
     srcSheet.getRange(ref.row, col + 1).setValue(val == null ? '' : val);
   });
   return true;
