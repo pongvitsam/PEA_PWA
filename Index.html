@@ -411,6 +411,11 @@
 
     <div id="menu-map" style="display: none;">
       <div class="filter-bar row g-3 align-items-center">
+        <div class="col-12">
+          <button type="button" id="btnMapGpsNow" class="btn btn-info text-white fw-semibold" onclick="showRadiusFromGps()" title="ซูมไปตำแหน่งปัจจุบันและแสดงโครงการในรัศมีที่เลือก — ไม่ต้องซูมเอง">
+            <i class="fa-solid fa-location-crosshairs"></i> พิกัดตอนนี้ — ดูโครงการใกล้เคียง
+          </button>
+        </div>
         <div class="col-md-3">
           <span class="fw-bold"><i class="fa-solid fa-magnifying-glass"></i> ค้นหาสถานที่บนแผนที่:</span>
           <div class="input-group mt-1">
@@ -460,7 +465,7 @@
           <button class="btn btn-light border w-100" onclick="resetFilters()"><i class="fa-solid fa-rotate-right"></i> ล้างตัวกรองทั้งหมด</button>
         </div>
         <div class="col-12 mt-1">
-          <div id="mapGpsStatus" class="small text-muted"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
+          <div id="mapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showRadiusFromGps()" onkeydown="if(event.key==='Enter'||event.key===' ')showRadiusFromGps()" title="กดเพื่อซูมไปตำแหน่งปัจจุบันและดูโครงการใกล้เคียง"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
         </div>
         <div class="col-12 mt-2">
           <div class="border rounded-3 p-3 bg-white shadow-sm">
@@ -478,11 +483,11 @@
                 <span class="input-group-text py-0 px-2 small">กำหนดเอง</span>
                 <input type="number" id="mapRadiusKmCustom" class="form-control form-control-sm py-0" style="max-width:88px;" min="0.1" max="500" step="0.1" placeholder="กม." oninput="reapplyRadiusIfActive()" onchange="reapplyRadiusIfActive()">
               </div>
-              <button type="button" class="btn btn-sm btn-info text-white" onclick="showRadiusFromGps()" title="ใช้พิกัด GPS ปัจจุบันเป็นจุดกลาง"><i class="fa-solid fa-location-crosshairs"></i> จากตำแหน่งฉัน</button>
+              <button type="button" id="btnMapGpsRadius" class="btn btn-sm btn-info text-white" onclick="showRadiusFromGps()" title="ใช้พิกัด GPS ปัจจุบันเป็นจุดกลาง"><i class="fa-solid fa-location-crosshairs"></i> พิกัดตอนนี้</button>
               <button type="button" class="btn btn-sm btn-outline-info" onclick="enableRadiusPickOnMap()" title="คลิกบนแผนที่ 1 ครั้ง"><i class="fa-solid fa-hand-pointer"></i> เลือกจุดบนแผนที่</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearRadiusFilter()"><i class="fa-solid fa-eraser"></i> ล้างวง</button>
             </div>
-            <p class="small text-muted mb-0 mt-2">เลือกจากเมนูหรือ<strong>พิมพ์ระยะในช่องกำหนดเอง</strong> (มีผลแทนเมนูเมื่อกรอกตัวเลข 0.1–500 กม.) แล้วกด &quot;จากตำแหน่งฉัน&quot; หรือ &quot;เลือกจุดบนแผนที่&quot; — จะมี<strong>วงสีฟ้า</strong>บนแผนที่ และหมุดในรัศมีจะชัด นอกรัศมีจะจาง</p>
+            <p class="small text-muted mb-0 mt-2">เลือกจากเมนูหรือ<strong>พิมพ์ระยะในช่องกำหนดเอง</strong> (มีผลแทนเมนูเมื่อกรอกตัวเลข 0.1–500 กม.) แล้วกด &quot;พิกัดตอนนี้&quot; หรือ &quot;เลือกจุดบนแผนที่&quot; — แผนที่จะ<strong>ซูมอัตโนมัติ</strong> มี<strong>วงสีฟ้า</strong> และหมุดในรัศมีจะชัด นอกรัศมีจะจาง</p>
           </div>
         </div>
       </div>
@@ -1163,6 +1168,48 @@
       return parseFloat(sel && sel.value) || 10;
     }
 
+    function zoomForRadiusKm_(km) {
+      if (km <= 3) return 14;
+      if (km <= 5) return 13;
+      if (km <= 10) return 12;
+      if (km <= 25) return 11;
+      if (km <= 50) return 10;
+      if (km <= 100) return 9;
+      return 8;
+    }
+
+    function focusMapOnRadius_(la, ln, km) {
+      if (!map) return;
+      try { map.invalidateSize(); } catch (e) {}
+      var zoom = zoomForRadiusKm_(km);
+      var pts = [[la, ln]];
+      if (markersLayer) {
+        markersLayer.eachLayer(function(m) {
+          if (!(m instanceof L.Marker)) return;
+          var ll = m.getLatLng();
+          if (haversineKm_(la, ln, ll.lat, ll.lng) <= km) pts.push([ll.lat, ll.lng]);
+        });
+      }
+      var runFocus = function() {
+        if (pts.length > 1) {
+          try {
+            map.fitBounds(pts, { padding: [56, 56], maxZoom: Math.min(zoom + 1, 15) });
+            return;
+          } catch (e) {}
+        }
+        map.flyTo([la, ln], zoom, { animate: true });
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runFocus);
+      else setTimeout(runFocus, 50);
+    }
+
+    function setMapGpsButtonsBusy_(busy) {
+      [document.getElementById('btnMapGpsNow'), document.getElementById('btnMapGpsRadius')].forEach(function(b) {
+        if (!b) return;
+        b.disabled = !!busy;
+      });
+    }
+
     function csvEscapeCell_(val) {
       if (val == null || val === '') return '';
       var s = String(val);
@@ -1341,32 +1388,35 @@
       }).addTo(map);
       if (typeof radiusCenterMarker.bringToFront === 'function') radiusCenterMarker.bringToFront();
       window.styleMarkersByRadius();
-      try {
-        map.fitBounds(radiusCircle.getBounds(), { padding: [40, 40], maxZoom: 11 });
-      } catch (e) {}
+      focusMapOnRadius_(la, ln, km);
     };
 
     window.showRadiusFromGps = function() {
       if (!map) {
-        Toast.fire({ icon: 'warning', title: 'เปิดหน้าแผนที่ก่อน' });
+        Toast.fire({ icon: 'warning', title: 'กำลังโหลดแผนที่...' });
         return;
       }
+      function finish_(la, ln) {
+        lastUserGps = { lat: la, lng: ln, at: Date.now() };
+        window.applyRadiusFilter(la, ln);
+        setMapGpsButtonsBusy_(false);
+      }
       if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        window.applyRadiusFilter(lastUserGps.lat, lastUserGps.lng);
+        finish_(lastUserGps.lat, lastUserGps.lng);
         return;
       }
       if (!navigator.geolocation) {
         Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
         return;
       }
+      setMapGpsButtonsBusy_(true);
+      updateMapGpsStatus('กำลังดึงพิกัด...', 'text-warning');
       navigator.geolocation.getCurrentPosition(
         function(pos) {
-          var la = pos.coords.latitude;
-          var ln = pos.coords.longitude;
-          lastUserGps = { lat: la, lng: ln, at: Date.now() };
-          window.applyRadiusFilter(la, ln);
+          finish_(pos.coords.latitude, pos.coords.longitude);
         },
         function() {
+          setMapGpsButtonsBusy_(false);
           Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
         },
         { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
@@ -1598,6 +1648,7 @@
     function startAppAfterAuth() {
       if (appStarted) return;
       appStarted = true;
+      startMapGpsTracking();
       const cached = readCachedLocations_();
       const usedCache = !!(cached && cached.length);
       if (usedCache) initApp(cached);
@@ -1718,7 +1769,7 @@
         let lat = pos.coords.latitude;
         let lng = pos.coords.longitude;
         lastUserGps = { lat: lat, lng: lng, at: Date.now() };
-        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6), 'text-success');
+        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6) + ' — กดเพื่อดูใกล้เคียง', 'text-success');
         if(!map) return;
         if(!myLocationMarker) {
           myLocationMarker = L.circleMarker([lat, lng], {
@@ -1806,7 +1857,10 @@
         map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
         L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
         markersLayer = L.layerGroup().addTo(map);
-        setTimeout(function() { startMapGpsTracking(); }, 1000);
+        setTimeout(function() {
+          try { map.invalidateSize(); } catch (e) {}
+          startMapGpsTracking();
+        }, 0);
         setTimeout(loadProvinceBordersLazy_, 5000);
       }
       
@@ -3105,7 +3159,12 @@
       if (activeTab) activeTab.classList.add('active');
       
       if(menuId === 'map' && map) {
-        setTimeout(() => map.invalidateSize(), 200);
+        setTimeout(function() {
+          try { map.invalidateSize(); } catch (e) {}
+          if (radiusFilter.active && radiusFilter.lat != null && radiusFilter.lng != null) {
+            focusMapOnRadius_(radiusFilter.lat, radiusFilter.lng, radiusFilter.km);
+          }
+        }, 200);
         startMapGpsTracking();
       }
 
