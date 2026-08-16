@@ -2007,6 +2007,60 @@
       }).getInspectionFormTemplate();
     }
 
+    const PDF_UPLOAD_MAX_BYTES_ = 50 * 1024 * 1024;
+    const PDF_UPLOAD_CHUNK_BYTES_ = 2 * 1024 * 1024;
+    const PDF_UPLOAD_CHUNK_THRESHOLD_ = 3 * 1024 * 1024;
+
+    function readFileSliceAsBase64_(blob) {
+      return new Promise(function(resolve, reject) {
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+          const dataUrl = String(ev.target.result || '');
+          const i = dataUrl.indexOf(',');
+          resolve(i >= 0 ? dataUrl.slice(i + 1) : dataUrl);
+        };
+        reader.onerror = function() { reject(new Error('อ่านไฟล์ไม่สำเร็จ')); };
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function gasRunPromise_(fnName, arg1, arg2) {
+      return new Promise(function(resolve, reject) {
+        google.script.run.withSuccessHandler(resolve).withFailureHandler(function(err) {
+          reject(err instanceof Error ? err : new Error((err && err.message) ? err.message : String(err || 'เกิดข้อผิดพลาด')));
+        })[fnName](arg1, arg2);
+      });
+    }
+
+    function uploadPdfInChunks_(file, token, meta, onProgress) {
+      const chunkBytes = PDF_UPLOAD_CHUNK_BYTES_;
+      const chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
+      const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      const beginMeta = Object.assign({}, meta, {
+        uploadId: uploadId,
+        chunkTotal: chunkTotal,
+        fileSize: file.size
+      });
+      return gasRunPromise_('beginPdfChunkUpload', beginMeta, token).then(function() {
+        let chain = Promise.resolve();
+        for (let i = 0; i < chunkTotal; i++) {
+          (function(idx) {
+            chain = chain.then(function() {
+              const start = idx * chunkBytes;
+              const slice = file.slice(start, Math.min(file.size, start + chunkBytes));
+              return readFileSliceAsBase64_(slice).then(function(chunkData) {
+                if (onProgress) onProgress(idx + 1, chunkTotal);
+                return gasRunPromise_('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
+              });
+            });
+          })(i);
+        }
+        return chain.then(function() {
+          return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
+        });
+      });
+    }
+
     function openInspectionFormTemplateUpload() {
       if (!canEditAll()) return;
       let auth;
@@ -2053,31 +2107,40 @@
       if (!file || !canEditAll()) return;
       const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
       if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
+      if (file.size > PDF_UPLOAD_MAX_BYTES_) {
+        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB' });
+        return;
+      }
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
         Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
         return;
       }
       Swal.fire({ title: 'กำลังอัปโหลดแบบฟอร์ม...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const payload = {
-          fileName: file.name,
-          fileBase64: String(e.target.result).split(',')[1],
-          mimeType: file.type || 'application/pdf'
-        };
-        google.script.run.withSuccessHandler(function(res) {
-          Swal.close();
-          inspectionFormTemplateMeta = res || { exists: true };
-          renderInspectionFormTemplateBanner();
-          Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
-        }).withFailureHandler(function(err) {
-          Swal.close();
-          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
-        }).uploadInspectionFormTemplate(payload, auth);
+      const onDone = function(res) {
+        Swal.close();
+        inspectionFormTemplateMeta = res || { exists: true };
+        renderInspectionFormTemplateBanner();
+        Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
       };
-      reader.onerror = function() { Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' }); };
-      reader.readAsDataURL(file);
+      const onFail = function(err) {
+        Swal.close();
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+      };
+      const chunkMeta = { kind: 'inspectionForm', fileName: file.name };
+      if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
+        uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
+          Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+        }).then(onDone).catch(onFail);
+        return;
+      }
+      readFileSliceAsBase64_(file).then(function(fileBase64) {
+        return gasRunPromise_('uploadInspectionFormTemplate', {
+          fileName: file.name,
+          fileBase64: fileBase64,
+          mimeType: file.type || 'application/pdf'
+        }, auth);
+      }).then(onDone).catch(onFail);
     }
 
     function deleteInspectionFormTemplateConfirm() {
@@ -4741,36 +4804,48 @@
       if (!file) { inspectionUiStash_ = null; return; }
       const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
       if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
+      if (file.size > PDF_UPLOAD_MAX_BYTES_) {
+        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB' });
+        return;
+      }
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
         Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
         return;
       }
       Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const payload = {
-          inspectionId: plan.id,
-          folderName: buildInspectionFileFolderName_(plan),
-          place: plan.place || '',
-          region: plan.region || '',
-          fileName: file.name,
-          fileBase64: String(e.target.result).split(',')[1],
-          mimeType: file.type || 'application/pdf'
-        };
-        google.script.run.withSuccessHandler(function(res) {
-          Swal.close();
-          applyInspectionUploadSuccess_(plan.id, res);
-          renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
-          Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
-        }).withFailureHandler(function(err) {
-          Swal.close();
-          inspectionUiStash_ = null;
-          if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
-        }).saveInspectionFileComment(payload, auth);
+      const onDone = function(res) {
+        Swal.close();
+        applyInspectionUploadSuccess_(plan.id, res);
+        renderInspectionFileCommentListInModal_(inspectionData.find(function(x) { return String(x.id) === String(plan.id); }) || plan);
+        Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
       };
-      reader.onerror = function() { Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' }); };
-      reader.readAsDataURL(file);
+      const onFail = function(err) {
+        Swal.close();
+        inspectionUiStash_ = null;
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
+      };
+      const chunkMeta = {
+        kind: 'inspection',
+        inspectionId: plan.id,
+        folderName: buildInspectionFileFolderName_(plan),
+        place: plan.place || '',
+        region: plan.region || '',
+        fileName: file.name
+      };
+      if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
+        uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
+          Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+        }).then(onDone).catch(onFail);
+        return;
+      }
+      readFileSliceAsBase64_(file).then(function(fileBase64) {
+        const payload = Object.assign({}, chunkMeta, {
+          fileBase64: fileBase64,
+          mimeType: file.type || 'application/pdf'
+        });
+        return gasRunPromise_('saveInspectionFileComment', payload, auth);
+      }).then(onDone).catch(onFail);
     }
 
     function renderInspectionFileCommentListInModal_(p) {

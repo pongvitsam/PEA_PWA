@@ -62,6 +62,9 @@
       var displayName = document.getElementById('displayName');
       var uploadSucceeded = false;
       var selectedFile = null;
+      var PDF_MAX = 50 * 1024 * 1024;
+      var PDF_CHUNK = 2 * 1024 * 1024;
+      var PDF_CHUNK_THRESHOLD = 3 * 1024 * 1024;
       if (isInspectionForm) {
         document.querySelector('h1').textContent = 'อัปโหลดแบบฟอร์มตรวจรับ';
       }
@@ -168,9 +171,56 @@
         displayName.select();
       });
 
+      function readSliceAsBase64(blob) {
+        return new Promise(function(resolve, reject) {
+          var reader = new FileReader();
+          reader.onload = function(ev) {
+            var dataUrl = String(ev.target.result || '');
+            var i = dataUrl.indexOf(',');
+            resolve(i >= 0 ? dataUrl.slice(i + 1) : dataUrl);
+          };
+          reader.onerror = function() { reject(new Error('อ่านไฟล์ไม่สำเร็จ')); };
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      function gasRun(fnName, arg1, arg2) {
+        return new Promise(function(resolve, reject) {
+          google.script.run.withSuccessHandler(resolve).withFailureHandler(function(err) {
+            reject(new Error((err && err.message) ? err.message : String(err || 'เกิดข้อผิดพลาด')));
+          })[fnName](arg1, arg2);
+        });
+      }
+
+      function uploadInChunks(file, meta) {
+        var chunkBytes = PDF_CHUNK;
+        var chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
+        var uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, chunkTotal: chunkTotal, fileSize: file.size });
+        return gasRun('beginPdfChunkUpload', beginMeta, token).then(function() {
+          var chain = Promise.resolve();
+          for (var i = 0; i < chunkTotal; i++) {
+            (function(idx) {
+              chain = chain.then(function() {
+                var start = idx * chunkBytes;
+                var slice = file.slice(start, Math.min(file.size, start + chunkBytes));
+                return readSliceAsBase64(slice).then(function(chunkData) {
+                  setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + (idx + 1) + '/' + chunkTotal, '');
+                  return gasRun('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
+                });
+              });
+            })(i);
+          }
+          return chain.then(function() {
+            return gasRun('finalizePdfChunkUpload', uploadId, token);
+          });
+        });
+      }
+
       function upload() {
         var file = selectedFile || (fileInput.files && fileInput.files[0]);
         if (!file) { setStatus('กรุณาเลือกไฟล์ PDF ก่อน', 'err'); return; }
+        if (file.size > PDF_MAX) { setStatus('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 50MB', 'err'); return; }
         var name = (displayName.value || '').trim();
         if (!name) { setStatus('กรุณาระบุชื่อไฟล์ที่แสดง', 'err'); displayName.focus(); return; }
 
@@ -179,45 +229,53 @@
         displayName.disabled = true;
         setStatus('<span class="spin"></span>กำลังอัปโหลดไป Drive...', '');
 
-        var reader = new FileReader();
-        reader.onload = function (e) {
-          var formData = {
-            siteKey: siteKey,
-            folderName: folderName,
-            fileName: name,
-            fileBase64: String(e.target.result).split(',')[1],
-            mimeType: file.type || 'application/pdf',
-            originalName: file.name
-          };
-          if (isInspection) {
-            formData.inspectionId = inspectionId;
-            formData.place = folderName;
-          }
-          var saveFn = isInspectionForm ? 'uploadInspectionFormTemplate' : (isInspection ? 'saveInspectionFileComment' : 'saveSiteDoc');
-          google.script.run
-            .withSuccessHandler(function (res) {
-              notifyParent(true, { result: res });
-              setTimeout(function () { notifyParent(true, { result: res }); }, 200);
-              setTimeout(function () { notifyParent(true, { result: res }); }, 800);
-              showDoneUi(true);
-              setTimeout(closeSelf, 500);
-            })
-            .withFailureHandler(function (err) {
-              btn.disabled = false;
-              fileInput.disabled = false;
-              displayName.disabled = false;
-              var msg = (err && err.message) ? err.message : String(err);
-              notifyParent(false, { error: msg });
-              showDoneUi(false, msg);
-            })[saveFn](formData, token);
-        };
-        reader.onerror = function () {
+        var chunkKind = isInspectionForm ? 'inspectionForm' : (isInspection ? 'inspection' : 'site');
+        var chunkMeta = { kind: chunkKind, fileName: name };
+        if (isInspection) {
+          chunkMeta.inspectionId = inspectionId;
+          chunkMeta.folderName = folderName;
+          chunkMeta.place = folderName;
+        } else if (!isInspectionForm) {
+          chunkMeta.siteKey = siteKey;
+          chunkMeta.folderName = folderName;
+        }
+
+        var saveFn = isInspectionForm ? 'uploadInspectionFormTemplate' : (isInspection ? 'saveInspectionFileComment' : 'saveSiteDoc');
+        var uploadPromise;
+        if (file.size > PDF_CHUNK_THRESHOLD) {
+          uploadPromise = uploadInChunks(file, chunkMeta);
+        } else {
+          uploadPromise = readSliceAsBase64(file).then(function(fileBase64) {
+            var formData = {
+              siteKey: siteKey,
+              folderName: folderName,
+              fileName: name,
+              fileBase64: fileBase64,
+              mimeType: file.type || 'application/pdf',
+              originalName: file.name
+            };
+            if (isInspection) {
+              formData.inspectionId = inspectionId;
+              formData.place = folderName;
+            }
+            return gasRun(saveFn, formData, token);
+          });
+        }
+
+        uploadPromise.then(function(res) {
+          notifyParent(true, { result: res });
+          setTimeout(function() { notifyParent(true, { result: res }); }, 200);
+          setTimeout(function() { notifyParent(true, { result: res }); }, 800);
+          showDoneUi(true);
+          setTimeout(closeSelf, 500);
+        }).catch(function(err) {
           btn.disabled = false;
           fileInput.disabled = false;
           displayName.disabled = false;
-          setStatus('อ่านไฟล์ไม่สำเร็จ', 'err');
-        };
-        reader.readAsDataURL(file);
+          var msg = (err && err.message) ? err.message : String(err);
+          notifyParent(false, { error: msg });
+          showDoneUi(false, msg);
+        });
       }
 
       btn.addEventListener('click', upload);
