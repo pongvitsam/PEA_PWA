@@ -63,10 +63,8 @@
       var uploadSucceeded = false;
       var selectedFile = null;
       var PDF_MAX = 100 * 1024 * 1024;
-      var PDF_CHUNK = 8 * 1024 * 1024;
+      var PDF_CHUNK = 10 * 1024 * 1024;
       var PDF_CHUNK_THRESHOLD = 3 * 1024 * 1024;
-      var PDF_PARALLEL = 4;
-      var PDF_TIMEOUT_MS = 60000;
       if (isInspectionForm) {
         document.querySelector('h1').textContent = 'อัปโหลดแบบฟอร์มตรวจรับ';
       }
@@ -194,48 +192,33 @@
         });
       }
 
-      function assertUploadNotTimedOut(startedAt) {
-        if (Date.now() - startedAt > PDF_TIMEOUT_MS) {
-          throw new Error('อัปโหลดใช้เวลาเกิน 1 นาที — ลองไฟล์เล็กลงหรือเชื่อมต่อที่เร็วขึ้น');
-        }
+      function formatUploadProgress(part, total) {
+        var pct = total > 0 ? Math.min(100, Math.round((part / total) * 100)) : 0;
+        return pct + '% (' + part + '/' + total + ')';
       }
 
       function uploadInChunks(file, meta) {
         var chunkBytes = PDF_CHUNK;
         var chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
         var uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-        var startedAt = Date.now();
         var beginMeta = Object.assign({}, meta, { uploadId: uploadId, chunkTotal: chunkTotal, fileSize: file.size });
         var completed = 0;
         function uploadOneChunk(idx) {
-          assertUploadNotTimedOut(startedAt);
           var start = idx * chunkBytes;
           var slice = file.slice(start, Math.min(file.size, start + chunkBytes));
           return readSliceAsBase64(slice).then(function(chunkData) {
             return gasRun('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
           }).then(function() {
             completed++;
-            setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + completed + '/' + chunkTotal, '');
+            setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(completed, chunkTotal), '');
           });
         }
         return gasRun('beginPdfChunkUpload', beginMeta, token).then(function() {
-          var chain = Promise.resolve();
-          for (var batchStart = 0; batchStart < chunkTotal; batchStart += PDF_PARALLEL) {
-            (function(startIdx) {
-              chain = chain.then(function() {
-                assertUploadNotTimedOut(startedAt);
-                var batch = [];
-                for (var i = startIdx; i < Math.min(startIdx + PDF_PARALLEL, chunkTotal); i++) {
-                  batch.push(uploadOneChunk(i));
-                }
-                return Promise.all(batch);
-              });
-            })(batchStart);
-          }
-          return chain.then(function() {
-            assertUploadNotTimedOut(startedAt);
-            return gasRun('finalizePdfChunkUpload', uploadId, token);
-          });
+          var tasks = [];
+          for (var i = 0; i < chunkTotal; i++) tasks.push(uploadOneChunk(i));
+          return Promise.all(tasks);
+        }).then(function() {
+          return gasRun('finalizePdfChunkUpload', uploadId, token);
         });
       }
 

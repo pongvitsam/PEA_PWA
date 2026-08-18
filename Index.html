@@ -2062,10 +2062,8 @@
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
-    const PDF_UPLOAD_CHUNK_BYTES_ = 8 * 1024 * 1024;
+    const PDF_UPLOAD_CHUNK_BYTES_ = 10 * 1024 * 1024;
     const PDF_UPLOAD_CHUNK_THRESHOLD_ = 3 * 1024 * 1024;
-    const PDF_UPLOAD_PARALLEL_ = 4;
-    const PDF_UPLOAD_TIMEOUT_MS_ = 60000;
 
     function readFileSliceAsBase64_(blob) {
       return new Promise(function(resolve, reject) {
@@ -2088,17 +2086,15 @@
       });
     }
 
-    function assertUploadNotTimedOut_(startedAt) {
-      if (Date.now() - startedAt > PDF_UPLOAD_TIMEOUT_MS_) {
-        throw new Error('อัปโหลดใช้เวลาเกิน 1 นาที — ลองไฟล์เล็กลงหรือเชื่อมต่อที่เร็วขึ้น');
-      }
+    function formatUploadProgress_(part, total) {
+      const pct = total > 0 ? Math.min(100, Math.round((part / total) * 100)) : 0;
+      return pct + '% (' + part + '/' + total + ')';
     }
 
     function uploadPdfInChunks_(file, token, meta, onProgress) {
       const chunkBytes = PDF_UPLOAD_CHUNK_BYTES_;
       const chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
       const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-      const startedAt = Date.now();
       const beginMeta = Object.assign({}, meta, {
         uploadId: uploadId,
         chunkTotal: chunkTotal,
@@ -2106,7 +2102,6 @@
       });
       let completed = 0;
       function uploadOneChunk_(idx) {
-        assertUploadNotTimedOut_(startedAt);
         const start = idx * chunkBytes;
         const slice = file.slice(start, Math.min(file.size, start + chunkBytes));
         return readFileSliceAsBase64_(slice).then(function(chunkData) {
@@ -2117,23 +2112,11 @@
         });
       }
       return gasRunPromise_('beginPdfChunkUpload', beginMeta, token).then(function() {
-        let chain = Promise.resolve();
-        for (let batchStart = 0; batchStart < chunkTotal; batchStart += PDF_UPLOAD_PARALLEL_) {
-          (function(startIdx) {
-            chain = chain.then(function() {
-              assertUploadNotTimedOut_(startedAt);
-              const batch = [];
-              for (let i = startIdx; i < Math.min(startIdx + PDF_UPLOAD_PARALLEL_, chunkTotal); i++) {
-                batch.push(uploadOneChunk_(i));
-              }
-              return Promise.all(batch);
-            });
-          })(batchStart);
-        }
-        return chain.then(function() {
-          assertUploadNotTimedOut_(startedAt);
-          return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
-        });
+        const tasks = [];
+        for (let i = 0; i < chunkTotal; i++) tasks.push(uploadOneChunk_(i));
+        return Promise.all(tasks);
+      }).then(function() {
+        return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
       });
     }
 
@@ -2206,7 +2189,7 @@
       const chunkMeta = { kind: 'inspectionForm', fileName: file.name };
       if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
         uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
-          Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+          Swal.update({ title: 'กำลังอัปโหลด... ' + formatUploadProgress_(part, total) });
         }).then(onDone).catch(onFail);
         return;
       }
@@ -4916,7 +4899,7 @@
       };
       if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
         uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
-          Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+          Swal.update({ title: 'กำลังอัปโหลด... ' + formatUploadProgress_(part, total) });
         }).then(onDone).catch(onFail);
         return;
       }
@@ -5788,7 +5771,7 @@ function submitSiteDoc() {
   };
   if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
     uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
-      Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+      Swal.update({ title: 'กำลังอัปโหลด... ' + formatUploadProgress_(part, total) });
     }).then(onSuccess).catch(onFail);
     return;
   }
