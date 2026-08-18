@@ -817,7 +817,7 @@
         </div>
 
         <div class="mb-3" id="docFileSection" style="display: none;">
-          <label class="fw-bold small text-muted">อัปโหลดไฟล์ (PDF, Image, etc. ขนาดไม่เกิน 50MB)</label>
+          <label class="fw-bold small text-muted">อัปโหลดไฟล์ (PDF, Image, etc. ขนาดไม่เกิน 100MB)</label>
           <input class="form-control" type="file" id="docFile">
         </div>
 
@@ -2061,9 +2061,11 @@
       }).getInspectionFormTemplate();
     }
 
-    const PDF_UPLOAD_MAX_BYTES_ = 50 * 1024 * 1024;
-    const PDF_UPLOAD_CHUNK_BYTES_ = 2 * 1024 * 1024;
+    const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
+    const PDF_UPLOAD_CHUNK_BYTES_ = 8 * 1024 * 1024;
     const PDF_UPLOAD_CHUNK_THRESHOLD_ = 3 * 1024 * 1024;
+    const PDF_UPLOAD_PARALLEL_ = 4;
+    const PDF_UPLOAD_TIMEOUT_MS_ = 60000;
 
     function readFileSliceAsBase64_(blob) {
       return new Promise(function(resolve, reject) {
@@ -2086,30 +2088,50 @@
       });
     }
 
+    function assertUploadNotTimedOut_(startedAt) {
+      if (Date.now() - startedAt > PDF_UPLOAD_TIMEOUT_MS_) {
+        throw new Error('อัปโหลดใช้เวลาเกิน 1 นาที — ลองไฟล์เล็กลงหรือเชื่อมต่อที่เร็วขึ้น');
+      }
+    }
+
     function uploadPdfInChunks_(file, token, meta, onProgress) {
       const chunkBytes = PDF_UPLOAD_CHUNK_BYTES_;
       const chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
       const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      const startedAt = Date.now();
       const beginMeta = Object.assign({}, meta, {
         uploadId: uploadId,
         chunkTotal: chunkTotal,
         fileSize: file.size
       });
+      let completed = 0;
+      function uploadOneChunk_(idx) {
+        assertUploadNotTimedOut_(startedAt);
+        const start = idx * chunkBytes;
+        const slice = file.slice(start, Math.min(file.size, start + chunkBytes));
+        return readFileSliceAsBase64_(slice).then(function(chunkData) {
+          return gasRunPromise_('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
+        }).then(function() {
+          completed++;
+          if (onProgress) onProgress(completed, chunkTotal);
+        });
+      }
       return gasRunPromise_('beginPdfChunkUpload', beginMeta, token).then(function() {
         let chain = Promise.resolve();
-        for (let i = 0; i < chunkTotal; i++) {
-          (function(idx) {
+        for (let batchStart = 0; batchStart < chunkTotal; batchStart += PDF_UPLOAD_PARALLEL_) {
+          (function(startIdx) {
             chain = chain.then(function() {
-              const start = idx * chunkBytes;
-              const slice = file.slice(start, Math.min(file.size, start + chunkBytes));
-              return readFileSliceAsBase64_(slice).then(function(chunkData) {
-                if (onProgress) onProgress(idx + 1, chunkTotal);
-                return gasRunPromise_('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
-              });
+              assertUploadNotTimedOut_(startedAt);
+              const batch = [];
+              for (let i = startIdx; i < Math.min(startIdx + PDF_UPLOAD_PARALLEL_, chunkTotal); i++) {
+                batch.push(uploadOneChunk_(i));
+              }
+              return Promise.all(batch);
             });
-          })(i);
+          })(batchStart);
         }
         return chain.then(function() {
+          assertUploadNotTimedOut_(startedAt);
           return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
         });
       });
@@ -2162,7 +2184,7 @@
       const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
       if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
       if (file.size > PDF_UPLOAD_MAX_BYTES_) {
-        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB' });
+        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 100MB' });
         return;
       }
       let auth;
@@ -4864,7 +4886,7 @@
       const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
       if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะ PDF' }); return; }
       if (file.size > PDF_UPLOAD_MAX_BYTES_) {
-        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB' });
+        Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 100MB' });
         return;
       }
       let auth;
@@ -5736,41 +5758,50 @@ function submitSiteDoc() {
   const file = fileInput.files[0];
   const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
   if (!isPdf) { Swal.fire({ icon: 'error', title: 'อัปโหลดได้เฉพาะไฟล์ PDF' }); return; }
+  if (file.size > PDF_UPLOAD_MAX_BYTES_) {
+    Swal.fire({ icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 100MB' });
+    return;
+  }
 
   const active2 = document.activeElement;
   if (active2 && active2.blur) active2.blur();
   Swal.fire({ title: 'กำลังอัปโหลด...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
 
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const formData = {
+  btn.disabled = true;
+  const chunkMeta = {
+    kind: 'site',
+    siteKey: siteKey,
+    folderName: folderName,
+    fileName: fileName
+  };
+  const onSuccess = function() {
+    btn.disabled = false;
+    try { siteDocModalObj.hide(); } catch (err) {}
+    Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
+    if (currentSiteDocIndex >= 0) refreshActiveLocationView(currentSiteDocIndex);
+  };
+  const onFail = function(err) {
+    btn.disabled = false;
+    if (!handleOutageAuthError(err)) {
+      Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
+    }
+  };
+  if (file.size > PDF_UPLOAD_CHUNK_THRESHOLD_) {
+    uploadPdfInChunks_(file, auth, chunkMeta, function(part, total) {
+      Swal.update({ title: 'กำลังอัปโหลด... ' + part + '/' + total });
+    }).then(onSuccess).catch(onFail);
+    return;
+  }
+  readFileSliceAsBase64_(file).then(function(fileBase64) {
+    return gasRunPromise_('saveSiteDoc', {
       siteKey: siteKey,
       folderName: folderName,
       fileName: fileName,
-      fileBase64: e.target.result.split(',')[1],
+      fileBase64: fileBase64,
       mimeType: file.type || 'application/pdf',
       originalName: file.name
-    };
-    btn.disabled = true;
-    google.script.run
-      .withSuccessHandler(() => {
-        btn.disabled = false;
-        try { siteDocModalObj.hide(); } catch (err) {}
-        Swal.fire({ icon: 'success', title: 'อัปโหลดสำเร็จ', timer: 1500, showConfirmButton: false });
-        if (currentSiteDocIndex >= 0) refreshActiveLocationView(currentSiteDocIndex);
-      })
-      .withFailureHandler(err => {
-        btn.disabled = false;
-        if (!handleOutageAuthError(err)) {
-          Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: err.message });
-        }
-      })
-      .saveSiteDoc(formData, auth);
-  };
-  reader.onerror = function() {
-    Swal.fire({ icon: 'error', title: 'อ่านไฟล์ไม่สำเร็จ' });
-  };
-  reader.readAsDataURL(file);
+    }, auth);
+  }).then(onSuccess).catch(onFail);
 }
 
 function waitSiteUploadPopup(popup) {
@@ -5989,7 +6020,7 @@ function submitDoc() {
     if (fileInput.files.length === 0) { Swal.fire({icon: 'warning', title: 'กรุณาเลือกไฟล์'}); return; }
     
     let file = fileInput.files[0];
-    if(file.size > 50 * 1024 * 1024) { Swal.fire({icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 50MB หากไฟล์ใหญ่ให้ใช้วิธีแนบลิงก์ Google Drive แทน'}); return; }
+    if(file.size > PDF_UPLOAD_MAX_BYTES_) { Swal.fire({icon: 'error', title: 'ไฟล์ใหญ่เกินไป', text: 'รองรับไม่เกิน 100MB หากไฟล์ใหญ่ให้ใช้วิธีแนบลิงก์ Google Drive แทน'}); return; }
 
     Swal.fire({ title: 'กำลังอัปโหลดไฟล์...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); }});
     

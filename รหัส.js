@@ -2707,7 +2707,7 @@ function deleteInspectionFormTemplate(sessionToken) {
 }
 
 const PDF_UPLOAD_CACHE_PREFIX_ = 'pdu:';
-const PDF_UPLOAD_MAX_BYTES_ = 50 * 1024 * 1024;
+const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
 
 function assertPdfChunkUploadAuth_(meta, sessionToken) {
   const kind = (meta && meta.kind || '').toString();
@@ -2747,7 +2747,7 @@ function assemblePdfBytesFromUpload_(uploadId, chunkTotal) {
     parts.push(bytes);
     totalLen += bytes.length;
   }
-  if (totalLen > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 50MB');
+  if (totalLen > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
   const out = new Uint8Array(totalLen);
   let off = 0;
   parts.forEach(function(bytes) {
@@ -2769,7 +2769,7 @@ function beginPdfChunkUpload(meta, sessionToken) {
   if (!uploadId) throw new Error('ไม่พบรหัสอัปโหลด');
   if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
   if (chunkTotal < 1) throw new Error('จำนวนชิ้นไฟล์ไม่ถูกต้อง');
-  if (fileSize > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 50MB');
+  if (fileSize > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
 
   const info = { kind: kind, uploadId: uploadId, fileName: fileName, chunkTotal: chunkTotal, received: 0 };
 
@@ -3012,6 +3012,9 @@ function saveSiteDoc(formObj, sessionToken) {
   if (!folderName) throw new Error('กรุณาระบุชื่อโฟลเดอร์');
   if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
   if (!formObj.fileBase64) throw new Error('กรุณาเลือกไฟล์ PDF');
+  if (formObj.fileBase64.length * 0.75 > PDF_UPLOAD_MAX_BYTES_) {
+    throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
+  }
 
   const mime = (formObj.mimeType || '').toString().toLowerCase();
   if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf') {
@@ -3221,6 +3224,9 @@ function saveProjectDoc(formObj, sessionToken) {
   let finalUrl = formObj.url || '';
 
   if (formObj.type === 'FILE' && formObj.fileBase64) {
+    if (formObj.fileBase64.length * 0.75 > PDF_UPLOAD_MAX_BYTES_) {
+      throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
+    }
     try {
       const folder = DriveApp.getFolderById(FOLDER_ID);
       const decodedFile = Utilities.base64Decode(formObj.fileBase64);
