@@ -2709,6 +2709,159 @@ function deleteInspectionFormTemplate(sessionToken) {
 const PDF_UPLOAD_CACHE_PREFIX_ = 'pdu:';
 const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
 
+function updatePdfChunkUploadMeta_(uploadId, updater) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const meta = getPdfChunkUploadMeta_(uploadId);
+    updater(meta);
+    CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(meta), 3600);
+    return meta;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resolvePdfUploadDriveName_(info) {
+  if (info.kind === 'inspectionForm') return INSPECTION_FORM_TEMPLATE_PREFIX + '.pdf';
+  const fileName = (info.fileName || '').toString();
+  return fileName.toLowerCase().endsWith('.pdf') ? fileName : (fileName + '.pdf');
+}
+
+function resolvePdfUploadTargetFolderId_(info) {
+  if (info.kind === 'inspectionForm') return INSPECTION_FILE_FOLDER_ID;
+  if (info.kind === 'inspection') {
+    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    return getOrCreateDriveSubFolder_(parent, info.folderName).getId();
+  }
+  if (info.kind === 'site') {
+    const parent = DriveApp.getFolderById(FOLDER_ID);
+    return getOrCreateDriveSubFolder_(parent, info.folderName).getId();
+  }
+  throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
+}
+
+function startDriveResumableUpload_(parentFolderId, driveName, fileSize) {
+  const token = ScriptApp.getOAuthToken();
+  const resp = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+    method: 'post',
+    contentType: 'application/json; charset=UTF-8',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'X-Upload-Content-Type': 'application/pdf',
+      'X-Upload-Content-Length': String(fileSize)
+    },
+    payload: JSON.stringify({
+      name: driveName,
+      mimeType: 'application/pdf',
+      parents: [parentFolderId]
+    }),
+    muteHttpExceptions: true
+  });
+  const code = resp.getResponseCode();
+  if (code !== 200) {
+    throw new Error('เริ่มอัปโหลด PDF ไม่สำเร็จ (' + code + ')');
+  }
+  const headers = resp.getAllHeaders();
+  const uploadUri = headers['Location'] || headers['location'];
+  if (!uploadUri) throw new Error('ไม่ได้รับ upload URI จาก Drive');
+  return uploadUri;
+}
+
+function putDriveResumableChunk_(uploadUri, bytes, start, totalSize) {
+  const token = ScriptApp.getOAuthToken();
+  const len = bytes.length;
+  const end = start + len - 1;
+  const resp = UrlFetchApp.fetch(uploadUri, {
+    method: 'put',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Length': String(len),
+      'Content-Range': 'bytes ' + start + '-' + end + '/' + totalSize
+    },
+    payload: bytes,
+    muteHttpExceptions: true
+  });
+  const code = resp.getResponseCode();
+  let fileId = '';
+  if (code === 200 || code === 201) {
+    try {
+      const json = JSON.parse(resp.getContentText());
+      fileId = json.id || '';
+    } catch (ignore) {}
+  }
+  if (code !== 200 && code !== 201 && code !== 308) {
+    throw new Error('อัปโหลดชิ้น PDF ไม่สำเร็จ (' + code + ')');
+  }
+  return { code: code, fileId: fileId };
+}
+
+function ensureDriveResumableComplete_(uploadUri, totalSize, receivedCount, chunkTotal) {
+  if (receivedCount < chunkTotal) throw new Error('ชิ้นไฟล์ไม่ครบ (' + receivedCount + '/' + chunkTotal + ')');
+  const token = ScriptApp.getOAuthToken();
+  const resp = UrlFetchApp.fetch(uploadUri, {
+    method: 'put',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Length': '0',
+      'Content-Range': 'bytes */' + totalSize
+    },
+    muteHttpExceptions: true
+  });
+  const code = resp.getResponseCode();
+  if (code === 200 || code === 201) {
+    try { return JSON.parse(resp.getContentText()).id || ''; } catch (ignore) {}
+  }
+  if (code === 308) throw new Error('อัปโหลด PDF ยังไม่ครบ — ลองใหม่');
+  throw new Error('ตรวจสอบไฟล์ PDF ไม่สำเร็จ (' + code + ')');
+}
+
+function finishResumablePdfUpload_(meta) {
+  const file = DriveApp.getFileById(meta.driveFileId);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (ignore) {}
+  const finalUrl = file.getUrl();
+
+  if (meta.kind === 'inspection') {
+    const saved = appendInspectionFileComment_(meta.inspectionId, meta.fileName, finalUrl);
+    logAction('อัปโหลด File comment (resumable): ' + meta.folderName + ' / ' + meta.fileName);
+    return {
+      success: true,
+      message: 'อัปโหลดไฟล์สำเร็จ',
+      url: finalUrl,
+      fileName: meta.fileName,
+      folderName: meta.folderName,
+      fileComment: saved.fileComment,
+      visited: saved.visited
+    };
+  }
+
+  if (meta.kind === 'inspectionForm') {
+    setInspectionFormTemplateProps_(meta.driveFileId, meta.fileName);
+    try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
+    logAction('อัปโหลดแบบฟอร์มตรวจ (resumable): ' + meta.fileName);
+    return {
+      success: true,
+      exists: true,
+      url: finalUrl,
+      fileName: meta.fileName,
+      updatedAt: getInspectionFormTemplateProps_().updatedAt
+    };
+  }
+
+  if (meta.kind === 'site') {
+    const ss = getSpreadsheet_();
+    const sheet = getOrCreateSheet_(ss, SITE_DOCS_SHEET, ['DocID', 'SiteKey', 'FolderName', 'FileName', 'URL', 'UploadedBy', 'Timestamp']);
+    const newId = 'SDOC_' + new Date().getTime();
+    sheet.appendRow([
+      newId, meta.siteKey, meta.folderName, meta.fileName, finalUrl,
+      meta.uploadedBy || '', new Date()
+    ]);
+    return { success: true, message: 'อัปโหลดไฟล์สำเร็จ', id: newId, url: finalUrl };
+  }
+
+  throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
+}
+
 function assertPdfChunkUploadAuth_(meta, sessionToken) {
   const kind = (meta && meta.kind || '').toString();
   if (kind === 'inspection') assertInspectionFromSession_(sessionToken);
@@ -2725,25 +2878,53 @@ function getPdfChunkUploadMeta_(uploadId) {
   return JSON.parse(metaRaw);
 }
 
-function savePdfUploadChunkPart_(uploadId, chunkIndex, chunkData) {
+function savePdfUploadChunkPart_(uploadId, chunkIndex, chunkData, existingPartId) {
   const tmp = getUploadTempFolder_();
-  const partName = uploadId + '_' + ('00000' + chunkIndex).slice(-5) + '.part';
-  const existing = tmp.getFilesByName(partName);
-  while (existing.hasNext()) existing.next().setTrashed(true);
-  tmp.createFile(Utilities.newBlob(chunkData, 'text/plain', partName));
+  const partName = uploadId + '_' + ('00000' + chunkIndex).slice(-5) + '.bin';
+  if (existingPartId) {
+    try { DriveApp.getFileById(existingPartId).setTrashed(true); } catch (ignore) {}
+  } else {
+    const legacy = tmp.getFilesByName(partName);
+    while (legacy.hasNext()) legacy.next().setTrashed(true);
+    const legacyText = tmp.getFilesByName(uploadId + '_' + ('00000' + chunkIndex).slice(-5) + '.part');
+    while (legacyText.hasNext()) legacyText.next().setTrashed(true);
+  }
+  const bytes = Utilities.base64Decode(chunkData);
+  const file = tmp.createFile(Utilities.newBlob(bytes, 'application/octet-stream', partName));
+  return file.getId();
 }
 
-function assemblePdfBytesFromUpload_(uploadId, chunkTotal) {
-  const tmp = getUploadTempFolder_();
+function assemblePdfBytesFromUpload_(uploadId, chunkTotal, partIds) {
   let totalLen = 0;
   const parts = [];
+  partIds = partIds || {};
   for (let i = 0; i < chunkTotal; i++) {
-    const partName = uploadId + '_' + ('00000' + i).slice(-5) + '.part';
-    const files = tmp.getFilesByName(partName);
-    if (!files.hasNext()) throw new Error('ชิ้นไฟล์ไม่ครบ (ขาดชิ้นที่ ' + (i + 1) + ')');
-    const partFile = files.next();
-    const bytes = Utilities.base64Decode(partFile.getBlob().getDataAsString());
-    partFile.setTrashed(true);
+    let bytes = null;
+    const partId = partIds[String(i)] || partIds[i];
+    if (partId) {
+      try {
+        const partFile = DriveApp.getFileById(partId);
+        bytes = partFile.getBlob().getBytes();
+        partFile.setTrashed(true);
+      } catch (ignore) {}
+    }
+    if (!bytes) {
+      const tmp = getUploadTempFolder_();
+      const binName = uploadId + '_' + ('00000' + i).slice(-5) + '.bin';
+      const binFiles = tmp.getFilesByName(binName);
+      if (binFiles.hasNext()) {
+        const partFile = binFiles.next();
+        bytes = partFile.getBlob().getBytes();
+        partFile.setTrashed(true);
+      } else {
+        const partName = uploadId + '_' + ('00000' + i).slice(-5) + '.part';
+        const files = tmp.getFilesByName(partName);
+        if (!files.hasNext()) throw new Error('ชิ้นไฟล์ไม่ครบ (ขาดชิ้นที่ ' + (i + 1) + ')');
+        const partFile = files.next();
+        bytes = Utilities.base64Decode(partFile.getBlob().getDataAsString());
+        partFile.setTrashed(true);
+      }
+    }
     parts.push(bytes);
     totalLen += bytes.length;
   }
@@ -2771,7 +2952,15 @@ function beginPdfChunkUpload(meta, sessionToken) {
   if (chunkTotal < 1) throw new Error('จำนวนชิ้นไฟล์ไม่ถูกต้อง');
   if (fileSize > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
 
-  const info = { kind: kind, uploadId: uploadId, fileName: fileName, chunkTotal: chunkTotal, received: 0 };
+  const info = {
+    kind: kind,
+    uploadId: uploadId,
+    fileName: fileName,
+    chunkTotal: chunkTotal,
+    fileSize: fileSize,
+    chunkBytes: parseInt(meta.chunkBytes, 10) || Math.ceil(fileSize / chunkTotal),
+    received: 0
+  };
 
   if (kind === 'inspection') {
     assertInspectionFromSession_(sessionToken);
@@ -2798,8 +2987,19 @@ function beginPdfChunkUpload(meta, sessionToken) {
     throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
   }
 
+  info.driveName = resolvePdfUploadDriveName_(info);
+  try {
+    if (kind === 'inspectionForm') removeInspectionFormTemplateFile_();
+    const parentFolderId = resolvePdfUploadTargetFolderId_(info);
+    info.uploadUri = startDriveResumableUpload_(parentFolderId, info.driveName, fileSize);
+    info.uploadMode = 'resumable';
+  } catch (e) {
+    info.uploadMode = 'legacy';
+    logAction('PDF resumable fallback: ' + ((e && e.message) ? e.message : String(e)));
+  }
+
   CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(info), 3600);
-  return { success: true, uploadId: uploadId, chunkTotal: chunkTotal };
+  return { success: true, uploadId: uploadId, chunkTotal: chunkTotal, uploadMode: info.uploadMode };
 }
 
 function savePdfUploadChunk(formObj, sessionToken) {
@@ -2815,10 +3015,30 @@ function savePdfUploadChunk(formObj, sessionToken) {
   assertPdfChunkUploadAuth_(meta, sessionToken);
   if (chunkIndex >= meta.chunkTotal) throw new Error('ลำดับชิ้นเกินจำนวน');
 
-  savePdfUploadChunkPart_(uploadId, chunkIndex, chunkData);
-  meta.received = (parseInt(meta.received, 10) || 0) + 1;
-  CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(meta), 3600);
-  return { success: true, chunkIndex: chunkIndex, received: meta.received, chunkTotal: meta.chunkTotal };
+  if (meta.uploadMode === 'resumable' && meta.uploadUri) {
+    const chunkBytes = parseInt(meta.chunkBytes, 10) || 0;
+    if (!chunkBytes) throw new Error('ขนาดชิ้นไม่ถูกต้อง');
+    const start = chunkIndex * chunkBytes;
+    const bytes = Utilities.base64Decode(chunkData);
+    const result = putDriveResumableChunk_(meta.uploadUri, bytes, start, meta.fileSize);
+    const updated = updatePdfChunkUploadMeta_(uploadId, function(m) {
+      if (result.fileId) m.driveFileId = result.fileId;
+      if (!m.receivedChunks) m.receivedChunks = {};
+      m.receivedChunks[String(chunkIndex)] = true;
+      m.received = Object.keys(m.receivedChunks).length;
+    });
+    return { success: true, chunkIndex: chunkIndex, received: updated.received, chunkTotal: updated.chunkTotal };
+  }
+
+  updatePdfChunkUploadMeta_(uploadId, function(m) {
+    if (!m.partIds) m.partIds = {};
+    const prevId = m.partIds[String(chunkIndex)];
+    const partId = savePdfUploadChunkPart_(uploadId, chunkIndex, chunkData, prevId);
+    m.partIds[String(chunkIndex)] = partId;
+    m.received = (parseInt(m.received, 10) || 0) + 1;
+  });
+  const legacyMeta = getPdfChunkUploadMeta_(uploadId);
+  return { success: true, chunkIndex: chunkIndex, received: legacyMeta.received, chunkTotal: legacyMeta.chunkTotal };
 }
 
 function finalizePdfChunkUpload(uploadId, sessionToken) {
@@ -2826,7 +3046,16 @@ function finalizePdfChunkUpload(uploadId, sessionToken) {
   const meta = getPdfChunkUploadMeta_(id);
   assertPdfChunkUploadAuth_(meta, sessionToken);
 
-  const fileBytes = assemblePdfBytesFromUpload_(id, meta.chunkTotal);
+  if (meta.uploadMode === 'resumable') {
+    if (!meta.driveFileId) {
+      meta.driveFileId = ensureDriveResumableComplete_(meta.uploadUri, meta.fileSize, meta.received, meta.chunkTotal);
+    }
+    if (!meta.driveFileId) throw new Error('อัปโหลด PDF ไม่สำเร็จ — ไม่พบไฟล์บน Drive');
+    CacheService.getScriptCache().remove(PDF_UPLOAD_CACHE_PREFIX_ + id);
+    return finishResumablePdfUpload_(meta);
+  }
+
+  const fileBytes = assemblePdfBytesFromUpload_(id, meta.chunkTotal, meta.partIds);
   CacheService.getScriptCache().remove(PDF_UPLOAD_CACHE_PREFIX_ + id);
   const driveName = meta.fileName.toLowerCase().endsWith('.pdf') ? meta.fileName : (meta.fileName + '.pdf');
   const blob = Utilities.newBlob(fileBytes, 'application/pdf', driveName);

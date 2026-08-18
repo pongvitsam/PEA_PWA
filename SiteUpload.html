@@ -63,8 +63,9 @@
       var uploadSucceeded = false;
       var selectedFile = null;
       var PDF_MAX = 100 * 1024 * 1024;
-      var PDF_CHUNK = 10 * 1024 * 1024;
-      var PDF_CHUNK_THRESHOLD = 3 * 1024 * 1024;
+      var PDF_CHUNK = 25 * 1024 * 1024;
+      var PDF_CHUNK_THRESHOLD = 2 * 1024 * 1024;
+      var PDF_PARALLEL = 5;
       if (isInspectionForm) {
         document.querySelector('h1').textContent = 'อัปโหลดแบบฟอร์มตรวจรับ';
       }
@@ -175,12 +176,20 @@
         return new Promise(function(resolve, reject) {
           var reader = new FileReader();
           reader.onload = function(ev) {
-            var dataUrl = String(ev.target.result || '');
-            var i = dataUrl.indexOf(',');
-            resolve(i >= 0 ? dataUrl.slice(i + 1) : dataUrl);
+            try {
+              var bytes = new Uint8Array(ev.target.result);
+              var binary = '';
+              var step = 0x8000;
+              for (var i = 0; i < bytes.length; i += step) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+              }
+              resolve(btoa(binary));
+            } catch (e) {
+              reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+            }
           };
           reader.onerror = function() { reject(new Error('อ่านไฟล์ไม่สำเร็จ')); };
-          reader.readAsDataURL(blob);
+          reader.readAsArrayBuffer(blob);
         });
       }
 
@@ -192,8 +201,9 @@
         });
       }
 
-      function formatUploadProgress(part, total) {
-        var pct = total > 0 ? Math.min(100, Math.round((part / total) * 100)) : 0;
+      function formatUploadProgress(part, total, phase) {
+        if (phase === 'merge') return '100% — กำลังรวมไฟล์...';
+        var pct = total > 0 ? Math.min(99, Math.round((part / total) * 100)) : 0;
         return pct + '% (' + part + '/' + total + ')';
       }
 
@@ -201,7 +211,7 @@
         var chunkBytes = PDF_CHUNK;
         var chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
         var uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, chunkTotal: chunkTotal, fileSize: file.size });
+        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, chunkTotal: chunkTotal, fileSize: file.size, chunkBytes: chunkBytes });
         var completed = 0;
         function uploadOneChunk(idx) {
           var start = idx * chunkBytes;
@@ -214,10 +224,18 @@
           });
         }
         return gasRun('beginPdfChunkUpload', beginMeta, token).then(function() {
-          var tasks = [];
-          for (var i = 0; i < chunkTotal; i++) tasks.push(uploadOneChunk(i));
-          return Promise.all(tasks);
+          var nextIdx = 0;
+          function worker() {
+            var idx = nextIdx++;
+            if (idx >= chunkTotal) return Promise.resolve();
+            return uploadOneChunk(idx).then(worker);
+          }
+          var workers = [];
+          var n = Math.min(PDF_PARALLEL, chunkTotal);
+          for (var w = 0; w < n; w++) workers.push(worker());
+          return Promise.all(workers);
         }).then(function() {
+          setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(chunkTotal, chunkTotal, 'merge'), '');
           return gasRun('finalizePdfChunkUpload', uploadId, token);
         });
       }
