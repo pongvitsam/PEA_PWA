@@ -17,6 +17,8 @@ const USERS_SHEET = 'Users';
 const SESSIONS_SHEET = 'Sessions';
 const FOLDER_ID = '1_SRxF0_obGuzFCo9NDcA3QPiZDn7or-P';
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+/** จดจำอุปกรณ์นี้ — เซสชันยาว 30 วัน (เก็บในชีท Sessions; cache สูงสุด 6 ชม. แล้วโหลดจากชีทใหม่) */
+const SESSION_REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let SS_MEMO_MAIN_ = null;
 function getSpreadsheet_() {
@@ -168,7 +170,7 @@ function dispatchApi_(action, args, sessionToken) {
   const tok = sessionToken;
   switch (action) {
     case 'getLocations': return getLocations();
-    case 'authenticate': return authenticate(args[0], args[1]);
+    case 'authenticate': return authenticate(args[0], args[1], args[2]);
     case 'validateClientSession': return validateClientSession(args[0] || tok);
     case 'revokeSession': return revokeSession(args[0] || tok);
     case 'getOutages': return getOutages();
@@ -187,6 +189,8 @@ function dispatchApi_(action, args, sessionToken) {
     case 'beginPdfChunkUpload': return beginPdfChunkUpload(args[0], args[1] || tok);
     case 'savePdfUploadChunk': return savePdfUploadChunk(args[0], args[1] || tok);
     case 'finalizePdfChunkUpload': return finalizePdfChunkUpload(args[0], args[1] || tok);
+    case 'beginPdfDirectUpload': return beginPdfDirectUpload(args[0], args[1] || tok);
+    case 'finalizePdfDirectUpload': return finalizePdfDirectUpload(args[0], args[1] || tok);
     case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
     case 'getInspectionFormTemplate': return getInspectionFormTemplate();
     case 'uploadInspectionFormTemplate': return uploadInspectionFormTemplate(args[0], args[1] || tok);
@@ -220,8 +224,10 @@ function sessionCacheKey_(token) {
   return SESSION_CACHE_PREFIX + token.toString();
 }
 
-function sessionCacheTtlSec_() {
-  return Math.min(21600, Math.max(60, Math.floor(SESSION_TTL_MS / 1000)));
+function sessionCacheTtlSec_(expireMs) {
+  let sec = Math.floor(SESSION_TTL_MS / 1000);
+  if (expireMs) sec = Math.floor((Number(expireMs) - Date.now()) / 1000);
+  return Math.min(21600, Math.max(60, sec));
 }
 
 function isLikelySessionToken_(token) {
@@ -256,7 +262,7 @@ function cleanupExpiredSessionsSheet_() {
 
 function cacheSession_(token, username, role, expire) {
   const payload = JSON.stringify({ username: username, role: role, expire: expire });
-  CacheService.getScriptCache().put(sessionCacheKey_(token), payload, sessionCacheTtlSec_());
+  CacheService.getScriptCache().put(sessionCacheKey_(token), payload, sessionCacheTtlSec_(expire));
 }
 
 function writeSessionToSheet_(token, username, role, expire) {
@@ -281,9 +287,10 @@ function readSessionFromSheet_(sessionToken) {
   return null;
 }
 
-function createSession_(username, role) {
+function createSession_(username, role, rememberDevice) {
   const token = Utilities.getUuid();
-  const expire = Date.now() + SESSION_TTL_MS;
+  const ttl = rememberDevice ? SESSION_REMEMBER_TTL_MS : SESSION_TTL_MS;
+  const expire = Date.now() + ttl;
   cacheSession_(token, username, role, expire);
   writeSessionToSheet_(token, username, role, expire);
   return { token: token, expire: expire };
@@ -517,10 +524,11 @@ function getLocations() {
   return result;
 }
 
-function authenticate(username, password) {
+function authenticate(username, password, rememberDevice) {
   const ss = getSpreadsheet_();
   username = (username || '').toString().trim();
   password = (password || '').toString();
+  const remember = !!rememberDevice;
 
   if (username === '' || username.toLowerCase() === 'guest') {
     return { success: false, message: 'กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่าน' };
@@ -529,7 +537,7 @@ function authenticate(username, password) {
   let userSheet = ss.getSheetByName(USERS_SHEET);
   if (!userSheet) {
     if (username === 'admin' && password === '1234') {
-      const sess = createSession_('admin', 'admin');
+      const sess = createSession_('admin', 'admin', remember);
       return {
         success: true, role: 'admin', sessionToken: sess.token, expire: sess.expire,
         message: 'เข้าสู่ระบบสำเร็จ (แอดมินหลัก)'
@@ -544,7 +552,7 @@ function authenticate(username, password) {
     if (data[i][0].toString() === username && data[i][1].toString() === password) {
       const role = data[i][2].toString();
       const roleLabel = role === 'admin' ? 'แอดมินหลัก' : (role === 'editor' ? 'แอดมินรอง' : role);
-      const sess = createSession_(username, role);
+      const sess = createSession_(username, role, remember);
       return {
         success: true, role: role, sessionToken: sess.token, expire: sess.expire,
         message: 'เข้าสู่ระบบสำเร็จ (' + roleLabel + ')'
@@ -2754,6 +2762,96 @@ function resolvePdfUploadTargetFolderId_(info) {
   throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
 }
 
+function buildPdfUploadInfo_(meta, sessionToken) {
+  meta = meta || {};
+  const kind = (meta.kind || '').toString();
+  const uploadId = (meta.uploadId != null ? meta.uploadId : ('u' + new Date().getTime().toString(36) + Math.random().toString(36).slice(2, 8))).toString().trim();
+  const fileName = (meta.fileName != null ? meta.fileName : '').toString().trim();
+  const fileSize = parseInt(meta.fileSize, 10) || 0;
+
+  if (!fileName) throw new Error('กรุณาระบุชื่อไฟล์');
+  if (fileSize < 1) throw new Error('ไม่พบขนาดไฟล์');
+  if (fileSize > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
+
+  const info = { kind: kind, uploadId: uploadId, fileName: fileName, fileSize: fileSize, received: 0 };
+
+  if (kind === 'inspection') {
+    assertInspectionFromSession_(sessionToken);
+    const inspectionId = (meta.inspectionId != null ? meta.inspectionId : '').toString().trim();
+    let folderName = sanitizeDriveFolderName_((meta.folderName != null ? meta.folderName : '').toString().trim());
+    if (!folderName && meta.place) folderName = buildInspectionFileFolderName_({ place: meta.place, region: meta.region });
+    if (!inspectionId) throw new Error('ไม่พบรหัสรายการ');
+    if (!folderName) throw new Error('ไม่พบชื่อพื้นที่');
+    info.inspectionId = inspectionId;
+    info.folderName = folderName;
+  } else if (kind === 'inspectionForm') {
+    assertAdminFromSession_(sessionToken);
+  } else if (kind === 'site') {
+    const role = assertEditorOrAdminFromSession_(sessionToken);
+    const session = validateSession_(sessionToken);
+    const siteKey = (meta.siteKey != null ? meta.siteKey : '').toString().trim();
+    const folderName = (meta.folderName != null ? meta.folderName : '').toString().trim();
+    if (!siteKey) throw new Error('ไม่พบรหัสสถานที่');
+    if (!folderName) throw new Error('กรุณาระบุชื่อโฟลเดอร์');
+    info.siteKey = siteKey;
+    info.folderName = folderName;
+    info.uploadedBy = session.username || role;
+  } else {
+    throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
+  }
+
+  info.driveName = resolvePdfUploadDriveName_(info);
+  if (kind === 'inspectionForm') removeInspectionFormTemplateFile_();
+  info.folderId = resolvePdfUploadTargetFolderId_(info);
+  return info;
+}
+
+function isDriveFileInFolder_(file, folderId) {
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === folderId) return true;
+  }
+  return false;
+}
+
+/** เริ่มอัปโหลด PDF จากเบราว์เซอร์ตรงเข้า Drive — ไม่ใช้ UrlFetchApp */
+function beginPdfDirectUpload(meta, sessionToken) {
+  const info = buildPdfUploadInfo_(meta, sessionToken);
+  const emptyBlob = Utilities.newBlob([], 'application/pdf', info.driveName);
+  const file = DriveApp.getFolderById(info.folderId).createFile(emptyBlob);
+  info.driveFileId = file.getId();
+  info.uploadMode = 'direct';
+  CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + info.uploadId, JSON.stringify(info), 3600);
+  return {
+    success: true,
+    uploadId: info.uploadId,
+    fileId: info.driveFileId,
+    folderId: info.folderId,
+    driveName: info.driveName,
+    accessToken: ScriptApp.getOAuthToken()
+  };
+}
+
+function finalizePdfDirectUpload(formObj, sessionToken) {
+  const uploadId = (formObj && formObj.uploadId != null ? formObj.uploadId : '').toString().trim();
+  const fileId = (formObj && formObj.fileId != null ? formObj.fileId : '').toString().trim();
+  if (!uploadId) throw new Error('ไม่พบรหัสอัปโหลด');
+  if (!fileId) throw new Error('ไม่พบรหัสไฟล์');
+  const meta = getPdfChunkUploadMeta_(uploadId);
+  assertPdfChunkUploadAuth_(meta, sessionToken);
+  if (meta.driveFileId && meta.driveFileId !== fileId) throw new Error('รหัสไฟล์ไม่ตรงกับการอัปโหลด');
+  const file = DriveApp.getFileById(fileId);
+  if (meta.folderId && !isDriveFileInFolder_(file, meta.folderId)) {
+    throw new Error('ไฟล์ไม่อยู่ในโฟลเดอร์ที่กำหนด');
+  }
+  const bytes = parseInt(file.getSize(), 10) || 0;
+  if (bytes < 1) throw new Error('อัปโหลด PDF ไม่สำเร็จ — ไฟล์ว่าง');
+  if (bytes > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
+  meta.driveFileId = fileId;
+  CacheService.getScriptCache().remove(PDF_UPLOAD_CACHE_PREFIX_ + uploadId);
+  return finishResumablePdfUpload_(meta);
+}
+
 function startDriveResumableUpload_(parentFolderId, driveName, fileSize) {
   const token = ScriptApp.getOAuthToken();
   const resp = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
@@ -3051,19 +3149,10 @@ function beginPdfChunkUpload(meta, sessionToken) {
   }
 
   info.driveName = resolvePdfUploadDriveName_(info);
-  try {
-    if (kind === 'inspectionForm') removeInspectionFormTemplateFile_();
-    const parentFolderId = resolvePdfUploadTargetFolderId_(info);
-    info.uploadUri = startDriveResumableUpload_(parentFolderId, info.driveName, fileSize);
-    info.uploadMode = 'resumable';
-  } catch (e) {
-    if (fileSize > GAS_BLOB_MAX_BYTES_) {
-      const msg = (e && e.message) ? e.message : String(e);
-      throw new Error('ไม่สามารถอัปโหลด PDF ขนาดใหญ่ (>50MB) ได้: ' + msg);
-    }
-    info.uploadMode = 'legacy';
-    logAction('PDF resumable fallback: ' + ((e && e.message) ? e.message : String(e)));
+  if (fileSize > GAS_BLOB_MAX_BYTES_) {
+    throw new Error('กรุณารีเฟรชหน้า (Ctrl+F5) แล้วอัปโหลดใหม่ — ระบบอัปโหลดตรงเข้า Drive');
   }
+  info.uploadMode = 'legacy';
 
   CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(info), 3600);
   return { success: true, uploadId: uploadId, chunkTotal: chunkTotal, uploadMode: info.uploadMode };
@@ -3222,7 +3311,8 @@ function saveInspectionFileComment(formObj, sessionToken) {
 }
 
 function forceAuth() {
-  DriveApp.createFile('dummy.txt', 'test');
+  DriveApp.getRootFolder();
+  return { success: true, authorized: true };
 }
 
 // ==========================================

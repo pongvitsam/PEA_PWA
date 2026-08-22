@@ -48,6 +48,10 @@
         <label class="form-label small fw-bold text-muted">รหัสผ่าน</label>
         <input type="password" id="loginPass" class="form-control" placeholder="••••" autocomplete="current-password">
       </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" id="loginRemember" checked>
+        <label class="form-check-label" for="loginRemember">จดจำอุปกรณ์นี้ (30 วัน)</label>
+      </div>
       <button class="btn btn-teal w-100 py-2" id="btnLogin"><i class="fa-solid fa-right-to-bracket"></i> เข้าสู่ระบบ</button>
       <p class="text-muted small text-center mt-3 mb-0">
         <i class="fa-solid fa-circle-info"></i> ต้องเข้าสู่ระบบก่อนใช้งาน
@@ -87,7 +91,9 @@
     document.getElementById('btnLogin').onclick = function () {
       const user = document.getElementById('loginUser').value.trim();
       const pass = document.getElementById('loginPass').value;
+      const remember = !!(document.getElementById('loginRemember') && document.getElementById('loginRemember').checked);
       if (!user) { Swal.fire({ icon: 'warning', title: 'กรอกชื่อผู้ใช้' }); return; }
+      try { localStorage.setItem('pwa_remember_device', remember ? '1' : '0'); } catch (e) {}
       Swal.fire({ title: 'กำลังเข้าสู่ระบบ...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
       google.script.run.withSuccessHandler(data => {
         Swal.close();
@@ -97,8 +103,14 @@
         goApp();
       }).withFailureHandler(err => {
         Swal.fire({ icon: 'error', title: 'เชื่อมต่อไม่สำเร็จ', text: err.message });
-      }).authenticate(user, pass);
+      }).authenticate(user, pass, remember);
     };
+
+    try {
+      if (localStorage.getItem('pwa_remember_device') === '0') {
+        document.getElementById('loginRemember').checked = false;
+      }
+    } catch (e) {}
 
     document.getElementById('loginPass').addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('btnLogin').click();

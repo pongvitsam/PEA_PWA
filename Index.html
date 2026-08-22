@@ -1929,9 +1929,15 @@
           if(res.isConfirmed) doLogout();
         }); return;
       }
+      let rememberPref = true;
+      try { rememberPref = localStorage.getItem('pwa_remember_device') !== '0'; } catch (e) {}
       Swal.fire({
         title: 'เข้าสู่ระบบ',
-        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน"><input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">',
+        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน">' +
+          '<input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">' +
+          '<label for="swal-remember" style="display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0 0;cursor:pointer;font-size:0.95rem;user-select:none;">' +
+          '<input type="checkbox" id="swal-remember"' + (rememberPref ? ' checked' : '') + ' style="width:1.1rem;height:1.1rem;accent-color:#2563eb;">' +
+          'จดจำอุปกรณ์นี้ (30 วัน)</label>',
         confirmButtonText: 'เข้าสู่ระบบ',
         confirmButtonColor: '#2563eb',
         allowOutsideClick: !mandatory,
@@ -1939,10 +1945,15 @@
         preConfirm: () => {
           const user = document.getElementById('swal-user').value.trim();
           if (!user) { Swal.showValidationMessage('กรอกชื่อผู้ใช้'); return false; }
-          return { user: user, pass: document.getElementById('swal-pass').value };
+          return {
+            user: user,
+            pass: document.getElementById('swal-pass').value,
+            remember: !!(document.getElementById('swal-remember') && document.getElementById('swal-remember').checked)
+          };
         }
       }).then((res) => {
         if (res.isConfirmed) {
+          try { localStorage.setItem('pwa_remember_device', res.value.remember ? '1' : '0'); } catch (e) {}
           google.script.run.withSuccessHandler(data => {
             if(data.success) {
               if (!data.sessionToken) {
@@ -1961,7 +1972,7 @@
           }).withFailureHandler(err => {
             Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: err.message });
             if (mandatory) showLogin(true);
-          }).authenticate(res.value.user, res.value.pass);
+          }).authenticate(res.value.user, res.value.pass, res.value.remember);
         } else if (mandatory) {
           showLogin(true);
         }
@@ -2062,9 +2073,7 @@
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
-    const PDF_UPLOAD_CHUNK_BYTES_ = 25 * 1024 * 1024;
     const PDF_UPLOAD_CHUNK_THRESHOLD_ = 2 * 1024 * 1024;
-    const PDF_UPLOAD_PARALLEL_ = 5;
 
     function readFileSliceAsBase64_(blob) {
       return new Promise(function(resolve, reject) {
@@ -2095,47 +2104,42 @@
       });
     }
 
-    function formatUploadProgress_(part, total, phase) {
-      if (phase === 'merge') return '100% — กำลังรวมไฟล์...';
-      const pct = total > 0 ? Math.min(99, Math.round((part / total) * 100)) : 0;
-      return pct + '% (' + part + '/' + total + ')';
+    function formatUploadProgress_(loaded, total, phase) {
+      if (phase === 'save') return '100% — กำลังบันทึก...';
+      const pct = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
+      return pct + '%';
+    }
+
+    function uploadPdfToDriveDirect_(file, session, onProgress) {
+      return new Promise(function(resolve, reject) {
+        const xhr = new XMLHttpRequest();
+        const url = 'https://www.googleapis.com/upload/drive/v3/files/'
+          + encodeURIComponent(session.fileId)
+          + '?uploadType=media&supportsAllDrives=true';
+        xhr.open('PATCH', url);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
+        xhr.setRequestHeader('Content-Type', 'application/pdf');
+        xhr.upload.onprogress = function(ev) {
+          if (ev.lengthComputable && onProgress) onProgress(ev.loaded, ev.total);
+        };
+        xhr.onload = function() {
+          if (xhr.status >= 200 && xhr.status < 300) resolve(session.fileId);
+          else reject(new Error('อัปโหลด Drive ไม่สำเร็จ (' + xhr.status + ')'));
+        };
+        xhr.onerror = function() { reject(new Error('เครือข่ายขัดข้องขณะอัปโหลด')); };
+        xhr.send(file);
+      });
     }
 
     function uploadPdfInChunks_(file, token, meta, onProgress) {
-      const chunkBytes = PDF_UPLOAD_CHUNK_BYTES_;
-      const chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
       const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-      const beginMeta = Object.assign({}, meta, {
-        uploadId: uploadId,
-        chunkTotal: chunkTotal,
-        fileSize: file.size,
-        chunkBytes: chunkBytes
-      });
-      let completed = 0;
-      function uploadOneChunk_(idx) {
-        const start = idx * chunkBytes;
-        const slice = file.slice(start, Math.min(file.size, start + chunkBytes));
-        return readFileSliceAsBase64_(slice).then(function(chunkData) {
-          return gasRunPromise_('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
-        }).then(function() {
-          completed++;
-          if (onProgress) onProgress(completed, chunkTotal);
+      const beginMeta = Object.assign({}, meta, { uploadId: uploadId, fileSize: file.size });
+      return gasRunPromise_('beginPdfDirectUpload', beginMeta, token).then(function(session) {
+        if (!session || !session.fileId || !session.accessToken) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
+        return uploadPdfToDriveDirect_(file, session, onProgress).then(function(fileId) {
+          if (onProgress) onProgress(file.size, file.size, 'save');
+          return gasRunPromise_('finalizePdfDirectUpload', { uploadId: session.uploadId, fileId: fileId }, token);
         });
-      }
-      return gasRunPromise_('beginPdfChunkUpload', beginMeta, token).then(function() {
-        let nextIdx = 0;
-        function worker_() {
-          const idx = nextIdx++;
-          if (idx >= chunkTotal) return Promise.resolve();
-          return uploadOneChunk_(idx).then(worker_);
-        }
-        const workers = [];
-        const n = Math.min(PDF_UPLOAD_PARALLEL_, chunkTotal);
-        for (let w = 0; w < n; w++) workers.push(worker_());
-        return Promise.all(workers);
-      }).then(function() {
-        if (onProgress) onProgress(chunkTotal, chunkTotal, 'merge');
-        return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
       });
     }
 
