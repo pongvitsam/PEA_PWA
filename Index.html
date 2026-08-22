@@ -1475,7 +1475,8 @@
     };
     let outageData = [];
     let filteredOutageData = [];
-    let outageInitialized = false; 
+    let outageInitialized = false;
+    let outageLoading = false; 
     let allData = [];
     let filteredData = [];
     let selectedRoute = [];
@@ -1905,17 +1906,19 @@
         startAppAfterAuth();
         google.script.run.withSuccessHandler(function(res) {
           if (!res || !res.valid) {
+            appStarted = false;
             clearAuthState();
             updateUIByRole();
             showLogin(true);
             return;
           }
-          persistAuthState(res.role, token.sessionToken, token.expire);
+          persistAuthState(res.role, token.sessionToken, res.expire || token.expire);
           updateUIByRole();
         }).withFailureHandler(function() {
           // คงสถานะเดิมถ้าเน็ตหลุดชั่วคราว — ผู้ใช้ยังใช้ข้อมูลในเครื่องได้
         }).validateClientSession(token.sessionToken);
       } catch (e) {
+        appStarted = false;
         clearAuthState();
         updateUIByRole();
         showLogin(true);
@@ -2008,7 +2011,8 @@
     authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login'; authBtn.className = 'btn btn-sm btn-custom-secondary';
   }
   const outageEditable = canEditOutage();
-  document.getElementById('btnAddOutage').disabled = !outageEditable;
+  const btnAddOutage = document.getElementById('btnAddOutage');
+  if (btnAddOutage) btnAddOutage.disabled = !outageEditable;
   const btnTop = document.getElementById('btnAddOutageTop');
   if (btnTop) btnTop.disabled = !outageEditable;
   const inspectionEditable = canEditInspection();
@@ -2620,9 +2624,13 @@
       let bounds = [];
       const rowToIndex = new Map(allData.map((item, idx) => [item.row, idx]));
       filteredData.forEach(loc => {
-        let marker = L.marker([loc.lat, loc.lng], { icon: getIcon(loc.phase) });
+        const lat = Number(loc.lat);
+        const lng = Number(loc.lng);
+        if (!isFinite(lat) || !isFinite(lng)) return;
+        let marker = L.marker([lat, lng], { icon: getIcon(loc.phase) });
         marker._loc = loc;
         let realIndex = rowToIndex.get(loc.row);
+        if (realIndex == null) return;
         let hasName = !!(loc.name && String(loc.name).trim());
         if(hasName) {
           marker.bindTooltip(String(loc.name).trim(), {
@@ -2638,7 +2646,7 @@
         });
         
         markersLayer.addLayer(marker);
-        bounds.push([loc.lat, loc.lng]);
+        bounds.push([lat, lng]);
       });
       if (radiusFilter.active && radiusFilter.lat != null && radiusFilter.lng != null) {
         window.applyRadiusFilter(radiusFilter.lat, radiusFilter.lng);
@@ -2780,12 +2788,14 @@
     }
 
     function showDetailsPanel(index) {
+      if (index == null || index < 0) return;
       let loc = allData[index];
       let panel = document.getElementById('detailsPanel');
+      if (!loc || !panel) return;
       currentSiteDocIndex = index;
       panel.innerHTML = buildLocationDetailsHtml(index);
       loadSiteDocsForPanel(loc.row, 'siteDocsContainer');
-      if (loc && loc.lat && loc.lng) {
+      if (loc.lat && loc.lng) {
         calcDistanceMyLoc(loc.lat, loc.lng);
       }
       try {
@@ -3188,7 +3198,7 @@
           btn.disabled = false;
           Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: err.message, confirmButtonColor: '#2563eb' });
         })
-        .updateLocation(loc, userRole);
+        .updateLocation(loc, gasAuthArgs());
     }
 
     function isCoarseTouchUi_() {
@@ -3210,10 +3220,16 @@
       function applyFingerMode(touchCount) {
         if (!isCoarseTouchUi_()) {
           m.dragging.enable();
+          el.style.touchAction = '';
           return;
         }
-        if (touchCount >= 2) m.dragging.enable();
-        else m.dragging.disable();
+        if (touchCount >= 2) {
+          m.dragging.enable();
+          el.style.touchAction = 'none';
+        } else {
+          m.dragging.disable();
+          el.style.touchAction = 'pan-y';
+        }
       }
 
       applyFingerMode(0);
@@ -3228,11 +3244,10 @@
 
     function collapseMobileNav_() {
       var nav = document.getElementById('navbarNav');
-      if (!nav || !nav.classList.contains('show')) return;
+      if (!nav) return;
       try {
-        var inst = bootstrap.Collapse.getInstance(nav);
-        if (!inst) inst = bootstrap.Collapse.getOrCreateInstance(nav, { toggle: false });
-        inst.hide();
+        var inst = bootstrap.Collapse.getOrCreateInstance(nav, { toggle: false });
+        if (nav.classList.contains('show')) inst.hide();
       } catch (e) {
         nav.classList.remove('show');
         var toggler = document.querySelector('.navbar-toggler');
@@ -3336,8 +3351,8 @@
       const start = normalizeGregorianDate_(o.start);
       const end = normalizeGregorianDate_(o.end);
       return Object.assign({}, o, {
-        start: start ? start.toISOString() : o.start,
-        end: end ? end.toISOString() : o.end
+        start: start ? dateToLocalIso(start) : o.start,
+        end: end ? dateToLocalIso(end) : o.end
       });
     }
 
@@ -3381,6 +3396,8 @@
     }
 
     function initOutageSystem() {
+      if (outageLoading) return;
+      outageLoading = true;
       const cached = readCachedOutages_();
       if (cached) {
         outageData = normalizeOutageList_(cached);
@@ -3388,12 +3405,14 @@
         filterOutages();
       }
       google.script.run.withSuccessHandler(res => {
+        outageLoading = false;
         outageData = normalizeOutageList_(res || []);
         outageInitialized = true;
         writeCachedOutages_(res || []);
         filterOutages();
         scheduleOutageBackgroundSync_();
       }).withFailureHandler(err => {
+        outageLoading = false;
         if (!cached) {
           outageData = [];
           outageInitialized = true;
@@ -4090,8 +4109,8 @@
       let formData = {
         id: id,
         projectName: project,
-        start: start ? normalizeGregorianDate_(start).toISOString() : '',
-        end: end ? normalizeGregorianDate_(end).toISOString() : '',
+        start: start ? dateToLocalIso(normalizeGregorianDate_(start)) : '',
+        end: end ? dateToLocalIso(normalizeGregorianDate_(end)) : '',
         remark: document.getElementById('o_remark').value,
         fileUrl: document.getElementById('o_peaUrl').value.trim()
       };
@@ -6055,7 +6074,7 @@ function saveNewOrder() {
   google.script.run.withSuccessHandler(() => {
     Toast.fire({ icon: 'success', title: 'จัดลำดับเรียบร้อย' });
     fetchDocs(); // รีเฟรชข้อมูลใน RAM
-  }).updateDocOrders(newOrderData, userRole);
+  }).updateDocOrders(newOrderData, gasAuthArgs());
 }
 
 function openDocModal(type) {
@@ -6130,14 +6149,14 @@ function executeSaveDoc(formData) {
       btn.disabled = false;
       Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
     })
-    .saveProjectDoc(formData, userRole);
+    .saveProjectDoc(formData, gasAuthArgs());
 }
 
 function deleteDocItem(id) {
   Swal.fire({ title: 'ยืนยันการลบ?', text: 'หากลบกลุ่ม โฟลเดอร์และไฟล์ข้างในจะหลุดออกมาอยู่หน้าหลัก', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' }).then(res => {
     if (res.isConfirmed) {
       Toast.fire({ icon: 'info', title: 'กำลังลบ...' });
-      google.script.run.withSuccessHandler(() => { fetchDocs(); }).deleteDoc(id, userRole);
+      google.script.run.withSuccessHandler(() => { fetchDocs(); }).deleteDoc(id, gasAuthArgs());
     }
   });
 }
@@ -6179,7 +6198,7 @@ function saveEditDoc() {
       btn.disabled = false;
       Swal.fire({ icon: 'error', title: 'ขัดข้อง', text: err.message });
     })
-    .editProjectDoc(id, newTitle, newNote, userRole);
+    .editProjectDoc(id, newTitle, newNote, gasAuthArgs());
 }
   </script>
 </body>

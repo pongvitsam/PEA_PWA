@@ -63,9 +63,7 @@
       var uploadSucceeded = false;
       var selectedFile = null;
       var PDF_MAX = 100 * 1024 * 1024;
-      var PDF_CHUNK = 25 * 1024 * 1024;
       var PDF_CHUNK_THRESHOLD = 2 * 1024 * 1024;
-      var PDF_PARALLEL = 5;
       if (isInspectionForm) {
         document.querySelector('h1').textContent = 'อัปโหลดแบบฟอร์มตรวจรับ';
       }
@@ -201,42 +199,44 @@
         });
       }
 
-      function formatUploadProgress(part, total, phase) {
-        if (phase === 'merge') return '100% — กำลังรวมไฟล์...';
-        var pct = total > 0 ? Math.min(99, Math.round((part / total) * 100)) : 0;
-        return pct + '% (' + part + '/' + total + ')';
+      function formatUploadProgress(loaded, total) {
+        var pct = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
+        return pct + '%';
+      }
+
+      function uploadPdfToDriveDirect(file, session, onProgress) {
+        return new Promise(function(resolve, reject) {
+          var xhr = new XMLHttpRequest();
+          var url = 'https://www.googleapis.com/upload/drive/v3/files/'
+            + encodeURIComponent(session.fileId)
+            + '?uploadType=media&supportsAllDrives=true';
+          xhr.open('PATCH', url);
+          xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
+          xhr.setRequestHeader('Content-Type', 'application/pdf');
+          xhr.upload.onprogress = function(ev) {
+            if (ev.lengthComputable && onProgress) onProgress(ev.loaded, ev.total);
+          };
+          xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) resolve(session.fileId);
+            else reject(new Error('อัปโหลด Drive ไม่สำเร็จ (' + xhr.status + ')'));
+          };
+          xhr.onerror = function() { reject(new Error('เครือข่ายขัดข้องขณะอัปโหลด')); };
+          xhr.send(file);
+        });
       }
 
       function uploadInChunks(file, meta) {
-        var chunkBytes = PDF_CHUNK;
-        var chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
         var uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, chunkTotal: chunkTotal, fileSize: file.size, chunkBytes: chunkBytes });
-        var completed = 0;
-        function uploadOneChunk(idx) {
-          var start = idx * chunkBytes;
-          var slice = file.slice(start, Math.min(file.size, start + chunkBytes));
-          return readSliceAsBase64(slice).then(function(chunkData) {
-            return gasRun('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: chunkData }, token);
-          }).then(function() {
-            completed++;
-            setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(completed, chunkTotal), '');
+        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, fileSize: file.size });
+        return gasRun('beginPdfDirectUpload', beginMeta, token).then(function(session) {
+          if (!session || !session.fileId || !session.accessToken) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
+          setStatus('<span class="spin"></span>กำลังอัปโหลด... 0%', '');
+          return uploadPdfToDriveDirect(file, session, function(loaded, total) {
+            setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(loaded, total), '');
+          }).then(function(fileId) {
+            setStatus('<span class="spin"></span>กำลังบันทึกข้อมูล...', '');
+            return gasRun('finalizePdfDirectUpload', { uploadId: session.uploadId, fileId: fileId }, token);
           });
-        }
-        return gasRun('beginPdfChunkUpload', beginMeta, token).then(function() {
-          var nextIdx = 0;
-          function worker() {
-            var idx = nextIdx++;
-            if (idx >= chunkTotal) return Promise.resolve();
-            return uploadOneChunk(idx).then(worker);
-          }
-          var workers = [];
-          var n = Math.min(PDF_PARALLEL, chunkTotal);
-          for (var w = 0; w < n; w++) workers.push(worker());
-          return Promise.all(workers);
-        }).then(function() {
-          setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(chunkTotal, chunkTotal, 'merge'), '');
-          return gasRun('finalizePdfChunkUpload', uploadId, token);
         });
       }
 

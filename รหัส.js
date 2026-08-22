@@ -306,7 +306,7 @@ function validateSession_(sessionToken) {
     try {
       const info = JSON.parse(cached);
       if (info.expire && info.expire > Date.now()) {
-        return { username: info.username, role: info.role };
+        return { username: info.username, role: info.role, expire: info.expire };
       }
     } catch (e) { /* fall through to sheet */ }
     CacheService.getScriptCache().remove(key);
@@ -315,13 +315,13 @@ function validateSession_(sessionToken) {
   const fromSheet = readSessionFromSheet_(sessionToken);
   if (!fromSheet) throw new Error('เซสชันไม่ถูกต้อง กรุณา login ใหม่');
   cacheSession_(sessionToken, fromSheet.username, fromSheet.role, fromSheet.expire);
-  return { username: fromSheet.username, role: fromSheet.role };
+  return { username: fromSheet.username, role: fromSheet.role, expire: fromSheet.expire };
 }
 
 function validateClientSession(sessionToken) {
   try {
     const info = validateSession_(sessionToken);
-    return { valid: true, role: info.role, username: info.username };
+    return { valid: true, role: info.role, username: info.username, expire: info.expire };
   } catch (e) {
     return { valid: false, message: e.message };
   }
@@ -405,27 +405,42 @@ function fixGregorianDate_(d) {
   return d;
 }
 
+function toLocalIsoString_(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return null;
+  d = fixGregorianDate_(d);
+  return Utilities.formatDate(d, 'Asia/Bangkok', "yyyy-MM-dd'T'HH:mm:ss");
+}
+
 function normalizeOutageDate_(val) {
   if (val == null || val === '') return null;
   if (val instanceof Date && !isNaN(val.getTime())) {
-    return fixGregorianDate_(val).toISOString();
+    return toLocalIsoString_(val);
   }
   if (typeof val === 'number') {
     const ms = Math.round((val - 25569) * 86400 * 1000);
     const d = new Date(ms);
-    if (!isNaN(d.getTime())) return fixGregorianDate_(d).toISOString();
+    if (!isNaN(d.getTime())) return toLocalIsoString_(d);
   }
   const th = parseThaiDate_(val);
-  if (th) return fixGregorianDate_(th).toISOString();
+  if (th) return toLocalIsoString_(th);
   const d = new Date(val);
-  if (!isNaN(d.getTime())) return fixGregorianDate_(d).toISOString();
+  if (!isNaN(d.getTime())) return toLocalIsoString_(d);
   return null;
 }
 
 function parseOutageDateForSheet_(val) {
   const iso = normalizeOutageDate_(val);
   if (!iso) throw new Error('รูปแบบวันที่ไม่ถูกต้อง');
-  return new Date(iso);
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    return new Date(
+      Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+      Number(m[4]), Number(m[5]), Number(m[6] || 0)
+    );
+  }
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) throw new Error('รูปแบบวันที่ไม่ถูกต้อง');
+  return d;
 }
 
 function validateHttpUrl_(url) {

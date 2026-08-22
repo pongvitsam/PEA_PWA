@@ -76,7 +76,9 @@
     function goApp() { window.location.href = 'app.html'; }
 
     function hasValidToken(t) {
-      return t && t.role && t.role !== 'guest' && t.sessionToken && t.expire && t.expire > Date.now();
+      return t && t.role && t.role !== 'guest' && t.sessionToken &&
+        typeof t.sessionToken === 'string' && t.sessionToken.length >= 32 && t.sessionToken.indexOf('-') > 0 &&
+        t.expire && t.expire > Date.now();
     }
 
     try {
