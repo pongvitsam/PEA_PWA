@@ -302,6 +302,14 @@
     .btn-custom-danger { background: linear-gradient(135deg, #f87171, #ef4444); color: white; border: none; border-radius: 10px; font-weight: 600; }
     #map { height: 75vh; border-radius: 18px; border: 1px solid var(--pwa-border); box-shadow: var(--pwa-shadow); z-index: 1; }
     .details-panel { height: 75vh; overflow-y: auto; background: var(--pwa-surface); border-radius: 18px; padding: 20px; box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border); }
+    /* มือถือ: นิ้วเดียวเลื่อนหน้าได้ — อย่าให้ Leaflet บล็อก touch */
+    .leaflet-container.map-scroll-friendly { touch-action: pan-y !important; }
+    @media (max-width: 991.98px) {
+      #map { height: 52vh; max-height: 420px; }
+      .details-panel { height: auto; min-height: 280px; max-height: none; overflow-y: visible; }
+      .map-touch-hint { display: block !important; }
+    }
+    .map-touch-hint { display: none; font-size: 0.8rem; color: #64748b; margin-top: 0.4rem; }
     .filter-bar { background: var(--pwa-surface); border-radius: 16px; padding: 18px; margin-bottom: 20px; box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border); }
     .form-select, .form-control { border-radius: 10px; border: 1px solid #cbd5e1; box-shadow: none; background: #fff; }
     .form-control:focus, .form-select:focus { border-color: var(--pwa-primary); box-shadow: 0 0 0 0.25rem rgba(37, 99, 235, 0.15); }
@@ -495,6 +503,7 @@
       <div class="row">
         <div class="col-lg-8 mb-4">
           <div id="map"></div>
+          <div class="map-touch-hint"><i class="fa-solid fa-hand-pointer"></i> นิ้วเดียวเลื่อนหน้าดูรายละเอียด · สองนิ้วเลื่อนแผนที่</div>
           <div id="radiusSummary" class="d-none mt-2 p-3 small rounded-3 border border-primary bg-light text-dark"></div>
         </div>
         <div class="col-lg-4 mb-4">
@@ -1857,6 +1866,7 @@
         map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
         L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
         markersLayer = L.layerGroup().addTo(map);
+        makeMapPageScrollFriendly_(map);
         setTimeout(function() {
           try { map.invalidateSize(); } catch (e) {}
           startMapGpsTracking();
@@ -2778,6 +2788,13 @@
       if (loc && loc.lat && loc.lng) {
         calcDistanceMyLoc(loc.lat, loc.lng);
       }
+      try {
+        if (window.matchMedia('(max-width: 991.98px)').matches) {
+          setTimeout(function() {
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 80);
+        }
+      } catch (e) {}
     }
 
     function viewDbLocation(index) {
@@ -2985,6 +3002,7 @@
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(routeMap);
       routeMarkersLayer = L.layerGroup().addTo(routeMap);
       routeLineLayer = L.layerGroup().addTo(routeMap);
+      makeMapPageScrollFriendly_(routeMap);
       if (!window._routeMapResizeBound) {
         window._routeMapResizeBound = true;
         window.addEventListener('resize', function () {
@@ -3173,6 +3191,55 @@
         .updateLocation(loc, userRole);
     }
 
+    function isCoarseTouchUi_() {
+      try {
+        return window.matchMedia('(hover: none) and (pointer: coarse)').matches ||
+          window.matchMedia('(max-width: 991.98px)').matches;
+      } catch (e) {
+        return !!(typeof L !== 'undefined' && L.Browser && L.Browser.mobile);
+      }
+    }
+
+    /** มือถือ: นิ้วเดียวเลื่อนหน้า / สองนิ้วเลื่อนแผนที่ */
+    function makeMapPageScrollFriendly_(m) {
+      if (!m || m._pwaScrollFriendly) return;
+      m._pwaScrollFriendly = true;
+      var el = m.getContainer();
+      el.classList.add('map-scroll-friendly');
+
+      function applyFingerMode(touchCount) {
+        if (!isCoarseTouchUi_()) {
+          m.dragging.enable();
+          return;
+        }
+        if (touchCount >= 2) m.dragging.enable();
+        else m.dragging.disable();
+      }
+
+      applyFingerMode(0);
+      el.addEventListener('touchstart', function (e) {
+        applyFingerMode(e.touches ? e.touches.length : 0);
+      }, { passive: true });
+      el.addEventListener('touchend', function (e) {
+        applyFingerMode(e.touches ? e.touches.length : 0);
+      }, { passive: true });
+      el.addEventListener('touchcancel', function () { applyFingerMode(0); }, { passive: true });
+    }
+
+    function collapseMobileNav_() {
+      var nav = document.getElementById('navbarNav');
+      if (!nav || !nav.classList.contains('show')) return;
+      try {
+        var inst = bootstrap.Collapse.getInstance(nav);
+        if (!inst) inst = bootstrap.Collapse.getOrCreateInstance(nav, { toggle: false });
+        inst.hide();
+      } catch (e) {
+        nav.classList.remove('show');
+        var toggler = document.querySelector('.navbar-toggler');
+        if (toggler) toggler.setAttribute('aria-expanded', 'false');
+      }
+    }
+
     function switchMenu(menuId) {
       ['dash', 'map', 'route', 'db', 'outage', 'inspection', 'docs'].forEach(id => {
         var menuEl = document.getElementById('menu-' + id);
@@ -3185,6 +3252,7 @@
       var activeTab = document.getElementById('tab-' + menuId);
       if (activeMenu) activeMenu.style.display = 'block';
       if (activeTab) activeTab.classList.add('active');
+      collapseMobileNav_();
       
       if(menuId === 'map' && map) {
         setTimeout(function() {
