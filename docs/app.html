@@ -421,7 +421,7 @@
     <div id="menu-map" style="display: none;">
       <div class="filter-bar row g-3 align-items-center">
         <div class="col-12">
-          <button type="button" id="btnMapGpsNow" class="btn btn-info text-white fw-semibold" onclick="showRadiusFromGps()" title="ซูมไปตำแหน่งปัจจุบันและแสดงโครงการในรัศมีที่เลือก — ไม่ต้องซูมเอง">
+          <button type="button" id="btnMapGpsNow" class="btn btn-info text-white fw-semibold" onclick="showMyLocationOnMap()" title="ซูมไปตำแหน่ง GPS ของคุณ — หมุดโครงการทั้งหมดยังแสดงเต็มสี">
             <i class="fa-solid fa-location-crosshairs"></i> พิกัดตอนนี้ — ดูโครงการใกล้เคียง
           </button>
         </div>
@@ -474,7 +474,7 @@
           <button class="btn btn-light border w-100" onclick="resetFilters()"><i class="fa-solid fa-rotate-right"></i> ล้างตัวกรองทั้งหมด</button>
         </div>
         <div class="col-12 mt-1">
-          <div id="mapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showRadiusFromGps()" onkeydown="if(event.key==='Enter'||event.key===' ')showRadiusFromGps()" title="กดเพื่อซูมไปตำแหน่งปัจจุบันและดูโครงการใกล้เคียง"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
+          <div id="mapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showMyLocationOnMap()" onkeydown="if(event.key==='Enter'||event.key===' ')showMyLocationOnMap()" title="กดเพื่อซูมไปตำแหน่งปัจจุบัน — หมุดทั้งหมดยังเต็มสี"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
         </div>
         <div class="col-12 mt-2">
           <div class="border rounded-3 p-3 bg-white shadow-sm">
@@ -496,7 +496,7 @@
               <button type="button" class="btn btn-sm btn-outline-info" onclick="enableRadiusPickOnMap()" title="คลิกบนแผนที่ 1 ครั้ง"><i class="fa-solid fa-hand-pointer"></i> เลือกจุดบนแผนที่</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearRadiusFilter()"><i class="fa-solid fa-eraser"></i> ล้างวง</button>
             </div>
-            <p class="small text-muted mb-0 mt-2">เลือกจากเมนูหรือ<strong>พิมพ์ระยะในช่องกำหนดเอง</strong> (มีผลแทนเมนูเมื่อกรอกตัวเลข 0.1–500 กม.) แล้วกด &quot;พิกัดตอนนี้&quot; หรือ &quot;เลือกจุดบนแผนที่&quot; — แผนที่จะ<strong>ซูมอัตโนมัติ</strong> มี<strong>วงสีฟ้า</strong> และหมุดในรัศมีจะชัด นอกรัศมีจะจาง</p>
+            <p class="small text-muted mb-0 mt-2">เลือกจากเมนูหรือ<strong>พิมพ์ระยะในช่องกำหนดเอง</strong> (มีผลแทนเมนูเมื่อกรอกตัวเลข 0.1–500 กม.) แล้วกด &quot;พิกัดตอนนี้&quot; หรือ &quot;เลือกจุดบนแผนที่&quot; ในกล่องนี้ — แผนที่จะ<strong>ซูมอัตโนมัติ</strong> มี<strong>วงสีฟ้า</strong> และ<strong>หมุดในรัศมีจะเข้ม นอกรัศมีจะจาง</strong> (ปุ่มฟ้าใหญ่ด้านบนแค่ไปพิกัดตัวเอง โดยหมุดทั้งหมดยังเข้มปกติ)</p>
           </div>
         </div>
       </div>
@@ -1401,13 +1401,71 @@
       focusMapOnRadius_(la, ln, km);
     };
 
+    function placeMyLocationMarker_(la, ln) {
+      lastUserGps = { lat: la, lng: ln, at: Date.now() };
+      updateMapGpsStatus(la.toFixed(6) + ', ' + ln.toFixed(6) + ' — กดเพื่อไปพิกัดนี้', 'text-success');
+      if (!map) return;
+      if (!myLocationMarker) {
+        myLocationMarker = L.circleMarker([la, ln], {
+          radius: 9, color: '#fff', weight: 2, fillColor: '#0ea5e9', fillOpacity: 0.95
+        }).addTo(map);
+        myLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
+      } else {
+        myLocationMarker.setLatLng([la, ln]);
+      }
+    }
+
+    /** ปุ่มฟ้าใหญ่: ไปพิกัดตัวเอง — หมุดโครงการทั้งหมดเข้มปกติ (ไม่เปิดโหมดรัศมี) */
+    window.showMyLocationOnMap = function() {
+      if (!map) {
+        Toast.fire({ icon: 'warning', title: 'กำลังโหลดแผนที่...' });
+        return;
+      }
+      function finish_(la, ln) {
+        if (radiusFilter.active) window.clearRadiusFilter();
+        placeMyLocationMarker_(la, ln);
+        if (markersLayer) {
+          markersLayer.eachLayer(function(m) {
+            if (m instanceof L.Marker) {
+              try { m.setOpacity(1); } catch (e) {}
+            }
+          });
+        }
+        try { map.invalidateSize(); } catch (e) {}
+        map.flyTo([la, ln], 13, { animate: true });
+        setMapGpsButtonsBusy_(false);
+        Toast.fire({ icon: 'success', title: 'ไปพิกัดของคุณแล้ว', text: 'หมุดทั้งหมดยังแสดงเต็มสี — ใช้กล่อง「ค้นหาในรัศมี」ถ้าต้องการจางนอกวง' });
+      }
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
+        finish_(lastUserGps.lat, lastUserGps.lng);
+        return;
+      }
+      if (!navigator.geolocation) {
+        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
+        return;
+      }
+      setMapGpsButtonsBusy_(true);
+      updateMapGpsStatus('กำลังดึงพิกัด...', 'text-warning');
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          finish_(pos.coords.latitude, pos.coords.longitude);
+        },
+        function() {
+          setMapGpsButtonsBusy_(false);
+          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
+        },
+        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
+      );
+    };
+
+    /** ในกล่องค้นหารัศมี: ใช้ GPS เป็นจุดกลาง + จางหมุดนอกวง */
     window.showRadiusFromGps = function() {
       if (!map) {
         Toast.fire({ icon: 'warning', title: 'กำลังโหลดแผนที่...' });
         return;
       }
       function finish_(la, ln) {
-        lastUserGps = { lat: la, lng: ln, at: Date.now() };
+        placeMyLocationMarker_(la, ln);
         window.applyRadiusFilter(la, ln);
         setMapGpsButtonsBusy_(false);
       }
@@ -1785,7 +1843,7 @@
         let lat = pos.coords.latitude;
         let lng = pos.coords.longitude;
         lastUserGps = { lat: lat, lng: lng, at: Date.now() };
-        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6) + ' — กดเพื่อดูใกล้เคียง', 'text-success');
+        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6) + ' — กดเพื่อไปพิกัดนี้', 'text-success');
         if(!map) return;
         if(!myLocationMarker) {
           myLocationMarker = L.circleMarker([lat, lng], {
