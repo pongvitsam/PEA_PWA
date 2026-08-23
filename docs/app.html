@@ -3324,7 +3324,37 @@
 
     function normalizeGregorianDate_(input) {
       if (input == null || input === '') return null;
-      const d = input instanceof Date ? new Date(input.getTime()) : new Date(input);
+      if (input instanceof Date) {
+        if (isNaN(input.getTime())) return null;
+        if (input.getFullYear() > 2400) {
+          return new Date(
+            input.getFullYear() - 543, input.getMonth(), input.getDate(),
+            input.getHours(), input.getMinutes(), input.getSeconds(), input.getMilliseconds()
+          );
+        }
+        return new Date(input.getTime());
+      }
+      const s = String(input).trim();
+      if (!s) return null;
+      // ISO แบบไม่มี timezone = นาฬิกาท้องถิ่น (ไทย) — ห้ามให้ engine ตีเป็น UTC
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i);
+      if (m) {
+        let y = Number(m[1]);
+        const mo = Number(m[2]) - 1;
+        const day = Number(m[3]);
+        const h = Number(m[4] || 0);
+        const mi = Number(m[5] || 0);
+        const sec = Number(m[6] || 0);
+        const tz = (m[7] || '').toUpperCase();
+        if (y > 2400) y -= 543;
+        if (!tz) return new Date(y, mo, day, h, mi, sec);
+        if (tz === 'Z' || tz === '+00:00' || tz === '+0000') {
+          return new Date(Date.UTC(y, mo, day, h, mi, sec));
+        }
+        const withTz = new Date(s);
+        if (!isNaN(withTz.getTime())) return withTz;
+      }
+      const d = new Date(s);
       if (isNaN(d.getTime())) return null;
       if (d.getFullYear() > 2400) {
         return new Date(
@@ -3521,11 +3551,14 @@
     function buildOutageCalendarEvents() {
       return filteredOutageData.filter(hasOutageDates).map(o => {
         const style = getOutageEventStyle(o);
+        const startD = normalizeGregorianDate_(o.start);
+        const endD = normalizeGregorianDate_(o.end);
+        // ส่งสตริงเวลาท้องถิ่น (ไม่มี Z) + timeZone:'local' — กัน FullCalendar เลื่อนวันจาก UTC
         return {
           id: String(o.id),
           title: o.projectName,
-          start: normalizeGregorianDate_(o.start) || o.start,
-          end: normalizeGregorianDate_(o.end) || o.end,
+          start: startD ? dateToLocalIso(startD) : o.start,
+          end: endD ? dateToLocalIso(endD) : o.end,
           backgroundColor: style.bg,
           borderColor: style.border,
           textColor: '#fff',
@@ -3614,7 +3647,7 @@
       calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
         initialDate: focusDate,
-        timeZone: 'Asia/Bangkok',
+        timeZone: 'local',
         locale: 'th',
         height: calHeight,
         dayMaxEvents: false,
