@@ -3682,9 +3682,13 @@
         },
         eventClick: function(info) {
           info.jsEvent.preventDefault();
+          // คลิกสถานที่บนปฏิทิน = ดูรายการวันนั้นด้านขวาเท่านั้น — แก้ไขผ่านปุ่มดินสอเท่านั้น
           const start = info.event.start;
           if (start) window.setOutageSelectedDay_(start);
-          if (canEditOutage()) editOutage(info.event.id);
+          else if (info.event.id) {
+            const o = (outageData || []).find(function(x) { return String(x.id) === String(info.event.id); });
+            if (o && o.start) window.setOutageSelectedDay_(normalizeGregorianDate_(o.start));
+          }
         },
         eventDidMount: function(info) {
           const p = info.event.extendedProps || {};
