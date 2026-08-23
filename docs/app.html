@@ -90,6 +90,10 @@
       border-radius: 12px; padding: 0.55rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.875rem;
     }
     .outage-day-filter-bar.show { display: flex; }
+    .outage-card-selected {
+      box-shadow: 0 0 0 2px #0ea5e9, 0 8px 24px rgba(14, 165, 233, 0.22) !important;
+      transform: translateY(-2px);
+    }
     .fc .fc-daygrid-day-events { min-height: 1.5em; padding-bottom: 4px; }
     .fc-event {
       border-radius: 8px; border: none !important; padding: 3px 8px;
@@ -1550,6 +1554,8 @@
     let filteredOutageData = [];
     /** คีย์วัน YYYY-MM-DD ที่เลือกจากปฏิทิน — กรองรายการด้านขวา */
     let outageSelectedDayKey = null;
+    /** id งานที่คลิกจากปฏิทิน — แสดงรายการนี้ด้านบน */
+    let outageSelectedId = null;
     let outageInitialized = false;
     let outageLoading = false; 
     let allData = [];
@@ -3678,16 +3684,18 @@
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
         events: events,
         dateClick: function(info) {
+          outageSelectedId = null;
           window.setOutageSelectedDay_(info.date);
         },
         eventClick: function(info) {
           info.jsEvent.preventDefault();
-          // คลิกสถานที่บนปฏิทิน = ดูรายการวันนั้นด้านขวาเท่านั้น — แก้ไขผ่านปุ่มดินสอเท่านั้น
           const start = info.event.start;
-          if (start) window.setOutageSelectedDay_(start);
-          else if (info.event.id) {
-            const o = (outageData || []).find(function(x) { return String(x.id) === String(info.event.id); });
-            if (o && o.start) window.setOutageSelectedDay_(normalizeGregorianDate_(o.start));
+          const eventId = info.event.id;
+          if (start && eventId) {
+            window.setOutageSelectedEvent_(eventId, start);
+          } else if (eventId) {
+            const o = (outageData || []).find(function(x) { return String(x.id) === String(eventId); });
+            if (o && o.start) window.setOutageSelectedEvent_(eventId, normalizeGregorianDate_(o.start));
           }
         },
         eventDidMount: function(info) {
@@ -4000,7 +4008,14 @@
       if (!bar) return;
       if (outageSelectedDayKey) {
         bar.classList.add('show');
-        if (label) label.textContent = formatOutageDayKeyTh_(outageSelectedDayKey);
+        if (label) {
+          let txt = formatOutageDayKeyTh_(outageSelectedDayKey);
+          if (outageSelectedId) {
+            const sel = (outageData || []).find(function(o) { return String(o.id) === String(outageSelectedId); });
+            if (sel && sel.projectName) txt += ' · ' + sel.projectName;
+          }
+          label.textContent = txt;
+        }
       } else {
         bar.classList.remove('show');
         if (label) label.textContent = '';
@@ -4018,6 +4033,7 @@
 
     window.clearOutageSelectedDay_ = function() {
       outageSelectedDayKey = null;
+      outageSelectedId = null;
       updateOutageDayFilterUi_();
       renderOutageList();
       highlightOutageSelectedDay_();
@@ -4030,7 +4046,23 @@
         return;
       }
       const key = outageDayKey_(d);
+      outageSelectedId = null;
       outageSelectedDayKey = (outageSelectedDayKey === key) ? null : key;
+      updateOutageDayFilterUi_();
+      renderOutageList();
+      highlightOutageSelectedDay_();
+      const panel = document.querySelector('.outage-list-panel');
+      if (panel && window.matchMedia('(max-width: 991.98px)').matches) {
+        try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      }
+    };
+
+    /** คลิกสถานที่บนปฏิทิน — กรองวัน + แสดงรายการนั้นด้านบน */
+    window.setOutageSelectedEvent_ = function(eventId, dateInput) {
+      const d = dateInput instanceof Date ? dateInput : normalizeGregorianDate_(dateInput);
+      if (!d || isNaN(d.getTime()) || eventId == null) return;
+      outageSelectedDayKey = outageDayKey_(d);
+      outageSelectedId = String(eventId);
       updateOutageDayFilterUi_();
       renderOutageList();
       highlightOutageSelectedDay_();
@@ -4051,6 +4083,12 @@
       }
 
       let sortedData = [...listSource].sort((a,b) => {
+        if (outageSelectedId) {
+          const aSel = String(a.id) === String(outageSelectedId);
+          const bSel = String(b.id) === String(outageSelectedId);
+          if (aSel && !bSel) return -1;
+          if (!aSel && bSel) return 1;
+        }
         const aHas = hasOutageDates(a), bHas = hasOutageDates(b);
         if (!aHas && bHas) return 1; if (aHas && !bHas) return -1;
         if (!aHas && !bHas) return (a.projectName || '').localeCompare(b.projectName || '', 'th');
@@ -4097,9 +4135,11 @@
         
         let editBtn = canEditOutage() ? `<button class="btn btn-sm btn-primary rounded-circle shadow-sm" style="width: 32px; height: 32px;" onclick="editOutage('${safeId}')" title="แก้ไข"><i class="fa-solid fa-pen"></i></button>` : '';
         let locHint = findLocationForOutage(o.projectName) ? `<button class="btn btn-sm btn-outline-info rounded-pill mt-1" onclick="viewOutageLocation('${safeId}')"><i class="fa-solid fa-circle-info"></i> ดูข้อมูลสถานที่</button>` : '';
+        const isSelected = outageSelectedId && String(o.id) === String(outageSelectedId);
+        const cardId = 'outage-card-' + String(o.id).replace(/[^a-zA-Z0-9_-]/g, '_');
 
         return `
-          <div class="card border-0 shadow-sm mb-3" style="border-radius: 12px; ${cardStyle} transition: 0.3s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div id="${cardId}" class="card border-0 shadow-sm mb-3${isSelected ? ' outage-card-selected' : ''}" style="border-radius: 12px; ${cardStyle} transition: 0.3s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='${isSelected ? 'translateY(-2px)' : 'translateY(0)'}'">
             <div class="card-body p-3">
               <div class="d-flex justify-content-between align-items-start">
                 <div>
@@ -4118,6 +4158,14 @@
       });
       container.innerHTML = parts.join('');
       highlightOutageSelectedDay_();
+      if (outageSelectedId) {
+        const cardEl = document.getElementById('outage-card-' + String(outageSelectedId).replace(/[^a-zA-Z0-9_-]/g, '_'));
+        if (cardEl) {
+          setTimeout(function() {
+            try { cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+          }, 50);
+        }
+      }
     }
 
     function viewOutageLocation(id) {
