@@ -3471,7 +3471,14 @@
     }
 
     function formatCalendarTitleTh_(input) {
-      const d = normalizeGregorianDate_(input) || new Date();
+      let d = null;
+      if (input && typeof input === 'object' && !(input instanceof Date)) {
+        const info = input.date || input.start;
+        if (info && typeof info.year === 'number') {
+          d = new Date(info.year, info.month, info.day || 1);
+        }
+      }
+      if (!d) d = normalizeGregorianDate_(input) || new Date();
       const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
       return months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
     }
