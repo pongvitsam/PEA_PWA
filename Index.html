@@ -3732,9 +3732,8 @@
         displayEventEnd: true,
         eventOrder: 'start',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
-        titleFormat: function(arg) {
-          const d = arg && arg.date ? arg.date : (arg && arg.start ? arg.start : new Date());
-          return formatCalendarTitleTh_(d);
+        titleFormat: function(date) {
+          return formatCalendarTitleTh_(date);
         },
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
         events: events,
