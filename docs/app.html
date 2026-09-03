@@ -1152,6 +1152,7 @@
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
+    let outageCalendarViewDate_ = null;
     let currentDbLocationIndex = -1;
     let inspectionData = [], filteredInspectionData = [];
     let inspectionInitialized = false;
@@ -3415,17 +3416,53 @@
       return (rows || []).map(normalizeOutageRecord_);
     }
 
+    function _dbg153e7b_(location, message, data, hypothesisId) {
+      // #region agent log
+      fetch('http://127.0.0.1:7789/ingest/7a45a6b0-687f-46dc-b317-ba27173fd4da',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'153e7b'},body:JSON.stringify({sessionId:'153e7b',location:location,message:message,data:data,hypothesisId:hypothesisId,runId:'post-fix',timestamp:Date.now()})}).catch(function(){});
+      // #endregion
+    }
+
     function formatCalendarTitleTh_(input) {
       let d = null;
+      let branch = 'fallback';
       if (input && typeof input === 'object' && !(input instanceof Date)) {
         const info = input.date || input.start;
         if (info && typeof info.year === 'number') {
           d = new Date(info.year, info.month, info.day || 1);
+          branch = 'fc-verbose';
         }
       }
       if (!d) d = normalizeGregorianDate_(input) || new Date();
       const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
-      return months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
+      const title = months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
+      // #region agent log
+      _dbg153e7b_('docs/app.html:formatCalendarTitleTh_', 'title computed', {
+        branch: branch,
+        inputType: input == null ? 'null' : (input instanceof Date ? 'Date' : typeof input),
+        inputKeys: input && typeof input === 'object' && !(input instanceof Date) ? Object.keys(input) : [],
+        info: input && input.date ? { year: input.date.year, month: input.date.month, day: input.date.day } : (input && input.start ? { year: input.start.year, month: input.start.month, day: input.start.day } : null),
+        parsedMonth: d.getMonth(),
+        parsedYear: d.getFullYear(),
+        title: title
+      }, 'H1');
+      // #endregion
+      return title;
+    }
+
+    function syncOutageCalendarTitle_(info) {
+      const d = calendar ? calendar.getDate() : (info && info.start ? info.start : null);
+      if (!d) return '';
+      const title = formatCalendarTitleTh_(d);
+      const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
+      if (titleEl) titleEl.textContent = title;
+      // #region agent log
+      _dbg153e7b_('docs/app.html:syncOutageCalendarTitle_', 'title synced', {
+        calDate: d.toISOString(),
+        title: title,
+        domTitle: titleEl ? titleEl.textContent : null
+      }, 'H2');
+      // #endregion
+      return title;
     }
 
     function applyOutagePack(pack, opts) {
@@ -3641,12 +3678,30 @@
       const events = buildOutageCalendarEvents();
       const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
       const focusDate = getOutageCalendarFocusDate();
+      const calDateBefore = calendar ? calendar.getDate() : null;
+      const preserveDate = outageCalendarViewDate_ || calDateBefore || focusDate;
+      // #region agent log
+      _dbg153e7b_('docs/app.html:refreshOutageCalendar', 'refresh called', {
+        hasCalendar: !!calendar,
+        focusDate: focusDate ? focusDate.toISOString() : null,
+        calDateBefore: calDateBefore ? calDateBefore.toISOString() : null,
+        preserveDate: preserveDate ? preserveDate.toISOString() : null,
+        eventCount: events.length
+      }, 'H3');
+      // #endregion
       if (calendar) {
         calendar.setOption('height', calHeight);
         calendar.getEventSources().forEach(function(src) { src.remove(); });
         calendar.addEventSource(events);
-        calendar.gotoDate(focusDate);
+        calendar.gotoDate(preserveDate);
+        syncOutageCalendarTitle_();
         calendar.updateSize();
+        // #region agent log
+        _dbg153e7b_('docs/app.html:refreshOutageCalendar', 'after refresh', {
+          calDateAfter: calendar.getDate().toISOString(),
+          domTitle: (document.querySelector('.calendar-container .fc-toolbar-title') || {}).textContent || ''
+        }, 'H3');
+        // #endregion
         setTimeout(function() {
           document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
             el.style.minHeight = dayMinH + 'px';
@@ -3673,9 +3728,10 @@
       const { dayMinH, calHeight } = applyOutageCalendarLayout(events);
       const focusDate = getOutageCalendarFocusDate();
       if(calendar) calendar.destroy();
+      outageCalendarViewDate_ = outageCalendarViewDate_ || focusDate;
       calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridMonth',
-        initialDate: focusDate,
+        initialDate: outageCalendarViewDate_ || focusDate,
         timeZone: 'local',
         locale: 'th',
         height: calHeight,
@@ -3685,6 +3741,13 @@
         eventOrder: 'start',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
         titleFormat: function(date) {
+          // #region agent log
+          _dbg153e7b_('docs/app.html:titleFormat', 'titleFormat invoked', {
+            argType: date == null ? 'null' : (date instanceof Date ? 'Date' : typeof date),
+            argKeys: date && typeof date === 'object' && !(date instanceof Date) ? Object.keys(date) : [],
+            hasDateInfo: !!(date && date.date && typeof date.date.year === 'number')
+          }, 'H2');
+          // #endregion
           return formatCalendarTitleTh_(date);
         },
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
@@ -3714,7 +3777,19 @@
           info.el.style.borderLeft = '4px solid rgba(255,255,255,0.85)';
           info.el.title = info.event.title;
         },
-        datesSet: function() {
+        datesSet: function(info) {
+          if (calendar) outageCalendarViewDate_ = calendar.getDate();
+          syncOutageCalendarTitle_(info);
+          const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
+          // #region agent log
+          _dbg153e7b_('docs/app.html:datesSet', 'dates changed', {
+            start: info && info.start ? info.start.toISOString() : null,
+            calDate: calendar ? calendar.getDate().toISOString() : null,
+            viewType: info && info.view ? info.view.type : null,
+            domTitle: titleEl ? titleEl.textContent : null,
+            viewTitle: info && info.view ? info.view.title : null
+          }, 'H2');
+          // #endregion
           setTimeout(function() {
             document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
               el.style.minHeight = dayMinH + 'px';
@@ -4192,16 +4267,99 @@
       outageModalObj.show();
     }
 
+    function parseOutagePickerInput_(dateStr) {
+      if (dateStr == null || dateStr === '') return undefined;
+      if (dateStr instanceof Date) {
+        const d = normalizeGregorianDate_(dateStr);
+        return d || undefined;
+      }
+      const s = String(dateStr).replace(/\u00a0/g, ' ').trim();
+      if (!s) return undefined;
+      // รูปแบบแสดงผล: 24/08/2569 00:00 (ปี พ.ศ.)
+      const th = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+      if (th) {
+        let y = parseInt(th[3], 10);
+        if (y > 2400) y -= 543;
+        const d = new Date(y, parseInt(th[2], 10) - 1, parseInt(th[1], 10),
+          parseInt(th[4], 10), parseInt(th[5], 10), parseInt(th[6] || '0', 10));
+        return isNaN(d.getTime()) ? undefined : d;
+      }
+      // รูปแบบ ISO ท้องถิ่น: 2026-08-24T00:00:00 หรือ 2026-08-24 00:00
+      const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+      if (iso) {
+        let y = parseInt(iso[1], 10);
+        if (y > 2400) y -= 543;
+        const d = new Date(y, parseInt(iso[2], 10) - 1, parseInt(iso[3], 10),
+          parseInt(iso[4] || '0', 10), parseInt(iso[5] || '0', 10), parseInt(iso[6] || '0', 10));
+        return isNaN(d.getTime()) ? undefined : d;
+      }
+      const d = normalizeGregorianDate_(s);
+      return d || undefined;
+    }
+
+    function applyOutagePickerDisplay_(el, date) {
+      if (!el || !date) return;
+      el.value = formatOutagePickerDisplay_(date);
+    }
+
+    function setOutagePickerThaiYear_(fp) {
+      if (!fp || !fp.currentYearElement) return;
+      const buddhistYear = fp.currentYear + 543;
+      fp.currentYearElement.value = buddhistYear;
+      if (fp.calendarContainer) {
+        fp.calendarContainer.querySelectorAll('.numInput.cur-year').forEach(function(input) {
+          input.value = buddhistYear;
+        });
+      }
+    }
+
     function ensureOutageDatepickersReady_() {
       return ensureFlatpickr_().then(function() {
         const opts = {
-          enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", locale: "th",
+          enableTime: true,
+          time_24hr: true,
+          allowInput: true,
+          disableMobile: true,
+          dateFormat: 'd/m/Y H:i',
+          locale: (typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.th) ? flatpickr.l10ns.th : 'th',
+          formatDate: function(date) {
+            return formatOutagePickerDisplay_(date);
+          },
+          parseDate: function(dateStr) {
+            return parseOutagePickerInput_(dateStr);
+          },
+          onReady: function(selectedDates, dateStr, instance) {
+            setOutagePickerThaiYear_(instance);
+            if (instance.selectedDates[0]) applyOutagePickerDisplay_(instance.input, instance.selectedDates[0]);
+          },
+          onOpen: function(selectedDates, dateStr, instance) {
+            setOutagePickerThaiYear_(instance);
+            if (instance.selectedDates[0]) applyOutagePickerDisplay_(instance.input, instance.selectedDates[0]);
+          },
+          onYearChange: function() { setTimeout(function() { setOutagePickerThaiYear_(this); }.bind(this), 10); },
+          onMonthChange: function() { setTimeout(function() { setOutagePickerThaiYear_(this); }.bind(this), 10); },
           onChange: function(selectedDates, dateStr, instance) {
-            if (selectedDates[0]) instance.input.value = formatOutagePickerDisplay_(selectedDates[0]);
+            if (selectedDates[0]) applyOutagePickerDisplay_(instance.input, selectedDates[0]);
+            setOutagePickerThaiYear_(instance);
+          },
+          onClose: function(selectedDates, dateStr, instance) {
+            if (selectedDates[0]) applyOutagePickerDisplay_(instance.input, selectedDates[0]);
+            else if (instance.input && instance.input.value) {
+              const d = parseOutagePickerInput_(instance.input.value);
+              if (d) {
+                instance.setDate(d, false);
+                applyOutagePickerDisplay_(instance.input, d);
+              }
+            }
           }
         };
         document.querySelectorAll('#outageModal .datepicker').forEach(function(el) {
-          if (!el._flatpickr) flatpickr(el, opts);
+          if (el._flatpickr) {
+            if (el._flatpickr._pwaOutagePickerV2) return;
+            try { el._flatpickr.destroy(); } catch (e) {}
+          }
+          const fp = flatpickr(el, opts);
+          fp._pwaOutagePickerV2 = true;
         });
       });
     }
@@ -4266,8 +4424,20 @@
         document.getElementById('o_remark').value = o.remark || (o.sheetDetails && o.sheetDetails.remark) || '';
         document.getElementById('o_peaUrl').value = o.fileUrl || (fromSheet ? OUTAGE_SOURCE_SHEET_URL : '');
         if (hasOutageDates(o)) {
-          document.getElementById('o_start')._flatpickr.setDate(normalizeGregorianDate_(o.start));
-          document.getElementById('o_end')._flatpickr.setDate(normalizeGregorianDate_(o.end));
+          const startD = normalizeGregorianDate_(o.start);
+          const endD = normalizeGregorianDate_(o.end);
+          const startFp = document.getElementById('o_start')._flatpickr;
+          const endFp = document.getElementById('o_end')._flatpickr;
+          if (startD) {
+            startFp.setDate(startD, false);
+            applyOutagePickerDisplay_(startFp.input, startD);
+            setOutagePickerThaiYear_(startFp);
+          } else startFp.clear();
+          if (endD) {
+            endFp.setDate(endD, false);
+            applyOutagePickerDisplay_(endFp.input, endD);
+            setOutagePickerThaiYear_(endFp);
+          } else endFp.clear();
         } else {
           document.getElementById('o_start')._flatpickr.clear();
           document.getElementById('o_end')._flatpickr.clear();
@@ -4372,6 +4542,13 @@
     function filterOutages() {
       let textVal = document.getElementById('outageSearchInput').value.toLowerCase().trim();
       let regionVal = document.getElementById('outageRegionSelect').value;
+      // #region agent log
+      _dbg153e7b_('docs/app.html:filterOutages', 'filter triggered', {
+        textLen: textVal.length,
+        regionVal: regionVal,
+        resultCount: (outageData || []).length
+      }, 'H5');
+      // #endregion
 
       filteredOutageData = outageData.filter(o => {
         let matchText = (o.projectName || '').toLowerCase().includes(textVal);
