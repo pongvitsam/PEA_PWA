@@ -162,6 +162,23 @@
       background: #fff; border-radius: 20px; padding: 1.25rem;
       box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
     }
+    .inspection-map-panel {
+      background: #fff; border-radius: 20px; padding: 1.25rem; margin-top: 1.25rem;
+      box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
+    }
+    #inspectionMap {
+      height: 55vh; min-height: 320px; border-radius: 16px;
+      border: 1px solid var(--pwa-border); z-index: 1;
+    }
+    .inspection-map-details {
+      height: 55vh; min-height: 320px; overflow-y: auto;
+      background: #f8fafc; border-radius: 16px; padding: 1rem;
+      border: 1px solid var(--pwa-border);
+    }
+    @media (max-width: 991.98px) {
+      #inspectionMap { height: 45vh; max-height: 380px; }
+      .inspection-map-details { height: auto; min-height: 200px; max-height: none; }
+    }
     .inspection-form-template-banner {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
       padding: 0.85rem 1rem; border-radius: 14px;
@@ -786,9 +803,9 @@
           </div>
           <div class="col-md-2">
             <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ทุกสถานะ</option>
-              <option value="done">ไปแล้ว</option>
-              <option value="pending">ยังไม่ไป</option>
+              <option value="">ตรวจแล้วทั้งหมด</option>
+              <option value="done">ตรวจแล้ว</option>
+              <option value="pending">ยังไม่ตรวจ</option>
             </select>
           </div>
           <div class="col-md-2">
@@ -797,9 +814,43 @@
             </select>
           </div>
         </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="รอบส่งมอบงานจริง">
+              <option value="">ทุกรอบส่งมอบงานจริง</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <select id="inspectionHandoverDateSelect" class="form-select form-select-sm" onchange="filterInspections()" title="วันที่ส่งมอบ">
+              <option value="">ทุกวันที่ส่งมอบ</option>
+            </select>
+          </div>
+        </div>
         <div id="inspectionListContainer"></div>
         <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
         <input type="file" id="inspectionFormTemplateInput" accept="application/pdf,.pdf" style="display:none">
+      </div>
+      <div class="inspection-map-panel">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <div>
+            <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
+            <small class="text-muted">หมุดตามรายการที่กรองด้านบน — คลิกหมุดเพื่อดูรายละเอียดและนำทาง</small>
+          </div>
+          <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-8">
+            <div id="inspectionMap"></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="inspection-map-details" id="inspectionMapDetails">
+              <div class="text-center text-muted mt-5">
+                <i class="fa-solid fa-hand-pointer fa-2x mb-2"></i>
+                <p class="mb-0">คลิกหมุดบนแผนที่เพื่อดูรายละเอียด</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   
@@ -1159,6 +1210,7 @@
     let inspectionUiStash_ = null;
     let inspectionColumnFilters = {};
     let routeMap, routeMarkersLayer, routeLineLayer;
+    let inspectionMap = null, inspectionMarkersLayer = null;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
     let radiusCircle = null;
@@ -3394,6 +3446,13 @@
         ensureFlatpickr_().catch(function() {});
         if (!inspectionInitialized) initInspectionSystem();
         else filterInspections();
+        setTimeout(function() {
+          initInspectionMapIfNeeded_();
+          if (inspectionMap) {
+            try { inspectionMap.invalidateSize(); } catch (e) {}
+            renderInspectionMap_();
+          }
+        }, 250);
       }
     }
 
@@ -4686,6 +4745,8 @@
         phase: document.getElementById('inspectionPhaseSelect')?.value ?? '34',
         visited: document.getElementById('inspectionVisitedSelect')?.value || '',
         pwa: document.getElementById('inspectionPwaSelect')?.value || '',
+        handoverRound: document.getElementById('inspectionHandoverRoundSelect')?.value || '',
+        handoverDate: document.getElementById('inspectionHandoverDateSelect')?.value || '',
         search: document.getElementById('inspectionSearchInput')?.value || '',
         scrollTop: wrap ? wrap.scrollTop : 0,
         windowScrollY: window.scrollY || document.documentElement.scrollTop || 0
@@ -4726,6 +4787,10 @@
       if (searchEl && ui.search != null) searchEl.value = ui.search;
       const pwaEl = document.getElementById('inspectionPwaSelect');
       if (pwaEl && ui.pwa != null && [...pwaEl.options].some(o => o.value === ui.pwa)) pwaEl.value = ui.pwa;
+      const roundEl = document.getElementById('inspectionHandoverRoundSelect');
+      if (roundEl && ui.handoverRound != null && [...roundEl.options].some(o => o.value === ui.handoverRound)) roundEl.value = ui.handoverRound;
+      const dateEl = document.getElementById('inspectionHandoverDateSelect');
+      if (dateEl && ui.handoverDate != null && [...dateEl.options].some(o => o.value === ui.handoverDate)) dateEl.value = ui.handoverDate;
     }
 
     function inspectionOnRegionFilterChange() {
@@ -4869,6 +4934,66 @@
       const districts = [...new Set((inspectionData || []).map(p => (p.pwaDistrict || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
       sel.innerHTML = '<option value="">ทุกเขต กปภ.</option>' + districts.map(d => '<option value="' + escHtml(d) + '">' + escHtml(d) + '</option>').join('');
       if (cur && districts.includes(cur)) sel.value = cur;
+      setupInspectionHandoverFilters_(ui);
+    }
+
+    function inspectionHandoverDateKey_(raw) {
+      const d = parseInspectionHandoverDate_(raw);
+      if (!d || isNaN(d.getTime())) return '';
+      const pad = function(n) { return String(n).padStart(2, '0'); };
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function formatInspectionHandoverDateOption_(dayKey) {
+      if (!dayKey) return '';
+      const d = normalizeGregorianDate_(dayKey + 'T12:00:00');
+      if (!d) return dayKey;
+      try {
+        return d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+      } catch (e) {
+        return dayKey;
+      }
+    }
+
+    function setupInspectionHandoverFilters_(ui) {
+      const roundSel = document.getElementById('inspectionHandoverRoundSelect');
+      const dateSel = document.getElementById('inspectionHandoverDateSelect');
+      if (!roundSel && !dateSel) return;
+      const rounds = [];
+      const roundSeen = {};
+      const dates = [];
+      const dateSeen = {};
+      (inspectionData || []).forEach(function(p) {
+        const roundRaw = String(p.handoverRound || '').trim();
+        if (roundRaw) {
+          const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
+          if (!roundSeen[roundLabel]) {
+            roundSeen[roundLabel] = true;
+            rounds.push(roundLabel);
+          }
+        }
+        const dateKey = inspectionHandoverDateKey_(p.handoverRound) || inspectionHandoverDateKey_(p.handoverPlan);
+        if (dateKey && !dateSeen[dateKey]) {
+          dateSeen[dateKey] = true;
+          dates.push(dateKey);
+        }
+      });
+      rounds.sort(function(a, b) { return a.localeCompare(b, 'th'); });
+      dates.sort();
+      if (roundSel) {
+        const curRound = (ui && ui.handoverRound) ? ui.handoverRound : roundSel.value;
+        roundSel.innerHTML = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
+          rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
+        if (curRound && rounds.indexOf(curRound) >= 0) roundSel.value = curRound;
+      }
+      if (dateSel) {
+        const curDate = (ui && ui.handoverDate) ? ui.handoverDate : dateSel.value;
+        dateSel.innerHTML = '<option value="">ทุกวันที่ส่งมอบ</option>' +
+          dates.map(function(k) {
+            return '<option value="' + escHtml(k) + '">' + escHtml(formatInspectionHandoverDateOption_(k) || k) + '</option>';
+          }).join('');
+        if (curDate && dates.indexOf(curDate) >= 0) dateSel.value = curDate;
+      }
     }
 
     function inspectionMatchesPhaseFilter_(p, phaseVal) {
@@ -5724,6 +5849,8 @@
       const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
       const pwaVal = document.getElementById('inspectionPwaSelect')?.value || '';
+      const roundVal = document.getElementById('inspectionHandoverRoundSelect')?.value || '';
+      const dateVal = document.getElementById('inspectionHandoverDateSelect')?.value || '';
       const regionVal = getInspectionRegionFilter_();
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
@@ -5734,11 +5861,22 @@
         const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
         const matchRegion = !regionVal || (p.region || 'NC').toUpperCase() === regionVal;
         const matchColumns = matchesInspectionColumnFilters_(p);
-        return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns;
+        let matchRound = true;
+        if (roundVal) {
+          const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
+          matchRound = label === roundVal;
+        }
+        let matchDate = true;
+        if (dateVal) {
+          const key = inspectionHandoverDateKey_(p.handoverRound) || inspectionHandoverDateKey_(p.handoverPlan);
+          matchDate = key === dateVal;
+        }
+        return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns && matchRound && matchDate;
       });
 
       renderInspectionList(preserveUi);
       updateInspectionStats();
+      renderInspectionMap_();
     }
 
     const filterInspectionsDebounced_ = debounce_(filterInspections, 120);
@@ -5965,6 +6103,107 @@
           }
         }
       });
+    }
+
+    function initInspectionMapIfNeeded_() {
+      if (inspectionMap || typeof L === 'undefined') return;
+      const el = document.getElementById('inspectionMap');
+      if (!el) return;
+      inspectionMap = L.map('inspectionMap', { center: [13.7563, 100.5018], zoom: 6 });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(inspectionMap);
+      inspectionMarkersLayer = L.layerGroup().addTo(inspectionMap);
+      if (typeof makeMapPageScrollFriendly_ === 'function') makeMapPageScrollFriendly_(inspectionMap);
+      if (!window._inspMapResizeBound) {
+        window._inspMapResizeBound = true;
+        window.addEventListener('resize', function() {
+          const menu = document.getElementById('menu-inspection');
+          if (inspectionMap && menu && menu.style.display !== 'none') {
+            try { inspectionMap.invalidateSize(); } catch (e) {}
+          }
+        });
+      }
+    }
+
+    function showInspectionMapDetails_(p) {
+      const panel = document.getElementById('inspectionMapDetails');
+      if (!panel || !p) return;
+      const info = getInspectionMapLocation_(p);
+      const loc = info.loc;
+      const safeId = String(p.id).replace(/'/g, "\\'");
+      const roundTxt = formatInspectionHandoverDate_(p.handoverRound, false) || (p.handoverRound || '-');
+      const planTxt = formatInspectionHandoverDate_(p.handoverPlan, false) || (p.handoverPlan || '-');
+      const statusBadge = p.visited
+        ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
+        : '<span class="badge bg-warning text-dark">ยังไม่ตรวจ</span>';
+      let navHtml = '';
+      if (loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
+        navHtml =
+          '<button type="button" class="btn btn-outline-primary btn-sm me-1 mb-1" onclick="window.open(BASE_NAV_URL+\'&destination=' + loc.lat + ',' + loc.lng + '\',\'_blank\')">' +
+          '<i class="fa-brands fa-google"></i> นำทาง</button>';
+      }
+      const editBtn = canEditInspection()
+        ? '<button type="button" class="btn btn-primary btn-sm mb-1" onclick="editInspection(\'' + safeId + '\')"><i class="fa-solid fa-pen"></i> แก้ไข</button>'
+        : '';
+      panel.innerHTML =
+        '<div class="mb-2">' + statusBadge + '</div>' +
+        '<h6 class="fw-bold mb-2">' + escHtml(info.name || p.place || '-') + '</h6>' +
+        '<div class="small text-muted mb-1"><i class="fa-solid fa-layer-group me-1"></i>เฟส ' + escHtml(p.phase || '-') +
+        (p.region ? ' · ' + escHtml(p.region) : '') + '</div>' +
+        '<div class="small mb-1"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
+        '<div class="small mb-1"><b>แผนส่งมอบงาน:</b> ' + escHtml(planTxt) + '</div>' +
+        (p.pwaDistrict ? '<div class="small mb-1"><b>กปภ. เขต:</b> ' + escHtml(p.pwaDistrict) + '</div>' : '') +
+        (p.peaZone ? '<div class="small mb-2"><b>เขต กฟภ.:</b> ' + escHtml(p.peaZone) + '</div>' : '') +
+        '<div class="mt-2">' + navHtml +
+        '<button type="button" class="btn btn-outline-info btn-sm mb-1" onclick="viewInspectionLocation(\'' + safeId + '\')"><i class="fa-solid fa-circle-info"></i> รายละเอียด</button> ' +
+        editBtn + '</div>';
+    }
+
+    function renderInspectionMap_() {
+      const badge = document.getElementById('inspectionMapCountBadge');
+      const panel = document.getElementById('inspectionMapDetails');
+      const menu = document.getElementById('menu-inspection');
+      if (!menu || menu.style.display === 'none') return;
+      initInspectionMapIfNeeded_();
+      if (!inspectionMap || !inspectionMarkersLayer) return;
+      try { inspectionMap.invalidateSize(); } catch (e) {}
+      inspectionMarkersLayer.clearLayers();
+      const bounds = [];
+      let plotted = 0;
+      (filteredInspectionData || []).forEach(function(p) {
+        const info = getInspectionMapLocation_(p);
+        const loc = info.loc;
+        if (!loc) return;
+        const lat = Number(loc.lat);
+        const lng = Number(loc.lng);
+        if (!isFinite(lat) || !isFinite(lng)) return;
+        const marker = L.marker([lat, lng], { icon: getIcon(p.phase || loc.phase) });
+        if (p.visited) {
+          try { marker.setOpacity(0.55); } catch (e) {}
+        }
+        const tip = (info.name || p.place || '') + (p.visited ? ' (ตรวจแล้ว)' : '');
+        if (tip) marker.bindTooltip(tip, { direction: 'top', offset: [0, -28] });
+        marker.on('click', function() {
+          showInspectionMapDetails_(p);
+          if (window.matchMedia('(max-width: 991.98px)').matches) {
+            const d = document.getElementById('inspectionMapDetails');
+            if (d) try { d.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+          }
+        });
+        inspectionMarkersLayer.addLayer(marker);
+        bounds.push([lat, lng]);
+        plotted++;
+      });
+      if (badge) badge.textContent = plotted + ' จุด';
+      if (bounds.length > 1) {
+        try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
+      } else if (bounds.length === 1) {
+        inspectionMap.setView(bounds[0], 12);
+      } else {
+        inspectionMap.setView([13.7563, 100.5018], 6);
+        if (panel) {
+          panel.innerHTML = '<div class="text-center text-muted mt-5"><i class="fa-solid fa-map-location-dot fa-2x mb-2 opacity-50"></i><p class="mb-0">ไม่มีพิกัดตามตัวกรองปัจจุบัน</p></div>';
+        }
+      }
     }
 
     // --- จัดการแอดมินรอง (แอดมินหลักเท่านั้น) ---
