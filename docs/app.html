@@ -822,8 +822,8 @@
             </select>
           </div>
           <div class="col-md-6">
-            <select id="inspectionHandoverDateSelect" class="form-select form-select-sm" onchange="filterInspections()" title="วันที่ส่งมอบ">
-              <option value="">ทุกวันที่ส่งมอบ</option>
+            <select id="inspectionHandoverDateSelect" class="form-select form-select-sm" onchange="filterInspections()" title="วันที่จากคอลัมน์รอบส่งมอบงานจริงเท่านั้น">
+              <option value="">ทุกวันที่รอบส่งมอบงานจริง</option>
             </select>
           </div>
         </div>
@@ -4940,7 +4940,7 @@
             rounds.push(roundLabel);
           }
         }
-        const dateKey = inspectionHandoverDateKey_(p.handoverRound) || inspectionHandoverDateKey_(p.handoverPlan);
+        const dateKey = inspectionHandoverDateKey_(p.handoverRound);
         if (dateKey && !dateSeen[dateKey]) {
           dateSeen[dateKey] = true;
           dates.push(dateKey);
@@ -4964,7 +4964,7 @@
       }
       if (dateSel) {
         const curDate = (ui && ui.handoverDate) ? ui.handoverDate : dateSel.value;
-        dateSel.innerHTML = '<option value="">ทุกวันที่ส่งมอบ</option>' +
+        dateSel.innerHTML = '<option value="">ทุกวันที่รอบส่งมอบงานจริง</option>' +
           dates.map(function(k) {
             return '<option value="' + escHtml(k) + '">' + escHtml(formatInspectionHandoverDateOption_(k) || k) + '</option>';
           }).join('');
@@ -5926,7 +5926,7 @@
         }
         let matchDate = true;
         if (dateVal) {
-          const key = inspectionHandoverDateKey_(p.handoverRound) || inspectionHandoverDateKey_(p.handoverPlan);
+          const key = inspectionHandoverDateKey_(p.handoverRound);
           matchDate = key === dateVal;
         }
         return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns && matchRound && matchDate;
