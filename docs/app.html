@@ -835,29 +835,38 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
-            <small class="text-muted">กรองรอบส่งมอบ / สถานะตรวจ เพื่อวางแผนการเข้าตรวจ — คลิกหมุดเพื่อดูรายละเอียดและนำทาง</small>
+            <small class="text-muted">มีวันที่รอบส่งมอบ = พร้อมเข้าตรวจ · ไม่มีวันที่ = ยังไม่พร้อม — ใช้ตัวกรองด้านล่างเพื่อวางแผน</small>
           </div>
           <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
         </div>
         <div class="row g-2 mb-3 align-items-end" id="inspectionMapFilterBar">
-          <div class="col-md-5">
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-0" for="inspectionMapReadySelect">ความพร้อม (รอบส่งมอบงานจริง)</label>
+            <select id="inspectionMapReadySelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="มีวันที่รอบส่งมอบ = พร้อมเข้าตรวจ">
+              <option value="">ทุกสถานะความพร้อม</option>
+              <option value="ready">พร้อมเข้าตรวจ (มีวันที่)</option>
+              <option value="not_ready">ยังไม่พร้อม (ไม่มีวันที่)</option>
+            </select>
+          </div>
+          <div class="col-md-4">
             <label class="form-label small text-muted mb-0" for="inspectionMapRoundSelect">รอบส่งมอบงานจริง</label>
-            <select id="inspectionMapRoundSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="กรองตามรอบส่งมอบงานจริง">
-              <option value="">ทุกรอบส่งมอบงานจริง</option>
+            <select id="inspectionMapRoundSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="เลือกวันที่รอบส่งมอบงานจริง">
+              <option value="">ทุกรอบที่มีวันที่</option>
             </select>
           </div>
           <div class="col-md-4">
             <label class="form-label small text-muted mb-0" for="inspectionMapVisitedSelect">สถานะเข้าตรวจ</label>
             <select id="inspectionMapVisitedSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="กรองสถานที่ตรวจแล้ว / ยังไม่เข้าตรวจ">
-              <option value="">ทุกสถานะ</option>
+              <option value="">ทุกสถานะเข้าตรวจ</option>
               <option value="pending">ยังไม่เข้าตรวจ</option>
               <option value="done">ตรวจแล้ว</option>
             </select>
           </div>
-          <div class="col-md-3">
-            <div class="d-flex flex-wrap gap-2 small text-muted pb-1" id="inspectionMapLegend">
-              <span><i class="fa-solid fa-location-dot text-primary"></i> ยังไม่เข้าตรวจ</span>
-              <span><i class="fa-solid fa-location-dot text-success" style="opacity:0.55"></i> ตรวจแล้ว</span>
+          <div class="col-12">
+            <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
+              <span><i class="fa-solid fa-circle text-success"></i> พร้อมเข้าตรวจ (มีรอบส่งมอบ)</span>
+              <span><i class="fa-solid fa-circle text-secondary"></i> ยังไม่พร้อม (ไม่มีวันที่)</span>
+              <span><i class="fa-solid fa-location-dot text-primary" style="opacity:0.55"></i> ตรวจแล้ว (หมุดจาง)</span>
             </div>
           </div>
         </div>
@@ -4948,19 +4957,22 @@
       });
       rounds.sort(function(a, b) { return a.localeCompare(b, 'th'); });
       dates.sort();
-      const roundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
+      const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
+        rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
+      const mapRoundOptionsHtml = '<option value="">ทุกรอบที่มีวันที่</option>' +
         rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
       const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
         ? ui.handoverRound
-        : ((roundSel && roundSel.value) || (mapRoundSel && mapRoundSel.value) || '');
+        : ((roundSel && roundSel.value) || '');
       if (roundSel) {
-        roundSel.innerHTML = roundOptionsHtml;
+        roundSel.innerHTML = topRoundOptionsHtml;
         if (curRound === '__empty__' || rounds.indexOf(curRound) >= 0) roundSel.value = curRound;
       }
       if (mapRoundSel) {
-        mapRoundSel.innerHTML = roundOptionsHtml;
-        if (curRound === '__empty__' || rounds.indexOf(curRound) >= 0) mapRoundSel.value = curRound;
+        const curMapRound = mapRoundSel.value;
+        mapRoundSel.innerHTML = mapRoundOptionsHtml;
+        if (curMapRound && rounds.indexOf(curMapRound) >= 0) mapRoundSel.value = curMapRound;
       }
       if (dateSel) {
         const curDate = (ui && ui.handoverDate) ? ui.handoverDate : dateSel.value;
@@ -4970,26 +4982,38 @@
           }).join('');
         if (curDate && dates.indexOf(curDate) >= 0) dateSel.value = curDate;
       }
-      syncInspectionMapFilterControls_();
     }
 
-    function syncInspectionMapFilterControls_() {
-      const topRound = document.getElementById('inspectionHandoverRoundSelect');
-      const topVisited = document.getElementById('inspectionVisitedSelect');
-      const mapRound = document.getElementById('inspectionMapRoundSelect');
-      const mapVisited = document.getElementById('inspectionMapVisitedSelect');
-      if (mapRound && topRound && mapRound.value !== topRound.value) mapRound.value = topRound.value;
-      if (mapVisited && topVisited && mapVisited.value !== topVisited.value) mapVisited.value = topVisited.value;
+    function inspectionHasHandoverRound_(p) {
+      return !!String((p && p.handoverRound) || '').trim();
+    }
+
+    function getInspectionMapFilteredPlans_() {
+      const readyVal = document.getElementById('inspectionMapReadySelect')?.value || '';
+      const roundVal = document.getElementById('inspectionMapRoundSelect')?.value || '';
+      const visitedVal = document.getElementById('inspectionMapVisitedSelect')?.value || '';
+      return (filteredInspectionData || []).filter(function(p) {
+        const hasRound = inspectionHasHandoverRound_(p);
+        if (readyVal === 'ready' && !hasRound) return false;
+        if (readyVal === 'not_ready' && hasRound) return false;
+        if (roundVal) {
+          if (!hasRound) return false;
+          const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
+          if (label !== roundVal) return false;
+        }
+        if (visitedVal === 'done' && !p.visited) return false;
+        if (visitedVal === 'pending' && p.visited) return false;
+        return true;
+      });
     }
 
     function onInspectionMapFilterChange_() {
-      const mapRound = document.getElementById('inspectionMapRoundSelect');
-      const mapVisited = document.getElementById('inspectionMapVisitedSelect');
-      const topRound = document.getElementById('inspectionHandoverRoundSelect');
-      const topVisited = document.getElementById('inspectionVisitedSelect');
-      if (mapRound && topRound) topRound.value = mapRound.value;
-      if (mapVisited && topVisited) topVisited.value = mapVisited.value;
-      filterInspections();
+      const readyEl = document.getElementById('inspectionMapReadySelect');
+      const roundEl = document.getElementById('inspectionMapRoundSelect');
+      if (readyEl && readyEl.value === 'not_ready' && roundEl && roundEl.value) {
+        roundEl.value = '';
+      }
+      renderInspectionMap_();
     }
     window.onInspectionMapFilterChange_ = onInspectionMapFilterChange_;
 
@@ -6191,7 +6215,10 @@
       const planTxt = formatInspectionHandoverDate_(p.handoverPlan, false) || (p.handoverPlan || '-');
       const statusBadge = p.visited
         ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
-        : '<span class="badge bg-warning text-dark">ยังไม่ตรวจ</span>';
+        : '<span class="badge bg-warning text-dark">ยังไม่เข้าตรวจ</span>';
+      const readyBadge = inspectionHasHandoverRound_(p)
+        ? '<span class="badge bg-primary ms-1"><i class="fa-solid fa-clipboard-check"></i> พร้อมเข้าตรวจ</span>'
+        : '<span class="badge bg-secondary ms-1">ยังไม่พร้อม (ไม่มีรอบส่งมอบ)</span>';
       let navHtml = '';
       if (loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
         navHtml =
@@ -6202,7 +6229,7 @@
         ? '<button type="button" class="btn btn-primary btn-sm mb-1" onclick="editInspection(\'' + safeId + '\')"><i class="fa-solid fa-pen"></i> แก้ไข</button>'
         : '';
       panel.innerHTML =
-        '<div class="mb-2">' + statusBadge + '</div>' +
+        '<div class="mb-2">' + statusBadge + readyBadge + '</div>' +
         '<h6 class="fw-bold mb-2">' + escHtml(info.name || p.place || '-') + '</h6>' +
         '<div class="small text-muted mb-1"><i class="fa-solid fa-layer-group me-1"></i>เฟส ' + escHtml(p.phase || '-') +
         (p.region ? ' · ' + escHtml(p.region) : '') + '</div>' +
@@ -6220,30 +6247,36 @@
       const panel = document.getElementById('inspectionMapDetails');
       const menu = document.getElementById('menu-inspection');
       if (!menu || menu.style.display === 'none') return;
-      syncInspectionMapFilterControls_();
       initInspectionMapIfNeeded_();
       if (!inspectionMap || !inspectionMarkersLayer) return;
       try { inspectionMap.invalidateSize(); } catch (e) {}
       inspectionMarkersLayer.clearLayers();
       const bounds = [];
       let plotted = 0;
-      let plottedPending = 0;
+      let plottedReady = 0;
+      let plottedNotReady = 0;
       let plottedDone = 0;
-      (filteredInspectionData || []).forEach(function(p) {
+      const mapPlans = getInspectionMapFilteredPlans_();
+      mapPlans.forEach(function(p) {
         const info = getInspectionMapLocation_(p);
         const loc = info.loc;
         if (!loc) return;
         const lat = Number(loc.lat);
         const lng = Number(loc.lng);
         if (!isFinite(lat) || !isFinite(lng)) return;
+        const hasRound = inspectionHasHandoverRound_(p);
         const marker = L.marker([lat, lng], { icon: getIcon(p.phase || loc.phase) });
         if (p.visited) {
-          try { marker.setOpacity(0.55); } catch (e) {}
+          try { marker.setOpacity(0.45); } catch (e) {}
           plottedDone++;
-        } else {
-          plottedPending++;
+        } else if (!hasRound) {
+          try { marker.setOpacity(0.7); } catch (e) {}
         }
-        const tip = (info.name || p.place || '') + (p.visited ? ' (ตรวจแล้ว)' : ' (ยังไม่เข้าตรวจ)');
+        if (hasRound) plottedReady++;
+        else plottedNotReady++;
+        const tip = (info.name || p.place || '') +
+          (hasRound ? ' · พร้อมเข้าตรวจ' : ' · ยังไม่พร้อม') +
+          (p.visited ? ' · ตรวจแล้ว' : '');
         if (tip) marker.bindTooltip(tip, { direction: 'top', offset: [0, -28] });
         marker.on('click', function() {
           showInspectionMapDetails_(p);
@@ -6258,7 +6291,7 @@
       });
       if (badge) {
         badge.textContent = plotted
-          ? (plotted + ' จุด · ยังไม่เข้าตรวจ ' + plottedPending + ' · ตรวจแล้ว ' + plottedDone)
+          ? (plotted + ' จุด · พร้อม ' + plottedReady + ' · ยังไม่พร้อม ' + plottedNotReady + (plottedDone ? ' · ตรวจแล้ว ' + plottedDone : ''))
           : '0 จุด';
       }
       if (bounds.length > 1) {
@@ -6268,7 +6301,7 @@
       } else {
         inspectionMap.setView([13.7563, 100.5018], 6);
         if (panel) {
-          panel.innerHTML = '<div class="text-center text-muted mt-5"><i class="fa-solid fa-filter-circle-xmark fa-2x mb-2 opacity-50"></i><p class="mb-0">ไม่มีจุดตามตัวกรองนี้<br><span class="small">ลองเปลี่ยนรอบส่งมอบหรือสถานะเข้าตรวจ</span></p></div>';
+          panel.innerHTML = '<div class="text-center text-muted mt-5"><i class="fa-solid fa-filter-circle-xmark fa-2x mb-2 opacity-50"></i><p class="mb-0">ไม่มีจุดตามตัวกรองนี้<br><span class="small">ลองเปลี่ยนความพร้อม / รอบส่งมอบ / สถานะเข้าตรวจ</span></p></div>';
         }
       }
     }
