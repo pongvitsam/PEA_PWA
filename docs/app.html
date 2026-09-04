@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
+  <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PWA Project Dashboard</title>
@@ -15,8 +16,6 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="icon" href="data:,">
-  <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=11"></script>
   <!-- chart / fullcalendar / sortable / flatpickr: โหลดเมื่อเปิดเมนูที่เกี่ยวข้อง (มือถือเร็วขึ้น) -->
   <style>
     :root {
@@ -172,13 +171,29 @@
       border: 1px solid var(--pwa-border); z-index: 1;
     }
     .inspection-map-details {
-      height: 55vh; min-height: 320px; overflow-y: auto;
+      height: 32vh; min-height: 200px; max-height: 280px; overflow-y: auto;
       background: #f8fafc; border-radius: 16px; padding: 1rem;
       border: 1px solid var(--pwa-border);
     }
+    .inspection-trip-panel {
+      background: #eff6ff; border-radius: 16px; padding: 0.85rem 1rem;
+      border: 1px solid #bfdbfe; margin-top: 0.75rem;
+      max-height: 28vh; min-height: 140px; overflow-y: auto;
+    }
+    .inspection-trip-panel .insp-trip-stop {
+      display: flex; align-items: flex-start; gap: 0.5rem;
+      background: #fff; border-radius: 10px; padding: 0.5rem 0.65rem;
+      border: 1px solid var(--pwa-border); margin-bottom: 0.4rem;
+    }
+    .inspection-trip-panel .insp-trip-num {
+      width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+      background: #2563eb; color: #fff; font-size: 0.75rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+    }
     @media (max-width: 991.98px) {
       #inspectionMap { height: 45vh; max-height: 380px; }
-      .inspection-map-details { height: auto; min-height: 200px; max-height: none; }
+      .inspection-map-details { height: auto; min-height: 160px; max-height: none; }
+      .inspection-trip-panel { max-height: none; }
     }
     .inspection-form-template-banner {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
@@ -732,7 +747,7 @@
         </div>
       </div>
     </div>
-  
+
     <div id="menu-inspection" style="display: none;">
       <div class="inspection-page-header">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -880,10 +895,28 @@
           </div>
           <div class="col-lg-4">
             <div class="inspection-map-details" id="inspectionMapDetails">
-              <div class="text-center text-muted mt-5">
+              <div class="text-center text-muted mt-4">
                 <i class="fa-solid fa-hand-pointer fa-2x mb-2"></i>
-                <p class="mb-0">คลิกหมุดบนแผนที่เพื่อดูรายละเอียด</p>
+                <p class="mb-0">คลิกหมุดบนแผนที่เพื่อดูระยะทางจาก GPS และเพิ่มในแผนตรวจ</p>
               </div>
+            </div>
+            <div class="inspection-trip-panel" id="inspectionTripPanel">
+              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <div class="fw-bold small mb-0"><i class="fa-solid fa-route text-primary"></i> แผนตรวจ / นำทาง</div>
+                <span class="badge bg-primary" id="inspectionTripCountBadge">0 จุด</span>
+              </div>
+              <div class="input-group input-group-sm mb-2">
+                <input type="text" list="inspectionTripPlaceList" id="inspectionTripAddInput" class="form-control" placeholder="เพิ่มสถานที่ตรวจรับอื่น..." onkeydown="if(event.key==='Enter'){event.preventDefault();addInspectionTripFromSearch_()}">
+                <button type="button" class="btn btn-outline-primary" onclick="addInspectionTripFromSearch_()"><i class="fa-solid fa-plus"></i></button>
+              </div>
+              <datalist id="inspectionTripPlaceList"></datalist>
+              <div class="d-flex flex-wrap gap-1 mb-2">
+                <button type="button" class="btn btn-sm btn-info text-white" onclick="addInspectionTripGpsStart_()"><i class="fa-solid fa-location-crosshairs"></i> เริ่มจาก GPS</button>
+                <button type="button" class="btn btn-sm btn-custom-primary" id="inspectionTripNavBtn" onclick="startInspectionTripNavigation_()" disabled><i class="fa-brands fa-google"></i> นำทาง</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearInspectionTripPlan_()" title="ล้างแผน"><i class="fa-solid fa-trash"></i></button>
+              </div>
+              <div id="inspectionTripSummary" class="small text-muted mb-2"></div>
+              <div id="inspectionTripList"><p class="text-muted small mb-0">ยังไม่มีจุดในแผน — คลิกหมุดแล้วกด「เพิ่มในแผน」</p></div>
             </div>
           </div>
         </div>
@@ -1242,12 +1275,14 @@
     let currentDbLocationIndex = -1;
     let inspectionData = [], filteredInspectionData = [];
     let inspectionInitialized = false;
-    let inspectionUiStash_ = null;
     let inspectionActiveRegion = '';
+    let inspectionUiStash_ = null;
     let inspectionColumnFilters = {};
     let routeMap, routeMarkersLayer, routeLineLayer;
     let inspectionMap = null, inspectionMarkersLayer = null;
     let inspectionMyLocationMarker = null;
+    let inspectionTripStops = [];
+    const INSPECTION_TRIP_LS_KEY = 'insp_trip_plan_v1';
     let mapGpsWatchId = null;
     let myLocationMarker = null;
     let radiusCircle = null;
@@ -1757,11 +1792,6 @@
       return userRole === 'admin' || userRole === 'editor';
     }
 
-    function redirectToLogin() {
-      clearAuthState();
-      window.location.href = 'index.html';
-    }
-
     let appStarted = false;
     let mapInitialized = false;
     let dashboardEverOpened = false;
@@ -2112,13 +2142,23 @@
     function checkAuthToken() {
       try {
         const raw = localStorage.getItem('pwa_token');
-        if (!raw) { redirectToLogin(); return; }
+        if (!raw) {
+          updateUIByRole();
+          showLogin(true);
+          return;
+        }
         const token = JSON.parse(raw);
         if (!token || !token.expire || token.expire <= Date.now()) {
-          redirectToLogin(); return;
+          clearAuthState();
+          updateUIByRole();
+          showLogin(true);
+          return;
         }
         if (token.role === 'guest' || !token.sessionToken || !isValidSessionTokenFormat(token.sessionToken)) {
-          redirectToLogin(); return;
+          clearAuthState();
+          updateUIByRole();
+          showLogin(true);
+          return;
         }
         // มือถือ: เริ่มโหลดแอปทันทีจาก token ในเครื่อง — validate พื้นหลัง
         persistAuthState(token.role, token.sessionToken, token.expire);
@@ -2127,17 +2167,21 @@
         google.script.run.withSuccessHandler(function(res) {
           if (!res || !res.valid) {
             appStarted = false;
-            redirectToLogin();
+            clearAuthState();
+            updateUIByRole();
+            showLogin(true);
             return;
           }
           persistAuthState(res.role, token.sessionToken, res.expire || token.expire);
           updateUIByRole();
         }).withFailureHandler(function() {
-          // คงสถานะเดิมถ้าเน็ตหลุดชั่วคราว
+          // คงสถานะเดิมถ้าเน็ตหลุดชั่วคราว — ผู้ใช้ยังใช้ข้อมูลในเครื่องได้
         }).validateClientSession(token.sessionToken);
       } catch (e) {
         appStarted = false;
-        redirectToLogin();
+        clearAuthState();
+        updateUIByRole();
+        showLogin(true);
       }
     }
 
@@ -2147,10 +2191,10 @@
       if (tok) {
         google.script.run.withFailureHandler(function() {}).revokeSession(tok);
       }
-      window.location.href = 'index.html';
+      window.location.reload();
     }
 
-    function showLogin() {
+    function showLogin(mandatory) {
       if(userRole === 'admin' || userRole === 'editor') {
         Swal.fire({
           title: 'ออกจากระบบ?', text: "คุณต้องการออกจากระบบหรือไม่", icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787'
@@ -2158,7 +2202,54 @@
           if(res.isConfirmed) doLogout();
         }); return;
       }
-      window.location.href = 'index.html';
+      let rememberPref = true;
+      try { rememberPref = localStorage.getItem('pwa_remember_device') !== '0'; } catch (e) {}
+      Swal.fire({
+        title: 'เข้าสู่ระบบ',
+        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน">' +
+          '<input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">' +
+          '<label for="swal-remember" style="display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0 0;cursor:pointer;font-size:0.95rem;user-select:none;">' +
+          '<input type="checkbox" id="swal-remember"' + (rememberPref ? ' checked' : '') + ' style="width:1.1rem;height:1.1rem;accent-color:#2563eb;">' +
+          'จดจำอุปกรณ์นี้ (30 วัน)</label>',
+        confirmButtonText: 'เข้าสู่ระบบ',
+        confirmButtonColor: '#2563eb',
+        allowOutsideClick: !mandatory,
+        allowEscapeKey: !mandatory,
+        preConfirm: () => {
+          const user = document.getElementById('swal-user').value.trim();
+          if (!user) { Swal.showValidationMessage('กรอกชื่อผู้ใช้'); return false; }
+          return {
+            user: user,
+            pass: document.getElementById('swal-pass').value,
+            remember: !!(document.getElementById('swal-remember') && document.getElementById('swal-remember').checked)
+          };
+        }
+      }).then((res) => {
+        if (res.isConfirmed) {
+          try { localStorage.setItem('pwa_remember_device', res.value.remember ? '1' : '0'); } catch (e) {}
+          google.script.run.withSuccessHandler(data => {
+            if(data.success) {
+              if (!data.sessionToken) {
+                Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: 'ไม่ได้รับ session token จากเซิร์ฟเวอร์' });
+                showLogin(true);
+                return;
+              }
+              persistAuthState(data.role, data.sessionToken, data.expire || (Date.now() + SESSION_TTL_MS));
+              updateUIByRole();
+              Toast.fire({ icon: 'success', title: data.message });
+              startAppAfterAuth();
+            } else {
+              Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
+              if (mandatory) showLogin(true);
+            }
+          }).withFailureHandler(err => {
+            Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: err.message });
+            if (mandatory) showLogin(true);
+          }).authenticate(res.value.user, res.value.pass, res.value.remember);
+        } else if (mandatory) {
+          showLogin(true);
+        }
+      });
     }
 
     function canEditOutage() { return userRole === 'admin' || userRole === 'editor'; }
@@ -2662,7 +2753,7 @@
       let sortedRegions = Object.keys(regionCount).sort();
       let rData = sortedRegions.map(k => regionCount[k]);
       let rLabel = regionType === 'pwa' ? 'กปภ.' : 'กฟภ.';
-      let rColor = regionType === 'pwa' ? '#3b82f6' : '#6366f1';
+      let rColor = regionType === 'pwa' ? '#3b82f6' : '#6366f1'; 
 
       pwaChartInstance = new Chart(ctxPwa, {
         type: 'bar',
@@ -3586,7 +3677,7 @@
       const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
       const title = months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
       // #region agent log
-      _dbg153e7b_('docs/app.html:formatCalendarTitleTh_', 'title computed', {
+      _dbg153e7b_('Index.html:formatCalendarTitleTh_', 'title computed', {
         branch: branch,
         inputType: input == null ? 'null' : (input instanceof Date ? 'Date' : typeof input),
         inputKeys: input && typeof input === 'object' && !(input instanceof Date) ? Object.keys(input) : [],
@@ -3606,7 +3697,7 @@
       const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
       if (titleEl) titleEl.textContent = title;
       // #region agent log
-      _dbg153e7b_('docs/app.html:syncOutageCalendarTitle_', 'title synced', {
+      _dbg153e7b_('Index.html:syncOutageCalendarTitle_', 'title synced', {
         calDate: d.toISOString(),
         title: title,
         domTitle: titleEl ? titleEl.textContent : null
@@ -3831,7 +3922,7 @@
       const calDateBefore = calendar ? calendar.getDate() : null;
       const preserveDate = outageCalendarViewDate_ || calDateBefore || focusDate;
       // #region agent log
-      _dbg153e7b_('docs/app.html:refreshOutageCalendar', 'refresh called', {
+      _dbg153e7b_('Index.html:refreshOutageCalendar', 'refresh called', {
         hasCalendar: !!calendar,
         focusDate: focusDate ? focusDate.toISOString() : null,
         calDateBefore: calDateBefore ? calDateBefore.toISOString() : null,
@@ -3847,7 +3938,7 @@
         syncOutageCalendarTitle_();
         calendar.updateSize();
         // #region agent log
-        _dbg153e7b_('docs/app.html:refreshOutageCalendar', 'after refresh', {
+        _dbg153e7b_('Index.html:refreshOutageCalendar', 'after refresh', {
           calDateAfter: calendar.getDate().toISOString(),
           domTitle: (document.querySelector('.calendar-container .fc-toolbar-title') || {}).textContent || ''
         }, 'H3');
@@ -3892,7 +3983,7 @@
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
         titleFormat: function(date) {
           // #region agent log
-          _dbg153e7b_('docs/app.html:titleFormat', 'titleFormat invoked', {
+          _dbg153e7b_('Index.html:titleFormat', 'titleFormat invoked', {
             argType: date == null ? 'null' : (date instanceof Date ? 'Date' : typeof date),
             argKeys: date && typeof date === 'object' && !(date instanceof Date) ? Object.keys(date) : [],
             hasDateInfo: !!(date && date.date && typeof date.date.year === 'number')
@@ -3932,7 +4023,7 @@
           syncOutageCalendarTitle_(info);
           const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
           // #region agent log
-          _dbg153e7b_('docs/app.html:datesSet', 'dates changed', {
+          _dbg153e7b_('Index.html:datesSet', 'dates changed', {
             start: info && info.start ? info.start.toISOString() : null,
             calDate: calendar ? calendar.getDate().toISOString() : null,
             viewType: info && info.view ? info.view.type : null,
@@ -4693,7 +4784,7 @@
       let textVal = document.getElementById('outageSearchInput').value.toLowerCase().trim();
       let regionVal = document.getElementById('outageRegionSelect').value;
       // #region agent log
-      _dbg153e7b_('docs/app.html:filterOutages', 'filter triggered', {
+      _dbg153e7b_('Index.html:filterOutages', 'filter triggered', {
         textLen: textVal.length,
         regionVal: regionVal,
         resultCount: (outageData || []).length
@@ -4871,6 +4962,8 @@
 
     function initInspectionSystem() {
       if (inspectionInitialized) return;
+      loadInspectionTripPlan_();
+      renderInspectionTripPanel_();
       const cached = readCachedInspections_();
       if (cached) {
         inspectionData = cached;
@@ -4878,6 +4971,7 @@
         inspectionInitialized = true;
         setupInspectionPwaFilter();
         filterInspections();
+        refreshInspectionTripDatalist_();
       } else {
         showInspectionLoading_();
       }
@@ -4888,6 +4982,7 @@
         writeCachedInspections_(res || []);
         setupInspectionPwaFilter();
         filterInspections();
+        refreshInspectionTripDatalist_();
         setTimeout(function() { loadInspectionFormTemplate(); }, 800);
         scheduleInspectionBackgroundSync_();
       }).withFailureHandler(err => {
@@ -6205,7 +6300,7 @@
         : '';
       Swal.fire({
         title: info.name,
-        html: renderOutageLocReadonly(info.loc) + distBlock + navBtn + mapBtn,
+        html: renderOutageLocReadonly(loc) + distBlock + navBtn + mapBtn,
         width: 620,
         confirmButtonColor: '#2563eb',
         confirmButtonText: 'ปิด',
@@ -6225,6 +6320,302 @@
           }
         }
       });
+    }
+
+    function loadInspectionTripPlan_() {
+      try {
+        const raw = localStorage.getItem(INSPECTION_TRIP_LS_KEY);
+        if (!raw) { inspectionTripStops = []; return; }
+        const parsed = JSON.parse(raw);
+        inspectionTripStops = Array.isArray(parsed) ? parsed.filter(function(s) {
+          return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
+        }) : [];
+      } catch (e) {
+        inspectionTripStops = [];
+      }
+    }
+
+    function saveInspectionTripPlan_() {
+      try {
+        localStorage.setItem(INSPECTION_TRIP_LS_KEY, JSON.stringify(inspectionTripStops || []));
+      } catch (e) {}
+    }
+
+    function inspectionTripStopFromPlan_(p) {
+      const info = getInspectionMapLocation_(p);
+      const loc = info.loc;
+      if (!loc || !isFinite(Number(loc.lat)) || !isFinite(Number(loc.lng))) return null;
+      return {
+        key: 'insp:' + String(p.id),
+        inspectionId: p.id,
+        name: info.name || p.place || 'สถานที่ตรวจรับ',
+        place: p.place || '',
+        region: p.region || '',
+        phase: p.phase || '',
+        handoverRound: p.handoverRound || '',
+        lat: Number(loc.lat),
+        lng: Number(loc.lng),
+        isMyLocation: false
+      };
+    }
+
+    function refreshInspectionTripDatalist_() {
+      const dl = document.getElementById('inspectionTripPlaceList');
+      if (!dl) return;
+      const opts = [];
+      const seen = {};
+      (inspectionData || []).forEach(function(p) {
+        const stop = inspectionTripStopFromPlan_(p);
+        if (!stop) return;
+        const label = stop.name + (stop.region ? ' (' + stop.region + ')' : '');
+        if (seen[label]) return;
+        seen[label] = true;
+        opts.push('<option value="' + escHtml(label) + '"></option>');
+      });
+      dl.innerHTML = opts.join('');
+    }
+
+    function renderInspectionTripPanel_() {
+      const listEl = document.getElementById('inspectionTripList');
+      const badge = document.getElementById('inspectionTripCountBadge');
+      const navBtn = document.getElementById('inspectionTripNavBtn');
+      const summaryEl = document.getElementById('inspectionTripSummary');
+      if (badge) badge.textContent = (inspectionTripStops.length || 0) + ' จุด';
+      if (navBtn) navBtn.disabled = inspectionTripStops.length === 0;
+      if (!listEl) return;
+      if (!inspectionTripStops.length) {
+        listEl.innerHTML = '<p class="text-muted small mb-0">ยังไม่มีจุดในแผน — คลิกหมุดแล้วกด「เพิ่มในแผน」</p>';
+        if (summaryEl) summaryEl.innerHTML = '';
+        return;
+      }
+      listEl.innerHTML = inspectionTripStops.map(function(stop, idx) {
+        const sub = stop.isMyLocation
+          ? 'ตำแหน่ง GPS ของคุณ'
+          : [(stop.region || ''), (formatInspectionHandoverDate_(stop.handoverRound, false) || stop.handoverRound || '')].filter(Boolean).join(' · ');
+        return '<div class="insp-trip-stop">' +
+          '<div class="insp-trip-num">' + (idx + 1) + '</div>' +
+          '<div class="flex-grow-1 small">' +
+            '<div class="fw-semibold">' + escHtml(stop.name || '-') + '</div>' +
+            (sub ? '<div class="text-muted" style="font-size:0.75rem">' + escHtml(sub) + '</div>' : '') +
+          '</div>' +
+          '<button type="button" class="btn btn-sm btn-outline-danger border-0 py-0 px-1" onclick="removeInspectionTripStop_(' + idx + ')" title="ลบ"><i class="fa-solid fa-xmark"></i></button>' +
+          '</div>';
+      }).join('');
+      refreshInspectionTripRouteSummary_();
+    }
+
+    function refreshInspectionTripRouteSummary_() {
+      const summaryEl = document.getElementById('inspectionTripSummary');
+      if (!summaryEl) return;
+      const pts = (inspectionTripStops || []).filter(function(s) {
+        return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
+      });
+      if (pts.length < 2) {
+        summaryEl.innerHTML = pts.length === 1
+          ? '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเวลาระหว่างจุด</span>'
+          : '';
+        return;
+      }
+      summaryEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณเวลาเดินทาง...</span>';
+      const coords = pts.map(function(s) { return Number(s.lng) + ',' + Number(s.lat); }).join(';');
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const t = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, 18000) : null;
+      const fetchOpts = ctrl ? { signal: ctrl.signal } : {};
+      fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=false', fetchOpts)
+        .then(function(res) { if (t) clearTimeout(t); return res.json(); })
+        .then(function(data) {
+          if (!(data.code === 'Ok' && data.routes && data.routes[0])) {
+            summaryEl.innerHTML = '<span class="text-warning">คำนวณเส้นทางไม่สำเร็จ — ยังกดนำทางได้</span>';
+            return;
+          }
+          const distKm = (data.routes[0].distance / 1000).toFixed(1);
+          const timeMin = Math.round(data.routes[0].duration / 60);
+          const hour = Math.floor(timeMin / 60);
+          const minute = timeMin % 60;
+          let legsHtml = '';
+          if (data.routes[0].legs && data.routes[0].legs.length) {
+            legsHtml = '<div class="mt-1">' + data.routes[0].legs.map(function(leg, i) {
+              const km = (leg.distance / 1000).toFixed(1);
+              const m = Math.round(leg.duration / 60);
+              const from = pts[i] ? pts[i].name : ('จุด ' + (i + 1));
+              const to = pts[i + 1] ? pts[i + 1].name : ('จุด ' + (i + 2));
+              return '<div class="text-muted" style="font-size:0.72rem">' + escHtml(from) + ' → ' + escHtml(to) + ': <b>' + km + ' กม.</b> · ~' + m + ' นาที</div>';
+            }).join('') + '</div>';
+          }
+          summaryEl.innerHTML =
+            '<div class="alert alert-success py-2 mb-0 small">' +
+            '<i class="fa-solid fa-car"></i> รวม <b>' + distKm + ' กม.</b> · ' +
+            '<i class="fa-regular fa-clock"></i> ~<b>' + hour + ' ชม. ' + minute + ' นาที</b>' +
+            legsHtml + '</div>';
+        })
+        .catch(function() {
+          if (t) clearTimeout(t);
+          summaryEl.innerHTML = '<span class="text-warning">เซิร์ฟเวอร์เส้นทางไม่พร้อม — ยังกดนำทางได้</span>';
+        });
+    }
+
+    window.addInspectionToTripPlan_ = function(inspectionId) {
+      const p = (inspectionData || []).find(function(x) { return String(x.id) === String(inspectionId); });
+      if (!p) {
+        Toast.fire({ icon: 'error', title: 'ไม่พบรายการตรวจรับ' });
+        return;
+      }
+      const stop = inspectionTripStopFromPlan_(p);
+      if (!stop) {
+        Toast.fire({ icon: 'warning', title: 'สถานที่นี้ยังไม่มีพิกัดในฐานข้อมูล' });
+        return;
+      }
+      if (inspectionTripStops.some(function(s) { return s.key === stop.key; })) {
+        Toast.fire({ icon: 'info', title: 'มีในแผนแล้ว' });
+        return;
+      }
+      inspectionTripStops.push(stop);
+      saveInspectionTripPlan_();
+      renderInspectionTripPanel_();
+      Toast.fire({ icon: 'success', title: 'เพิ่มในแผนตรวจแล้ว' });
+    };
+
+    window.addInspectionTripFromSearch_ = function() {
+      const input = document.getElementById('inspectionTripAddInput');
+      const val = (input && input.value ? input.value : '').trim().toLowerCase();
+      if (!val) {
+        Toast.fire({ icon: 'warning', title: 'พิมพ์หรือเลือกสถานที่ก่อน' });
+        return;
+      }
+      let matched = null;
+      (inspectionData || []).some(function(p) {
+        const stop = inspectionTripStopFromPlan_(p);
+        if (!stop) return false;
+        const label = (stop.name + (stop.region ? ' (' + stop.region + ')' : '')).toLowerCase();
+        const name = String(stop.name || '').toLowerCase();
+        if (label === val || name === val || label.indexOf(val) >= 0 || name.indexOf(val) >= 0) {
+          matched = p;
+          return true;
+        }
+        return false;
+      });
+      if (!matched) {
+        Toast.fire({ icon: 'error', title: 'ไม่พบสถานที่ในแผนตรวจรับ' });
+        return;
+      }
+      if (input) input.value = '';
+      addInspectionToTripPlan_(matched.id);
+    };
+
+    window.addInspectionTripGpsStart_ = function() {
+      function pushGps_(la, ln) {
+        const gpsStop = {
+          key: 'gps',
+          inspectionId: '',
+          name: 'ตำแหน่งของฉัน (GPS)',
+          place: '',
+          region: '',
+          phase: '',
+          handoverRound: '',
+          lat: la,
+          lng: ln,
+          isMyLocation: true
+        };
+        inspectionTripStops = inspectionTripStops.filter(function(s) { return !s.isMyLocation && s.key !== 'gps'; });
+        inspectionTripStops.unshift(gpsStop);
+        saveInspectionTripPlan_();
+        renderInspectionTripPanel_();
+        Toast.fire({ icon: 'success', title: 'ตั้งต้นทางเป็น GPS แล้ว' });
+      }
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
+        pushGps_(lastUserGps.lat, lastUserGps.lng);
+        return;
+      }
+      getUserLatLngForRoute_().then(function(user) {
+        pushGps_(user.lat, user.lng);
+      }).catch(function() {
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
+      });
+    };
+
+    window.removeInspectionTripStop_ = function(idx) {
+      if (idx < 0 || idx >= inspectionTripStops.length) return;
+      inspectionTripStops.splice(idx, 1);
+      saveInspectionTripPlan_();
+      renderInspectionTripPanel_();
+    };
+
+    window.clearInspectionTripPlan_ = function() {
+      if (!inspectionTripStops.length) return;
+      inspectionTripStops = [];
+      saveInspectionTripPlan_();
+      renderInspectionTripPanel_();
+      Toast.fire({ icon: 'success', title: 'ล้างแผนตรวจแล้ว' });
+    };
+
+    window.startInspectionTripNavigation_ = function() {
+      if (!inspectionTripStops.length) return;
+      const stops = inspectionTripStops.filter(function(s) {
+        return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
+      });
+      if (!stops.length) return;
+      let mapsUrl = BASE_NAV_URL;
+      if (stops.length === 1) {
+        mapsUrl += '&destination=' + stops[0].lat + ',' + stops[0].lng;
+      } else {
+        const origin = stops[0].lat + ',' + stops[0].lng;
+        const dest = stops[stops.length - 1].lat + ',' + stops[stops.length - 1].lng;
+        let waypoints = '';
+        if (stops.length > 2) {
+          waypoints = '&waypoints=' + stops.slice(1, -1).map(function(s) {
+            return s.lat + ',' + s.lng;
+          }).join('|');
+        }
+        mapsUrl += '&origin=' + origin + '&destination=' + dest + waypoints;
+      }
+      window.open(mapsUrl, '_blank');
+    };
+
+    function showInspectionMapDetails_(p) {
+      const panel = document.getElementById('inspectionMapDetails');
+      if (!panel || !p) return;
+      const info = getInspectionMapLocation_(p);
+      const loc = info.loc;
+      const safeId = String(p.id).replace(/'/g, "\\'");
+      const roundTxt = formatInspectionHandoverDate_(p.handoverRound, false) || (p.handoverRound || '-');
+      const planTxt = formatInspectionHandoverDate_(p.handoverPlan, false) || (p.handoverPlan || '-');
+      const statusBadge = p.visited
+        ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
+        : '<span class="badge bg-warning text-dark">ยังไม่เข้าตรวจ</span>';
+      const readyBadge = inspectionHasHandoverRound_(p)
+        ? '<span class="badge bg-primary ms-1"><i class="fa-solid fa-clipboard-check"></i> พร้อมเข้าตรวจ</span>'
+        : '<span class="badge bg-secondary ms-1">ยังไม่พร้อม (ไม่มีรอบส่งมอบ)</span>';
+      const hasCoords = !!(loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng)));
+      const distBlock = hasCoords
+        ? '<div id="inspMapDistResult" class="mt-2 small"><span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณระยะทางจาก GPS...</span></div>'
+        : '<div class="mt-2 small text-warning">ยังไม่มีพิกัดในฐานข้อมูล — คำนวณระยะไม่ได้</div>';
+      let actionHtml = '';
+      if (hasCoords) {
+        actionHtml +=
+          '<button type="button" class="btn btn-success btn-sm me-1 mb-1" onclick="addInspectionToTripPlan_(\'' + safeId + '\')">' +
+          '<i class="fa-solid fa-plus"></i> เพิ่มในแผน</button>' +
+          '<button type="button" class="btn btn-outline-primary btn-sm me-1 mb-1" onclick="window.open(BASE_NAV_URL+\'&destination=' + loc.lat + ',' + loc.lng + '\',\'_blank\')">' +
+          '<i class="fa-brands fa-google"></i> นำทางจุดนี้</button>';
+      }
+      const editBtn = canEditInspection()
+        ? '<button type="button" class="btn btn-primary btn-sm mb-1" onclick="editInspection(\'' + safeId + '\')"><i class="fa-solid fa-pen"></i> แก้ไข</button>'
+        : '';
+      panel.innerHTML =
+        '<div class="mb-2">' + statusBadge + readyBadge + '</div>' +
+        '<h6 class="fw-bold mb-2">' + escHtml(info.name || p.place || '-') + '</h6>' +
+        '<div class="small text-muted mb-1"><i class="fa-solid fa-layer-group me-1"></i>เฟส ' + escHtml(p.phase || '-') +
+        (p.region ? ' · ' + escHtml(p.region) : '') + '</div>' +
+        '<div class="small mb-1"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
+        '<div class="small mb-1"><b>แผนส่งมอบงาน:</b> ' + escHtml(planTxt) + '</div>' +
+        (p.pwaDistrict ? '<div class="small mb-1"><b>กปภ. เขต:</b> ' + escHtml(p.pwaDistrict) + '</div>' : '') +
+        (p.peaZone ? '<div class="small mb-1"><b>เขต กฟภ.:</b> ' + escHtml(p.peaZone) + '</div>' : '') +
+        distBlock +
+        '<div class="mt-2">' + actionHtml +
+        '<button type="button" class="btn btn-outline-info btn-sm me-1 mb-1" onclick="viewInspectionLocation(\'' + safeId + '\')"><i class="fa-solid fa-circle-info"></i> รายละเอียด</button> ' +
+        editBtn + '</div>';
+      if (hasCoords) {
+        calcDistanceMyLoc(Number(loc.lat), Number(loc.lng), 'inspMapDistResult');
+      }
     }
 
     function initInspectionMapIfNeeded_() {
@@ -6249,43 +6640,6 @@
       }
     }
 
-    function showInspectionMapDetails_(p) {
-      const panel = document.getElementById('inspectionMapDetails');
-      if (!panel || !p) return;
-      const info = getInspectionMapLocation_(p);
-      const loc = info.loc;
-      const safeId = String(p.id).replace(/'/g, "\\'");
-      const roundTxt = formatInspectionHandoverDate_(p.handoverRound, false) || (p.handoverRound || '-');
-      const planTxt = formatInspectionHandoverDate_(p.handoverPlan, false) || (p.handoverPlan || '-');
-      const statusBadge = p.visited
-        ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
-        : '<span class="badge bg-warning text-dark">ยังไม่เข้าตรวจ</span>';
-      const readyBadge = inspectionHasHandoverRound_(p)
-        ? '<span class="badge bg-primary ms-1"><i class="fa-solid fa-clipboard-check"></i> พร้อมเข้าตรวจ</span>'
-        : '<span class="badge bg-secondary ms-1">ยังไม่พร้อม (ไม่มีรอบส่งมอบ)</span>';
-      let navHtml = '';
-      if (loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
-        navHtml =
-          '<button type="button" class="btn btn-outline-primary btn-sm me-1 mb-1" onclick="window.open(BASE_NAV_URL+\'&destination=' + loc.lat + ',' + loc.lng + '\',\'_blank\')">' +
-          '<i class="fa-brands fa-google"></i> นำทาง</button>';
-      }
-      const editBtn = canEditInspection()
-        ? '<button type="button" class="btn btn-primary btn-sm mb-1" onclick="editInspection(\'' + safeId + '\')"><i class="fa-solid fa-pen"></i> แก้ไข</button>'
-        : '';
-      panel.innerHTML =
-        '<div class="mb-2">' + statusBadge + readyBadge + '</div>' +
-        '<h6 class="fw-bold mb-2">' + escHtml(info.name || p.place || '-') + '</h6>' +
-        '<div class="small text-muted mb-1"><i class="fa-solid fa-layer-group me-1"></i>เฟส ' + escHtml(p.phase || '-') +
-        (p.region ? ' · ' + escHtml(p.region) : '') + '</div>' +
-        '<div class="small mb-1"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
-        '<div class="small mb-1"><b>แผนส่งมอบงาน:</b> ' + escHtml(planTxt) + '</div>' +
-        (p.pwaDistrict ? '<div class="small mb-1"><b>กปภ. เขต:</b> ' + escHtml(p.pwaDistrict) + '</div>' : '') +
-        (p.peaZone ? '<div class="small mb-2"><b>เขต กฟภ.:</b> ' + escHtml(p.peaZone) + '</div>' : '') +
-        '<div class="mt-2">' + navHtml +
-        '<button type="button" class="btn btn-outline-info btn-sm mb-1" onclick="viewInspectionLocation(\'' + safeId + '\')"><i class="fa-solid fa-circle-info"></i> รายละเอียด</button> ' +
-        editBtn + '</div>';
-    }
-
     function renderInspectionMap_() {
       const badge = document.getElementById('inspectionMapCountBadge');
       const panel = document.getElementById('inspectionMapDetails');
@@ -6300,6 +6654,8 @@
       } else {
         startMapGpsTracking();
       }
+      refreshInspectionTripDatalist_();
+      renderInspectionTripPanel_();
       const bounds = [];
       let plotted = 0;
       let plottedReady = 0;
@@ -6518,6 +6874,7 @@ function openSiteDocModal(index) {
   const nameSec = document.getElementById('siteDocNameSection');
   const fileHint = document.getElementById('siteDocFileHint');
   if (window.pwaGasCall) {
+    // GitHub Pages: เลือกไฟล์+ตั้งชื่อในหน้าต่าง Apps Script
     if (fileSec) fileSec.style.display = 'none';
     if (nameSec) nameSec.style.display = 'none';
   } else {
@@ -6626,6 +6983,7 @@ function submitSiteDoc() {
   const btn = document.getElementById('btnSaveSiteDoc');
   const usePopup = !!window.pwaGasCall && !!window.GAS_API_URL;
 
+  // GitHub Pages: เลือกไฟล์ก่อน → ดึงชื่อมาให้แก้ ในหน้าต่าง Apps Script
   if (usePopup) {
     const active = document.activeElement;
     if (active && active.blur) active.blur();
@@ -6662,6 +7020,7 @@ function submitSiteDoc() {
     return;
   }
 
+  // โหมด Apps Script เดิม: อัปโหลดในหน้าเดียวกัน
   if (!fileInput.files || fileInput.files.length === 0) {
     Swal.fire({ icon: 'warning', title: 'กรุณาเลือกไฟล์ PDF ก่อน' });
     return;
@@ -6747,6 +7106,7 @@ function waitSiteUploadPopup(popup) {
     window.addEventListener('message', onMessage);
     const watch = setInterval(function () {
       if (settled) return;
+      // ปิดหน้าต่างหลังอัปโหลดสำเร็จบ่อยครั้งที่ postMessage ไม่ถึง — ถือว่าสำเร็จแล้วรีเฟรชรายการ
       if (popup.closed) finishOk({ closed: true });
     }, 400);
   });
@@ -6776,6 +7136,7 @@ function deleteSiteDocItem(id) {
   });
 }
 
+// ==========================================
 let projectDocs = [];
 let docModalObj;
 let editDocModalObj;
