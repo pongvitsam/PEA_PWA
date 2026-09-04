@@ -2255,20 +2255,25 @@ function planNeedsInspectionBackfill_(plan) {
 
 function writeInspectionBackToSource_(id, fields, opts) {
   opts = opts || {};
-  const verify = opts.verify !== false;
+  const verify = opts.verify === true;
   const ref = parseSyncedInspectionRowRef_(id);
   if (!ref) throw new Error('รหัสรายการจากชีทไม่ถูกต้อง');
   const sheetCtx = opts.sheetCtx || {};
   const ctx = getInspectionSourceWriteCtx_(sheetCtx, ref.sheetId);
   const srcSheet = ctx.sheet;
   const cols = Object.assign({}, ctx.cols);
-  if (cols.inspectSchedule == null && fields.inspectSchedule) {
+  const onlyKeys = opts.onlyKeys;
+  const keySet = onlyKeys && onlyKeys.length
+    ? onlyKeys.reduce(function(acc, k) { acc[k] = true; return acc; }, {})
+    : null;
+  if ((!keySet || keySet.inspectSchedule) && cols.inspectSchedule == null && fields.inspectSchedule) {
     throw new Error('ไม่พบคอลัมน์กำหนดตรวจงานในแท็บชีทต้นทาง');
   }
   const skipColForKey_ = {};
   const dateWriteInfo = {};
 
   function writeKey_(key) {
+    if (keySet && !keySet[key]) return;
     const col = cols[key];
     if (col == null) {
       if (key === 'inspectSchedule' && fields.inspectSchedule) {
@@ -2292,11 +2297,12 @@ function writeInspectionBackToSource_(id, fields, opts) {
     else skipColForKey_[col] = key;
   }
 
-  ['handoverRound', 'inspectSchedule'].forEach(writeKey_);
-  INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
-    if (key === 'handoverRound' || key === 'inspectSchedule') return;
-    writeKey_(key);
-  });
+  const ordered = ['handoverRound', 'inspectSchedule'].concat(
+    INSPECTION_SOURCE_COL_KEYS_.filter(function(k) {
+      return k !== 'handoverRound' && k !== 'inspectSchedule';
+    })
+  );
+  ordered.forEach(writeKey_);
   if (verify) SpreadsheetApp.flush();
   return dateWriteInfo;
 }
@@ -2343,6 +2349,32 @@ function pushInspectionPlansToSource(sessionToken) {
   return out;
 }
 
+function inspectionLocalColIndex_(key) {
+  const map = {
+    seq: 2, phase: 3, place: 4, pwaBranch: 5, pwaDistrict: 6, peaZone: 7, peaOffice: 8,
+    handoverPlan: 9, handoverRound: 10, inspectSchedule: 11, inspectors: 12, fileComment: 13,
+    committee: 14, inspectLetterDate: 15, passLetterStatusWork: 16, passLetterStatus: 17,
+    visited: 18, tcCoordinator: 19, tcContact: 20, region: 21
+  };
+  return map[key] || 0;
+}
+
+function patchInspectionLocalRow_(sheet, row1, id, fields, onlyKeys) {
+  if (!onlyKeys || !onlyKeys.length) {
+    sheet.getRange(row1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(id, fields)]);
+    return;
+  }
+  onlyKeys.forEach(function(key) {
+    const col = inspectionLocalColIndex_(key);
+    if (!col) return;
+    let val = fields[key];
+    if (key === 'visited') val = !!val;
+    else if (key === 'region') val = (val || '').toString().trim().toUpperCase();
+    else val = val == null ? '' : val;
+    sheet.getRange(row1, col).setValue(val);
+  });
+}
+
 function saveInspectionPlan(formObj, sessionToken) {
   assertInspectionFromSession_(sessionToken);
   const fields = inspectionFormToFields_(formObj);
@@ -2350,21 +2382,27 @@ function saveInspectionPlan(formObj, sessionToken) {
 
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
+  let onlyKeys = null;
+  if (formObj && formObj.changedKeys && formObj.changedKeys.length) {
+    onlyKeys = formObj.changedKeys.map(function(k) { return String(k); }).filter(Boolean);
+  }
 
   if (formObj.id) {
     const data = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       if (data[i][0].toString() === formObj.id.toString()) {
-        sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(formObj.id, fields)]);
+        patchInspectionLocalRow_(sheet, i + 1, formObj.id, fields, onlyKeys);
         if (isSyncedInspectionId_(formObj.id)) {
           try {
-            const writeInfo = writeInspectionBackToSource_(formObj.id, fields);
+            const writeInfo = writeInspectionBackToSource_(formObj.id, fields, {
+              verify: false,
+              onlyKeys: onlyKeys
+            });
             CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
             const sched = writeInfo && writeInfo.inspectSchedule;
             logAction('แก้ไขแผนตรวจรับ: ' + fields.place + (sched ? (' → ชีท แถว' + sched.row + ' คอล' + sched.col) : ''));
             invalidateInspectionListCache_();
-            const schedMsg = sched && sched.value ? (' (กำหนดตรวจงาน → แถว ' + sched.row + ' คอล ' + sched.col + ')') : '';
-            return { success: true, message: 'อัปเดตแล้ว (แอป + ชีท)' + schedMsg, sheetWrite: writeInfo };
+            return { success: true, message: 'อัปเดตแล้ว (แอป + ชีท)', sheetWrite: writeInfo };
           } catch (e) {
             const errMsg = friendlyInspectionSheetWriteError_(e);
             logAction('บันทึกแผนตรวจรับแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg);
