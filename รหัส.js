@@ -1260,7 +1260,7 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v2';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v5';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v6';
 const LIST_CACHE_TTL_SEC = 180;
 
 function invalidateOutageListCache_() {
@@ -1465,22 +1465,36 @@ const INSPECTION_DATE_FIELD_KEYS_ = { handoverPlan: true, handoverRound: true, i
 function formatInspectionDateDisplay_(val) {
   if (val == null || val === '') return '';
   if (val instanceof Date && !isNaN(val.getTime())) {
-    return val.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[val.getMonth()] + ' ' + (inspectionChristianYear_(val) + 543);
+    const tz = Session.getScriptTimeZone() || 'Asia/Bangkok';
+    try {
+      const day = parseInt(Utilities.formatDate(val, tz, 'd'), 10);
+      const month = parseInt(Utilities.formatDate(val, tz, 'M'), 10) - 1;
+      let year = parseInt(Utilities.formatDate(val, tz, 'yyyy'), 10);
+      if (year > 2400) year -= 543;
+      return day + ' ' + THAI_MONTHS_FULL_INSP_[month] + ' ' + (year + 543);
+    } catch (ignore) {
+      return val.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[val.getMonth()] + ' ' + (inspectionChristianYear_(val) + 543);
+    }
   }
   const s = cellStr_(val).replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  // ค่าที่ Sheets แสดงเป็นข้อความไทยอยู่แล้ว — ใช้ตรง ๆ หลัง normalize ปี
+  const mThai = s.match(/^(\d{1,2})\s+([ก-๙][ก-๙\.]*)\s+(\d{2,4})$/);
+  if (mThai) {
+    const d = parseThaiDate_(s);
+    if (d) {
+      let beYear = parseInt(mThai[3], 10);
+      if (beYear < 100) beYear += 2500;
+      beYear = inspectionNormalizeBeYear_(beYear);
+      return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + beYear;
+    }
+    return s;
+  }
   const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) {
     const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
     if (!isNaN(d.getTime())) {
       return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
-    }
-  }
-  const m = s.match(/^(\d{1,2})\s+([ก-๙][ก-๙\.]*)\s+(\d{4})$/);
-  if (m) {
-    const d = parseThaiDate_(s);
-    if (d) {
-      const beYear = inspectionNormalizeBeYear_(parseInt(m[3], 10));
-      return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + beYear;
     }
   }
   const d = parseThaiDate_(val);
@@ -1911,12 +1925,6 @@ function mapInspectionRow_(row) {
   const fromSheet = isSyncedInspectionId_(id);
   const handoverPlan = formatInspectionDateDisplay_(row[8]);
   let handoverRound = formatInspectionDateDisplay_(row[9]);
-  // ค่าที่คัดลอกจากแผนส่งมอบมาใส่รอบส่งมอบ — ไม่นับเป็นรอบจริง
-  if (handoverRound && handoverPlan) {
-    const rk = inspectionDateKeyForCompare_(handoverRound);
-    const pk = inspectionDateKeyForCompare_(handoverPlan);
-    if (rk && pk && rk === pk) handoverRound = '';
-  }
   return {
     id: id,
     seq: cellStr_(row[1]),
@@ -2119,38 +2127,21 @@ function isInspectionSourceDataRow_(row, map) {
   return place.length >= 2;
 }
 
-function extractInspectionFieldsFromSourceRow_(row, map) {
+function extractInspectionFieldsFromSourceRow_(row, map, displayRow) {
   const cols = map.cols;
   const out = {};
   INSPECTION_SOURCE_COL_KEYS_.forEach(function(key) {
     const col = cols[key];
     if (col == null) { out[key] = ''; return; }
     if (key === 'visited') out[key] = parseInspectionVisited_(row[col]);
-    else if (key === 'handoverPlan' || key === 'handoverRound' || key === 'inspectSchedule') out[key] = formatInspectionDateDisplay_(row[col]);
-    else out[key] = cellStr_(row[col]);
+    else if (key === 'handoverPlan' || key === 'handoverRound' || key === 'inspectSchedule') {
+      // ใช้ข้อความที่เห็นในชีทเป็นหลัก — กัน Date object / timezone สร้างวันที่เพี้ยน
+      const disp = displayRow && displayRow[col] != null ? String(displayRow[col]).replace(/\u00a0/g, ' ').trim() : '';
+      const raw = disp || row[col];
+      out[key] = formatInspectionDateDisplay_(raw);
+    } else out[key] = cellStr_(row[col]);
   });
-  // กันค่าที่คัดลอกจากแผนส่งมอบมาใส่รอบส่งมอบ (รอบต้องต่างจากแผน)
-  if (out.handoverRound && out.handoverPlan) {
-    const rk = inspectionDateKeyForCompare_(out.handoverRound);
-    const pk = inspectionDateKeyForCompare_(out.handoverPlan);
-    if (rk && pk && rk === pk) out.handoverRound = '';
-  }
   return out;
-}
-
-function inspectionDateKeyForCompare_(val) {
-  const s = formatInspectionDateDisplay_(val) || cellStr_(val);
-  if (!s) return '';
-  const d = parseThaiDate_(s) || (function() {
-    try {
-      const t = Date.parse(s);
-      return isNaN(t) ? null : new Date(t);
-    } catch (e) { return null; }
-  })();
-  if (d && !isNaN(d.getTime())) {
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  }
-  return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function inspectionFieldsToLocalRow_(id, fields) {
@@ -2202,14 +2193,16 @@ function collectSourceInspectionRows_() {
     const lastRow = srcSheet.getLastRow();
     const lastCol = Math.max(srcSheet.getLastColumn(), 25);
     if (lastRow < 2) return;
-    const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const range = srcSheet.getRange(1, 1, lastRow, lastCol);
+    const values = range.getValues();
+    const displays = range.getDisplayValues();
     const map = findInspectionHeaderMap_(values);
     const sheetId = srcSheet.getSheetId();
     const fcCol = map.cols.fileComment;
     for (let r = map.headerRow + 1; r < values.length; r++) {
       const row = values[r];
       if (!isInspectionSourceDataRow_(row, map)) continue;
-      const fields = extractInspectionFieldsFromSourceRow_(row, map);
+      const fields = extractInspectionFieldsFromSourceRow_(row, map, displays[r]);
       fields.region = region;
       if (fcCol != null) {
         try {
@@ -2228,6 +2221,29 @@ function collectSourceInspectionRows_() {
     }
   });
   return collected;
+}
+
+/** รายการวันที่รอบส่งมอบงานจริงจากชีทต้นทางเท่านั้น (สำหรับ dropdown) */
+function collectInspectionHandoverRoundOptions_(precollected) {
+  const rows = precollected || collectSourceInspectionRows_();
+  const seen = {};
+  const out = [];
+  rows.forEach(function(item) {
+    const raw = item && item.fields ? item.fields.handoverRound : '';
+    const label = formatInspectionDateDisplay_(raw) || String(raw || '').trim();
+    if (!label || seen[label]) return;
+    seen[label] = true;
+    out.push(label);
+  });
+  out.sort(function(a, b) {
+    const da = parseThaiDate_(a);
+    const db = parseThaiDate_(b);
+    if (da && db) return da.getTime() - db.getTime();
+    if (da) return -1;
+    if (db) return 1;
+    return String(a).localeCompare(String(b), 'th');
+  });
+  return out;
 }
 
 /** ตรวจแท็บชีทตรวจรับ NC/NE/S — ดู map คอลัมน์ โดยเฉพาะกำหนดตรวจงาน */
@@ -2345,23 +2361,49 @@ function getInspectionPlans() {
   return result;
 }
 
-const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v3';
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v4';
 const INSPECTION_SYNC_TTL_SEC = 300;
 const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
+
+function getInspectionRoundOptionsCached_() {
+  try {
+    const hit = CacheService.getScriptCache().get('insp_round_opts_v1');
+    if (hit) return JSON.parse(hit);
+  } catch (ignore) {}
+  return null;
+}
 
 function refreshInspectionPlansFromSource(force) {
   const wantForce = !!force;
   const cache = CacheService.getScriptCache();
   if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
-    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+    return {
+      synced: false,
+      plans: getInspectionPlans(),
+      roundOptions: getInspectionRoundOptionsCached_() || undefined,
+      sourceTitle: INSPECTION_SOURCE_TITLE,
+      sourceUrl: INSPECTION_SOURCE_URL
+    };
   }
   if (cache.get(INSPECTION_SYNC_SOFT_LOCK_KEY)) {
-    return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+    return {
+      synced: false,
+      plans: getInspectionPlans(),
+      roundOptions: getInspectionRoundOptionsCached_() || undefined,
+      sourceTitle: INSPECTION_SOURCE_TITLE,
+      sourceUrl: INSPECTION_SOURCE_URL
+    };
   }
   cache.put(INSPECTION_SYNC_SOFT_LOCK_KEY, '1', 120);
   try {
     if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
-      return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+      return {
+        synced: false,
+        plans: getInspectionPlans(),
+        roundOptions: getInspectionRoundOptionsCached_() || undefined,
+        sourceTitle: INSPECTION_SOURCE_TITLE,
+        sourceUrl: INSPECTION_SOURCE_URL
+      };
     }
     let rows;
     try {
@@ -2373,28 +2415,46 @@ function refreshInspectionPlansFromSource(force) {
         synced: false,
         error: e.message,
         plans: getInspectionPlans(),
+        roundOptions: getInspectionRoundOptionsCached_() || undefined,
         sourceTitle: INSPECTION_SOURCE_TITLE,
         sourceUrl: INSPECTION_SOURCE_URL
       };
     }
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(5000)) {
-      return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+      return {
+        synced: false,
+        plans: getInspectionPlans(),
+        roundOptions: getInspectionRoundOptionsCached_() || undefined,
+        sourceTitle: INSPECTION_SOURCE_TITLE,
+        sourceUrl: INSPECTION_SOURCE_URL
+      };
     }
     try {
       if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
-        return { synced: false, plans: getInspectionPlans(), sourceTitle: INSPECTION_SOURCE_TITLE, sourceUrl: INSPECTION_SOURCE_URL };
+        return {
+          synced: false,
+          plans: getInspectionPlans(),
+          roundOptions: getInspectionRoundOptionsCached_() || undefined,
+          sourceTitle: INSPECTION_SOURCE_TITLE,
+          sourceUrl: INSPECTION_SOURCE_URL
+        };
       }
       const ss = getSpreadsheet_();
       const sheet = ensureInspectionSheet_(ss);
       try {
         const n = syncInspectionsFromSource_(sheet, rows);
+        const roundOptions = collectInspectionHandoverRoundOptions_(rows);
         cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
         invalidateInspectionListCache_();
+        try {
+          cache.put('insp_round_opts_v1', JSON.stringify(roundOptions), 600);
+        } catch (ignore) {}
         return {
           synced: true,
           count: n,
           plans: readInspectionsMapped_(sheet),
+          roundOptions: roundOptions,
           sourceTitle: INSPECTION_SOURCE_TITLE,
           sourceUrl: INSPECTION_SOURCE_URL
         };
@@ -2405,6 +2465,7 @@ function refreshInspectionPlansFromSource(force) {
           synced: false,
           error: e.message,
           plans: readInspectionsMapped_(sheet),
+          roundOptions: getInspectionRoundOptionsCached_() || undefined,
           sourceTitle: INSPECTION_SOURCE_TITLE,
           sourceUrl: INSPECTION_SOURCE_URL
         };
