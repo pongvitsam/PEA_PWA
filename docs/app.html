@@ -1802,7 +1802,7 @@
     let provinceBordersLoaded = false;
     const LOC_LS_KEY = 'pwa_locations_v1';
     const OUTAGE_LS_KEY = 'pwa_outages_v1';
-    const INSPECTION_LS_KEY = 'pwa_inspection_v1';
+    const INSPECTION_LS_KEY = 'pwa_inspection_v2';
     const _assetLoadPromises_ = {};
     let _locationLookupCache_ = null;
     let _outageRegionCache_ = {};
@@ -4946,12 +4946,15 @@
       if (window._inspectionSyncTimer_) return;
       window._inspectionSyncTimer_ = setTimeout(function() {
         window._inspectionSyncTimer_ = null;
+        // force ครั้งแรกหลังอัปเดต logic รอบส่งมอบ — ล้างค่าเก่าที่ปนจากแผนส่งมอบ
+        const forceOnce = !sessionStorage.getItem('insp_round_scrub_v1');
         google.script.run.withSuccessHandler(function(pack) {
+          try { sessionStorage.setItem('insp_round_scrub_v1', '1'); } catch (e) {}
           applyInspectionPack(pack, { showError: false, preserveUi: true });
         }).withFailureHandler(function(err) {
           const msg = (err && err.message) ? err.message : String(err || '');
           if (/timeout|API timeout/i.test(msg)) return;
-        }).refreshInspectionPlansFromSource(false);
+        }).refreshInspectionPlansFromSource(forceOnce);
       }, 2500);
     }
 
@@ -5094,8 +5097,8 @@
       const rounds = [];
       const roundSeen = {};
       (inspectionData || []).forEach(function(p) {
-        // ใช้เฉพาะคอลัมน์รอบส่งมอบงานจริง — ไม่ดึงแผนส่งมอบ / กำหนดตรวจงาน
-        const roundRaw = String(p.handoverRound || '').trim();
+        // ใช้เฉพาะรอบส่งมอบงานจริงที่ต่างจากแผนส่งมอบ (กันวันที่แผนปนในตัวกรอง)
+        const roundRaw = inspectionEffectiveHandoverRound_(p);
         if (!roundRaw) return;
         const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
         if (!roundSeen[roundLabel]) {
@@ -5130,8 +5133,30 @@
       }
     }
 
+    function inspectionDateKeyForCompare_(val) {
+      const label = formatInspectionHandoverDate_(val, false) || String(val || '').trim();
+      if (!label) return '';
+      const d = parseInspectionHandoverDate_(label);
+      if (d && !isNaN(d.getTime())) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+      return label.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    /** รอบส่งมอบจริง — ตัดค่าที่เหมือนแผนส่งมอบทิ้ง (มักเป็นค่าเก่าที่คัดลอกผิด) */
+    function inspectionEffectiveHandoverRound_(p) {
+      const roundRaw = String((p && p.handoverRound) || '').trim();
+      if (!roundRaw) return '';
+      const planRaw = String((p && p.handoverPlan) || '').trim();
+      if (!planRaw) return roundRaw;
+      const rk = inspectionDateKeyForCompare_(roundRaw);
+      const pk = inspectionDateKeyForCompare_(planRaw);
+      if (rk && pk && rk === pk) return '';
+      return roundRaw;
+    }
+
     function inspectionHasHandoverRound_(p) {
-      return !!String((p && p.handoverRound) || '').trim();
+      return !!inspectionEffectiveHandoverRound_(p);
     }
 
     function getInspectionMapFilteredPlans_() {
@@ -5144,7 +5169,7 @@
         if (readyVal === 'not_ready' && hasRound) return false;
         if (roundVal) {
           if (!hasRound) return false;
-          const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
+          const label = formatInspectionHandoverDate_(inspectionEffectiveHandoverRound_(p), false) || inspectionEffectiveHandoverRound_(p);
           if (label !== roundVal) return false;
         }
         if (visitedVal === 'done' && !p.visited) return false;
@@ -6088,9 +6113,9 @@
         const matchColumns = matchesInspectionColumnFilters_(p);
         let matchRound = true;
         if (roundVal === '__empty__') {
-          matchRound = !String(p.handoverRound || '').trim();
+          matchRound = !inspectionEffectiveHandoverRound_(p);
         } else if (roundVal) {
-          const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
+          const label = formatInspectionHandoverDate_(inspectionEffectiveHandoverRound_(p), false) || inspectionEffectiveHandoverRound_(p);
           matchRound = label === roundVal;
         }
         return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns && matchRound;

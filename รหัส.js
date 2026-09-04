@@ -1260,7 +1260,7 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v2';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v2';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v5';
 const LIST_CACHE_TTL_SEC = 180;
 
 function invalidateOutageListCache_() {
@@ -1519,7 +1519,147 @@ function writeInspectionSourceCellValue_(sheet, row1, col0, val) {
     const formula = range.getFormula();
     if (formula) range.clearContent();
   } catch (ignore) {}
+  try { range.setNumberFormat('@'); } catch (ignore) {}
   range.setValue(text);
+}
+
+/** อ่าน File comment จากเซลล์ — กู้ URL จาก rich text / HYPERLINK ที่ Sheets แปลงให้ */
+function inspectionFileCommentFromRichText_(rich, plainFallback) {
+  const plain = cellStr_(plainFallback);
+  if (!rich) return plain;
+  try {
+    const runs = rich.getRuns && rich.getRuns();
+    if (runs && runs.length) {
+      const lines = [];
+      for (let i = 0; i < runs.length; i++) {
+        const t = cellStr_(runs[i].getText()).replace(/\n/g, ' ').trim();
+        let u = '';
+        try { u = runs[i].getLinkUrl() || ''; } catch (ignore) {}
+        if (!t && !u) continue;
+        if (u) lines.push((t || 'เปิดไฟล์ PDF') + '|' + u);
+        else if (t) lines.push(t);
+      }
+      if (lines.length) return lines.join('\n');
+    }
+  } catch (ignore) {}
+  try {
+    const u = rich.getLinkUrl && rich.getLinkUrl();
+    if (u) {
+      const t = cellStr_(rich.getText()) || 'เปิดไฟล์ PDF';
+      if (plain && plain.indexOf('|http') >= 0) return plain;
+      return t + '|' + u;
+    }
+  } catch (ignore) {}
+  return plain;
+}
+
+function inspectionFileCommentFromFormula_(formula, plainFallback) {
+  const plain = cellStr_(plainFallback);
+  const f = String(formula || '');
+  if (!f) return plain;
+  const m = f.match(/HYPERLINK\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]*)")?\s*\)/i);
+  if (!m) return plain;
+  const url = m[1];
+  const label = (m[2] && String(m[2]).trim()) || cellStr_(plain) || 'เปิดไฟล์ PDF';
+  if (plain && plain.indexOf('|http') >= 0) return plain;
+  return label + '|' + url;
+}
+
+function readInspectionFileCommentCell_(sheet, row1, col1, plainVal) {
+  const range = sheet.getRange(row1, col1);
+  let plain = cellStr_(plainVal != null ? plainVal : range.getValue());
+  try {
+    const formula = range.getFormula();
+    if (formula) plain = inspectionFileCommentFromFormula_(formula, plain);
+  } catch (ignore) {}
+  try {
+    const rich = range.getRichTextValue();
+    if (rich) plain = inspectionFileCommentFromRichText_(rich, plain);
+  } catch (ignore) {}
+  return plain;
+}
+
+/** เขียน File comment เป็นข้อความล้วน (กัน Sheets แปลง URL แล้วตัด |url หาย) */
+function writeInspectionFileCommentCell_(sheet, row1, col1, text) {
+  const range = sheet.getRange(row1, col1);
+  try {
+    const formula = range.getFormula();
+    if (formula) range.clearContent();
+  } catch (ignore) {}
+  try { range.clearFormat(); } catch (ignore) {}
+  range.setNumberFormat('@');
+  range.setValue(text == null ? '' : String(text));
+}
+
+function parseInspectionFileCommentLines_(raw) {
+  return String(raw || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
+    const idx = line.indexOf('|');
+    if (idx > 0 && /^https?:\/\//i.test(line.slice(idx + 1).trim())) {
+      return { name: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+    }
+    if (/^https?:\/\//i.test(line)) return { name: 'เปิดไฟล์ PDF', url: line };
+    return { name: line, url: '' };
+  });
+}
+
+let INSPECTION_DRIVE_FILE_INDEX_ = null;
+function getInspectionDriveFileIndex_() {
+  if (INSPECTION_DRIVE_FILE_INDEX_) return INSPECTION_DRIVE_FILE_INDEX_;
+  const index = {};
+  try {
+    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    const folders = parent.getFolders();
+    while (folders.hasNext()) {
+      const folder = folders.next();
+      const files = folder.getFiles();
+      while (files.hasNext()) {
+        const file = files.next();
+        const name = String(file.getName() || '').trim();
+        if (!name) continue;
+        const url = file.getUrl();
+        index[name.toLowerCase()] = url;
+        if (name.toLowerCase().endsWith('.pdf')) {
+          index[name.toLowerCase().slice(0, -4)] = url;
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('inspection drive index failed: ' + e.message);
+  }
+  INSPECTION_DRIVE_FILE_INDEX_ = index;
+  return index;
+}
+
+/** กู้ URL ที่หายจากชื่อไฟล์ในโฟลเดอร์ Drive แผนตรวจรับ */
+function recoverInspectionFileCommentUrls_(raw) {
+  const entries = parseInspectionFileCommentLines_(raw);
+  if (!entries.length) return cellStr_(raw);
+  let changed = false;
+  let index = null;
+  const out = entries.map(function(entry) {
+    if (entry.url) return entry.name + '|' + entry.url;
+    const name = entry.name;
+    if (!name || !/\.pdf$/i.test(name)) return name;
+    if (!index) index = getInspectionDriveFileIndex_();
+    const url = index[name.toLowerCase()] || index[name.toLowerCase().replace(/\.pdf$/i, '')];
+    if (!url) return name;
+    changed = true;
+    return name + '|' + url;
+  });
+  return changed || entries.some(function(e) { return !!e.url; }) ? out.join('\n') : cellStr_(raw);
+}
+
+function enrichInspectionFileComment_(raw, sheet, row1, col1) {
+  let text = raw;
+  if (sheet && row1 && col1) {
+    try { text = readInspectionFileCommentCell_(sheet, row1, col1, raw); } catch (ignore) {}
+  } else {
+    text = cellStr_(raw);
+  }
+  if (text && text.indexOf('|http') < 0 && /\.pdf/i.test(text)) {
+    try { text = recoverInspectionFileCommentUrls_(text); } catch (ignore) {}
+  }
+  return text;
 }
 
 function verifyInspectionSourceCellWrite_(sheet, row1, col0, expected) {
@@ -1769,6 +1909,14 @@ function parseInspectionVisited_(val) {
 function mapInspectionRow_(row) {
   const id = row[0];
   const fromSheet = isSyncedInspectionId_(id);
+  const handoverPlan = formatInspectionDateDisplay_(row[8]);
+  let handoverRound = formatInspectionDateDisplay_(row[9]);
+  // ค่าที่คัดลอกจากแผนส่งมอบมาใส่รอบส่งมอบ — ไม่นับเป็นรอบจริง
+  if (handoverRound && handoverPlan) {
+    const rk = inspectionDateKeyForCompare_(handoverRound);
+    const pk = inspectionDateKeyForCompare_(handoverPlan);
+    if (rk && pk && rk === pk) handoverRound = '';
+  }
   return {
     id: id,
     seq: cellStr_(row[1]),
@@ -1778,8 +1926,8 @@ function mapInspectionRow_(row) {
     pwaDistrict: cellStr_(row[5]),
     peaZone: cellStr_(row[6]),
     peaOffice: cellStr_(row[7]),
-    handoverPlan: formatInspectionDateDisplay_(row[8]),
-    handoverRound: formatInspectionDateDisplay_(row[9]),
+    handoverPlan: handoverPlan,
+    handoverRound: handoverRound,
     inspectSchedule: formatInspectionDateDisplay_(row[10]),
     inspectors: cellStr_(row[11]),
     fileComment: cellStr_(row[12]),
@@ -1801,8 +1949,31 @@ function readInspectionsMapped_(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   const numCols = Math.max(sheet.getLastColumn(), INSPECTION_HEADERS.length);
-  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-  return data.filter(r => r[3]).map(mapInspectionRow_);
+  const data = sheet.getRange(2, 1, lastRow, numCols).getValues();
+  const fileCommentCol = 13; // FileComment (1-based)
+  let richComments = null;
+  try {
+    richComments = sheet.getRange(2, fileCommentCol, lastRow, fileCommentCol).getRichTextValues();
+  } catch (ignore) {}
+  const out = [];
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    if (!row[3]) continue;
+    const mapped = mapInspectionRow_(row);
+    const sheetRow = i + 2;
+    let comment = mapped.fileComment;
+    try {
+      if (richComments && richComments[i] && richComments[i][0]) {
+        comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
+      }
+      comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol);
+    } catch (ignore) {
+      comment = enrichInspectionFileComment_(comment, null, 0, 0);
+    }
+    mapped.fileComment = comment;
+    out.push(mapped);
+  }
+  return out;
 }
 
 function normInspectionHeader_(t) {
@@ -1850,7 +2021,8 @@ function mapInspectionHeaderCell_(map, t, h, c, scheduleBest) {
     else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0 && h.indexOf('สาขา') < 0) map.cols.pwaDistrict = c;
     else if (map.cols.peaZone == null && ((h.indexOf('กฟภ') >= 0 && (h.indexOf('เขต') >= 0 || h.indexOf('ความรับผิดชอบ') >= 0)) || h.indexOf('pea') >= 0)) map.cols.peaZone = c;
     else if (h.indexOf('แผนส่งมอบงาน') >= 0 && h.indexOf('รอบ') < 0) map.cols.handoverPlan = c;
-    else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || (h.indexOf('รอบส่งมอบ') >= 0 && h.indexOf('แผน') < 0 && h.indexOf('กำหนด') < 0 && h.indexOf('ตรวจ') < 0)) map.cols.handoverRound = c;
+    // รับเฉพาะหัวคอลัมน์รอบส่งมอบงานจริง (กันแม็พผิดไปคอลัมน์อื่น)
+    else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || (h.indexOf('รอบส่งมอบ') >= 0 && h.indexOf('จริง') >= 0)) map.cols.handoverRound = c;
     else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
     else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
     else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
@@ -1957,7 +2129,28 @@ function extractInspectionFieldsFromSourceRow_(row, map) {
     else if (key === 'handoverPlan' || key === 'handoverRound' || key === 'inspectSchedule') out[key] = formatInspectionDateDisplay_(row[col]);
     else out[key] = cellStr_(row[col]);
   });
+  // กันค่าที่คัดลอกจากแผนส่งมอบมาใส่รอบส่งมอบ (รอบต้องต่างจากแผน)
+  if (out.handoverRound && out.handoverPlan) {
+    const rk = inspectionDateKeyForCompare_(out.handoverRound);
+    const pk = inspectionDateKeyForCompare_(out.handoverPlan);
+    if (rk && pk && rk === pk) out.handoverRound = '';
+  }
   return out;
+}
+
+function inspectionDateKeyForCompare_(val) {
+  const s = formatInspectionDateDisplay_(val) || cellStr_(val);
+  if (!s) return '';
+  const d = parseThaiDate_(s) || (function() {
+    try {
+      const t = Date.parse(s);
+      return isNaN(t) ? null : new Date(t);
+    } catch (e) { return null; }
+  })();
+  if (d && !isNaN(d.getTime())) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function inspectionFieldsToLocalRow_(id, fields) {
@@ -2012,11 +2205,21 @@ function collectSourceInspectionRows_() {
     const values = srcSheet.getRange(1, 1, lastRow, lastCol).getValues();
     const map = findInspectionHeaderMap_(values);
     const sheetId = srcSheet.getSheetId();
+    const fcCol = map.cols.fileComment;
     for (let r = map.headerRow + 1; r < values.length; r++) {
       const row = values[r];
       if (!isInspectionSourceDataRow_(row, map)) continue;
       const fields = extractInspectionFieldsFromSourceRow_(row, map);
       fields.region = region;
+      if (fcCol != null) {
+        try {
+          fields.fileComment = enrichInspectionFileComment_(fields.fileComment, srcSheet, r + 1, fcCol + 1);
+        } catch (ignore) {
+          fields.fileComment = enrichInspectionFileComment_(fields.fileComment, null, 0, 0);
+        }
+      } else {
+        fields.fileComment = enrichInspectionFileComment_(fields.fileComment, null, 0, 0);
+      }
       collected.push({
         id: buildSyncedInspectionId_(sheetId, r + 1),
         fields: fields,
@@ -2091,7 +2294,12 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     const id = oldData[i][0];
     if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
   }
-  const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  // ไม่ preserve handoverRound — ใช้ค่าจากชีทต้นทางเท่านั้น (กันวันที่แผนส่งมอบ/ค่าเก่าในแอปปนในตัวกรอง)
+  const preserveKeys = ['inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  const hasFileUrl_ = function(s) {
+    const t = String(s || '');
+    return /\|https?:\/\//i.test(t) || /^https?:\/\//im.test(t);
+  };
   const newData = [INSPECTION_HEADERS];
   rows.forEach(function(item) {
     const old = oldById[item.id];
@@ -2099,15 +2307,28 @@ function syncInspectionsFromSource_(destSheet, precollected) {
       preserveKeys.forEach(function(key) {
         const v = old[key];
         if (!(v === true || (v != null && v !== ''))) return;
-        // รอบส่งมอบ: ถ้าชีทต้นทางมีค่าแล้ว ใช้ค่าชีท (ไม่ให้ค่าเก่าในแอปจากคอลัมน์อื่นทับ)
-        if (key === 'handoverRound' && item.fields.handoverRound) return;
+        // File comment: ถ้าชีทต้นทางกู้ URL ได้แล้ว อย่าให้ค่าเก่าที่เหลือแค่ชื่อไฟล์ทับ
+        if (key === 'fileComment' && hasFileUrl_(item.fields.fileComment) && !hasFileUrl_(v)) return;
         item.fields[key] = v;
       });
     }
+    try {
+      item.fields.fileComment = enrichInspectionFileComment_(item.fields.fileComment, null, 0, 0);
+    } catch (ignore) {}
     newData.push(inspectionFieldsToLocalRow_(item.id, item.fields));
   });
   destSheet.clearContents();
   destSheet.getRange(1, 1, newData.length, INSPECTION_HEADERS.length).setValues(newData);
+  // เขียน FileComment เป็นข้อความล้วน กัน Sheets แปลงลิงก์แล้วตัด |url
+  if (newData.length > 1) {
+    try {
+      destSheet.getRange(2, 13, newData.length, 13).setNumberFormat('@');
+      for (let i = 1; i < newData.length; i++) {
+        const fc = newData[i][12];
+        if (fc) writeInspectionFileCommentCell_(destSheet, i + 1, 13, fc);
+      }
+    } catch (ignore) {}
+  }
   return rows.length;
 }
 
@@ -2124,7 +2345,7 @@ function getInspectionPlans() {
   return result;
 }
 
-const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v1';
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v3';
 const INSPECTION_SYNC_TTL_SEC = 300;
 const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
 
@@ -2288,7 +2509,11 @@ function writeInspectionBackToSource_(id, fields, opts) {
     let val = fields[key];
     if (key === 'visited') val = val ? 'TRUE' : '';
     else if (INSPECTION_DATE_FIELD_KEYS_[key]) val = formatInspectionDateForSheetWrite_(val);
-    writeInspectionSourceCellValue_(srcSheet, ref.row, col, val);
+    if (key === 'fileComment') {
+      writeInspectionFileCommentCell_(srcSheet, ref.row, col + 1, val);
+    } else {
+      writeInspectionSourceCellValue_(srcSheet, ref.row, col, val);
+    }
     if (key === 'inspectSchedule' || key === 'handoverRound') {
       dateWriteInfo[key] = { row: ref.row, col: col + 1, value: val };
       if (key === 'inspectSchedule' && val && verify) {
@@ -2364,7 +2589,11 @@ function inspectionLocalColIndex_(key) {
 
 function patchInspectionLocalRow_(sheet, row1, id, fields, onlyKeys) {
   if (!onlyKeys || !onlyKeys.length) {
-    sheet.getRange(row1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(id, fields)]);
+    const rowVals = inspectionFieldsToLocalRow_(id, fields);
+    sheet.getRange(row1, 1, 1, INSPECTION_HEADERS.length).setValues([rowVals]);
+    try {
+      writeInspectionFileCommentCell_(sheet, row1, 13, fields.fileComment || '');
+    } catch (ignore) {}
     return;
   }
   onlyKeys.forEach(function(key) {
@@ -2373,7 +2602,12 @@ function patchInspectionLocalRow_(sheet, row1, id, fields, onlyKeys) {
     let val = fields[key];
     if (key === 'visited') val = !!val;
     else if (key === 'region') val = (val || '').toString().trim().toUpperCase();
-    else val = val == null ? '' : val;
+    else if (key === 'fileComment') {
+      writeInspectionFileCommentCell_(sheet, row1, col, val == null ? '' : val);
+      return;
+    } else {
+      val = val == null ? '' : val;
+    }
     sheet.getRange(row1, col).setValue(val);
   });
 }
@@ -2499,6 +2733,7 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() !== inspectionId.toString()) continue;
     const row = mapInspectionRow_(data[i]);
+    try { row.fileComment = enrichInspectionFileComment_(row.fileComment, sheet, i + 1, 13); } catch (ignore) {}
     const entry = fileName + '|' + url;
     const nextComment = row.fileComment ? (row.fileComment + '\n' + entry) : entry;
     const fields = inspectionFormToFields_({
@@ -2525,6 +2760,7 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
       region: row.region
     });
     sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
+    try { writeInspectionFileCommentCell_(sheet, i + 1, 13, nextComment); } catch (ignore) {}
     if (isSyncedInspectionId_(inspectionId)) {
       try {
         writeInspectionBackToSource_(inspectionId, fields);
@@ -2594,6 +2830,7 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() !== inspectionId.toString()) continue;
     const row = mapInspectionRow_(data[i]);
+    try { row.fileComment = enrichInspectionFileComment_(row.fileComment, sheet, i + 1, 13); } catch (ignore) {}
     const lines = String(row.fileComment || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean);
     const nextLines = lines.filter(function(line) {
       const idx = line.indexOf('|');
@@ -2628,6 +2865,7 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
       region: row.region
     });
     sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
+    try { writeInspectionFileCommentCell_(sheet, i + 1, 13, nextComment); } catch (ignore) {}
     if (isSyncedInspectionId_(inspectionId)) {
       try {
         writeInspectionBackToSource_(inspectionId, fields);
