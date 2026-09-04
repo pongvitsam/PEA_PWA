@@ -816,14 +816,9 @@
           </div>
         </div>
         <div class="row g-2 mb-3">
-          <div class="col-md-6">
-            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="รอบส่งมอบงานจริง">
+          <div class="col-md-12">
+            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="กรองเฉพาะคอลัมน์รอบส่งมอบงานจริง">
               <option value="">ทุกรอบส่งมอบงานจริง</option>
-            </select>
-          </div>
-          <div class="col-md-6">
-            <select id="inspectionHandoverDateSelect" class="form-select form-select-sm" onchange="filterInspections()" title="วันที่จากคอลัมน์รอบส่งมอบงานจริงเท่านั้น">
-              <option value="">ทุกวันที่รอบส่งมอบงานจริง</option>
             </select>
           </div>
         </div>
@@ -4722,7 +4717,6 @@
         visited: document.getElementById('inspectionVisitedSelect')?.value || '',
         pwa: document.getElementById('inspectionPwaSelect')?.value || '',
         handoverRound: document.getElementById('inspectionHandoverRoundSelect')?.value || '',
-        handoverDate: document.getElementById('inspectionHandoverDateSelect')?.value || '',
         search: document.getElementById('inspectionSearchInput')?.value || '',
         scrollTop: wrap ? wrap.scrollTop : 0,
         windowScrollY: window.scrollY || document.documentElement.scrollTop || 0
@@ -4765,8 +4759,6 @@
       if (pwaEl && ui.pwa != null && [...pwaEl.options].some(o => o.value === ui.pwa)) pwaEl.value = ui.pwa;
       const roundEl = document.getElementById('inspectionHandoverRoundSelect');
       if (roundEl && ui.handoverRound != null && [...roundEl.options].some(o => o.value === ui.handoverRound)) roundEl.value = ui.handoverRound;
-      const dateEl = document.getElementById('inspectionHandoverDateSelect');
-      if (dateEl && ui.handoverDate != null && [...dateEl.options].some(o => o.value === ui.handoverDate)) dateEl.value = ui.handoverDate;
     }
 
     function inspectionOnRegionFilterChange() {
@@ -4933,34 +4925,32 @@
 
     function setupInspectionHandoverFilters_(ui) {
       const roundSel = document.getElementById('inspectionHandoverRoundSelect');
-      const dateSel = document.getElementById('inspectionHandoverDateSelect');
       const mapRoundSel = document.getElementById('inspectionMapRoundSelect');
-      if (!roundSel && !dateSel && !mapRoundSel) return;
+      if (!roundSel && !mapRoundSel) return;
       const rounds = [];
       const roundSeen = {};
-      const dates = [];
-      const dateSeen = {};
       (inspectionData || []).forEach(function(p) {
+        // ใช้เฉพาะคอลัมน์รอบส่งมอบงานจริง — ไม่ดึงแผนส่งมอบ / กำหนดตรวจงาน
         const roundRaw = String(p.handoverRound || '').trim();
-        if (roundRaw) {
-          const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
-          if (!roundSeen[roundLabel]) {
-            roundSeen[roundLabel] = true;
-            rounds.push(roundLabel);
-          }
-        }
-        const dateKey = inspectionHandoverDateKey_(p.handoverRound);
-        if (dateKey && !dateSeen[dateKey]) {
-          dateSeen[dateKey] = true;
-          dates.push(dateKey);
+        if (!roundRaw) return;
+        const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
+        if (!roundSeen[roundLabel]) {
+          roundSeen[roundLabel] = true;
+          rounds.push(roundLabel);
         }
       });
-      rounds.sort(function(a, b) { return a.localeCompare(b, 'th'); });
-      dates.sort();
+      rounds.sort(function(a, b) {
+        const ka = inspectionHandoverDateKey_(a);
+        const kb = inspectionHandoverDateKey_(b);
+        if (ka && kb) return ka.localeCompare(kb);
+        if (ka) return -1;
+        if (kb) return 1;
+        return a.localeCompare(b, 'th');
+      });
       const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
         rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
-      const mapRoundOptionsHtml = '<option value="">ทุกรอบที่มีวันที่</option>' +
+      const mapRoundOptionsHtml = '<option value="">ทุกรอบที่มีวันที่ (คอลัมน์รอบส่งมอบงานจริง)</option>' +
         rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
       const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
         ? ui.handoverRound
@@ -4973,14 +4963,6 @@
         const curMapRound = mapRoundSel.value;
         mapRoundSel.innerHTML = mapRoundOptionsHtml;
         if (curMapRound && rounds.indexOf(curMapRound) >= 0) mapRoundSel.value = curMapRound;
-      }
-      if (dateSel) {
-        const curDate = (ui && ui.handoverDate) ? ui.handoverDate : dateSel.value;
-        dateSel.innerHTML = '<option value="">ทุกวันที่รอบส่งมอบงานจริง</option>' +
-          dates.map(function(k) {
-            return '<option value="' + escHtml(k) + '">' + escHtml(formatInspectionHandoverDateOption_(k) || k) + '</option>';
-          }).join('');
-        if (curDate && dates.indexOf(curDate) >= 0) dateSel.value = curDate;
       }
     }
 
@@ -5930,7 +5912,6 @@
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
       const pwaVal = document.getElementById('inspectionPwaSelect')?.value || '';
       const roundVal = document.getElementById('inspectionHandoverRoundSelect')?.value || '';
-      const dateVal = document.getElementById('inspectionHandoverDateSelect')?.value || '';
       const regionVal = getInspectionRegionFilter_();
 
       filteredInspectionData = (inspectionData || []).filter(function(p) {
@@ -5948,12 +5929,7 @@
           const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
           matchRound = label === roundVal;
         }
-        let matchDate = true;
-        if (dateVal) {
-          const key = inspectionHandoverDateKey_(p.handoverRound);
-          matchDate = key === dateVal;
-        }
-        return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns && matchRound && matchDate;
+        return matchText && matchPhase && matchVisited && matchPwa && matchRegion && matchColumns && matchRound;
       });
 
       renderInspectionList(preserveUi);

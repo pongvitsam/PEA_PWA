@@ -1850,7 +1850,7 @@ function mapInspectionHeaderCell_(map, t, h, c, scheduleBest) {
     else if (h.indexOf('กปภ') >= 0 && h.indexOf('เขต') >= 0 && h.indexOf('สาขา') < 0) map.cols.pwaDistrict = c;
     else if (map.cols.peaZone == null && ((h.indexOf('กฟภ') >= 0 && (h.indexOf('เขต') >= 0 || h.indexOf('ความรับผิดชอบ') >= 0)) || h.indexOf('pea') >= 0)) map.cols.peaZone = c;
     else if (h.indexOf('แผนส่งมอบงาน') >= 0 && h.indexOf('รอบ') < 0) map.cols.handoverPlan = c;
-    else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || h.indexOf('รอบส่งมอบ') >= 0) map.cols.handoverRound = c;
+    else if (h.indexOf('รอบส่งมอบงานจริง') >= 0 || (h.indexOf('รอบส่งมอบ') >= 0 && h.indexOf('แผน') < 0 && h.indexOf('กำหนด') < 0 && h.indexOf('ตรวจ') < 0)) map.cols.handoverRound = c;
     else if (h.indexOf('รายชื่อคนเข้าตรวจ') >= 0) map.cols.inspectors = c;
     else if (h.indexOf('file comment') >= 0) map.cols.fileComment = c;
     else if (h.indexOf('คณะกรรมการตรวจรับ') >= 0) map.cols.committee = c;
@@ -2098,7 +2098,10 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     if (old) {
       preserveKeys.forEach(function(key) {
         const v = old[key];
-        if (v === true || (v != null && v !== '')) item.fields[key] = v;
+        if (!(v === true || (v != null && v !== ''))) return;
+        // รอบส่งมอบ: ถ้าชีทต้นทางมีค่าแล้ว ใช้ค่าชีท (ไม่ให้ค่าเก่าในแอปจากคอลัมน์อื่นทับ)
+        if (key === 'handoverRound' && item.fields.handoverRound) return;
+        item.fields[key] = v;
       });
     }
     newData.push(inspectionFieldsToLocalRow_(item.id, item.fields));
