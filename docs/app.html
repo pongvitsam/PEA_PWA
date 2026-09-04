@@ -862,6 +862,15 @@
               <span><i class="fa-solid fa-circle text-success"></i> พร้อมเข้าตรวจ (มีรอบส่งมอบ)</span>
               <span><i class="fa-solid fa-circle text-secondary"></i> ยังไม่พร้อม (ไม่มีวันที่)</span>
               <span><i class="fa-solid fa-location-dot text-primary" style="opacity:0.55"></i> ตรวจแล้ว (หมุดจาง)</span>
+              <span><i class="fa-solid fa-circle" style="color:#0ea5e9"></i> ตำแหน่งของฉัน</span>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+              <button type="button" id="btnInspectionMapGps" class="btn btn-sm btn-info text-white" onclick="showMyLocationOnInspectionMap()" title="แสดงและซูมไปพิกัด GPS ของคุณ">
+                <i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน
+              </button>
+              <div id="inspectionMapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showMyLocationOnInspectionMap()" onkeydown="if(event.key==='Enter'||event.key===' ')showMyLocationOnInspectionMap()" title="กดเพื่อซูมไปตำแหน่งปัจจุบัน">
+                <i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS
+              </div>
             </div>
           </div>
         </div>
@@ -1238,6 +1247,7 @@
     let inspectionColumnFilters = {};
     let routeMap, routeMarkersLayer, routeLineLayer;
     let inspectionMap = null, inspectionMarkersLayer = null;
+    let inspectionMyLocationMarker = null;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
     let radiusCircle = null;
@@ -1501,16 +1511,78 @@
     function placeMyLocationMarker_(la, ln) {
       lastUserGps = { lat: la, lng: ln, at: Date.now() };
       updateMapGpsStatus(la.toFixed(6) + ', ' + ln.toFixed(6) + ' — กดเพื่อไปพิกัดนี้', 'text-success');
-      if (!map) return;
-      if (!myLocationMarker) {
-        myLocationMarker = L.circleMarker([la, ln], {
-          radius: 9, color: '#fff', weight: 2, fillColor: '#0ea5e9', fillOpacity: 0.95
-        }).addTo(map);
-        myLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
-      } else {
-        myLocationMarker.setLatLng([la, ln]);
+      updateInspectionMapGpsStatus_(la.toFixed(6) + ', ' + ln.toFixed(6) + ' — กดเพื่อไปพิกัดนี้', 'text-success');
+      if (map) {
+        if (!myLocationMarker) {
+          myLocationMarker = L.circleMarker([la, ln], {
+            radius: 9, color: '#fff', weight: 2, fillColor: '#0ea5e9', fillOpacity: 0.95
+          }).addTo(map);
+          myLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
+        } else {
+          myLocationMarker.setLatLng([la, ln]);
+        }
       }
+      placeInspectionMyLocationMarker_(la, ln);
     }
+
+    function updateInspectionMapGpsStatus_(message, cls) {
+      const statusEl = document.getElementById('inspectionMapGpsStatus');
+      if (!statusEl) return;
+      statusEl.className = 'small ' + (cls || 'text-muted');
+      statusEl.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ' + message;
+    }
+
+    function placeInspectionMyLocationMarker_(la, ln) {
+      if (!inspectionMap || typeof L === 'undefined') return;
+      if (!inspectionMyLocationMarker) {
+        inspectionMyLocationMarker = L.circleMarker([la, ln], {
+          radius: 9, color: '#fff', weight: 2, fillColor: '#0ea5e9', fillOpacity: 0.95
+        }).addTo(inspectionMap);
+        inspectionMyLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
+      } else {
+        inspectionMyLocationMarker.setLatLng([la, ln]);
+        if (!inspectionMap.hasLayer(inspectionMyLocationMarker)) {
+          inspectionMyLocationMarker.addTo(inspectionMap);
+        }
+      }
+      try {
+        if (typeof inspectionMyLocationMarker.bringToFront === 'function') inspectionMyLocationMarker.bringToFront();
+      } catch (e) {}
+    }
+
+    /** ปุ่มพิกัดบนแผนที่ตรวจรับ */
+    window.showMyLocationOnInspectionMap = function() {
+      initInspectionMapIfNeeded_();
+      if (!inspectionMap) {
+        Toast.fire({ icon: 'warning', title: 'กำลังโหลดแผนที่ตรวจรับ...' });
+        return;
+      }
+      function finish_(la, ln) {
+        placeMyLocationMarker_(la, ln);
+        try { inspectionMap.invalidateSize(); } catch (e) {}
+        inspectionMap.flyTo([la, ln], 13, { animate: true });
+        Toast.fire({ icon: 'success', title: 'ไปพิกัดของคุณแล้ว' });
+      }
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
+        finish_(lastUserGps.lat, lastUserGps.lng);
+        return;
+      }
+      if (!navigator.geolocation) {
+        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
+        return;
+      }
+      updateInspectionMapGpsStatus_('กำลังดึงพิกัด...', 'text-warning');
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          finish_(pos.coords.latitude, pos.coords.longitude);
+        },
+        function() {
+          updateInspectionMapGpsStatus_('ดึง GPS ไม่ได้ (อนุญาต Location)', 'text-danger');
+          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
+        },
+        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
+      );
+    };
 
     /** ปุ่มฟ้าใหญ่: ไปพิกัดตัวเอง — หมุดโครงการทั้งหมดเข้มปกติ (ไม่เปิดโหมดรัศมี) */
     window.showMyLocationOnMap = function() {
@@ -1936,26 +2008,19 @@
     function startMapGpsTracking() {
       if(!navigator.geolocation) {
         updateMapGpsStatus('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
+        updateInspectionMapGpsStatus_('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
         return;
       }
       if(mapGpsWatchId !== null) return;
       updateMapGpsStatus('กำลังรออนุญาต GPS...', 'text-warning');
+      updateInspectionMapGpsStatus_('กำลังรออนุญาต GPS...', 'text-warning');
       mapGpsWatchId = navigator.geolocation.watchPosition(function(pos) {
         let lat = pos.coords.latitude;
         let lng = pos.coords.longitude;
-        lastUserGps = { lat: lat, lng: lng, at: Date.now() };
-        updateMapGpsStatus(lat.toFixed(6) + ', ' + lng.toFixed(6) + ' — กดเพื่อไปพิกัดนี้', 'text-success');
-        if(!map) return;
-        if(!myLocationMarker) {
-          myLocationMarker = L.circleMarker([lat, lng], {
-            radius: 8, color: '#2563eb', weight: 2, fillColor: '#60a5fa', fillOpacity: 0.9
-          }).addTo(map);
-          myLocationMarker.bindTooltip('ตำแหน่งของฉัน', { permanent: true, direction: 'top', offset: [0, -10] });
-        } else {
-          myLocationMarker.setLatLng([lat, lng]);
-        }
+        placeMyLocationMarker_(lat, lng);
       }, function() {
         updateMapGpsStatus('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
+        updateInspectionMapGpsStatus_('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
       }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 15000 });
     }
 
@@ -6170,6 +6235,9 @@
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(inspectionMap);
       inspectionMarkersLayer = L.layerGroup().addTo(inspectionMap);
       if (typeof makeMapPageScrollFriendly_ === 'function') makeMapPageScrollFriendly_(inspectionMap);
+      if (lastUserGps.lat != null && lastUserGps.lng != null) {
+        placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
+      }
       if (!window._inspMapResizeBound) {
         window._inspMapResizeBound = true;
         window.addEventListener('resize', function() {
@@ -6227,6 +6295,11 @@
       if (!inspectionMap || !inspectionMarkersLayer) return;
       try { inspectionMap.invalidateSize(); } catch (e) {}
       inspectionMarkersLayer.clearLayers();
+      if (lastUserGps.lat != null && lastUserGps.lng != null) {
+        placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
+      } else {
+        startMapGpsTracking();
+      }
       const bounds = [];
       let plotted = 0;
       let plottedReady = 0;
