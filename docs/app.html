@@ -5104,35 +5104,60 @@
       el.value = formatInspectionPickerDisplay_(date);
     }
 
+    function parseInspectionPickerInput_(dateStr) {
+      if (dateStr == null || dateStr === '') return undefined;
+      const d = parseInspectionHandoverDate_(dateStr);
+      return d || undefined;
+    }
+
     function getInspectionFlatpickrConfig_(opts) {
       opts = opts || {};
       const cfg = {
         allowInput: true,
         clickOpens: true,
         disableMobile: true,
+        dateFormat: 'j F Y',
+        formatDate: function(date) {
+          return formatInspectionPickerDisplay_(date);
+        },
+        parseDate: function(dateStr) {
+          return parseInspectionPickerInput_(dateStr);
+        },
         onReady: function(selectedDates, dateStr, instance) {
-          adjustInspectionYearDisplay_(selectedDates, dateStr, instance);
+          setInspectionThaiYear_(instance);
           if (instance.selectedDates[0]) {
             applyInspectionPickerDisplay_(instance.input, instance.selectedDates[0]);
           } else if (instance.input && instance.input.value) {
-            const d = parseInspectionHandoverDate_(instance.input.value);
-            if (d) applyInspectionPickerDisplay_(instance.input, d);
+            const d = parseInspectionPickerInput_(instance.input.value);
+            if (d) {
+              instance.setDate(d, false);
+              applyInspectionPickerDisplay_(instance.input, d);
+            }
+          }
+          syncInspInlineFilledClass_(instance.input);
+        },
+        onOpen: function(selectedDates, dateStr, instance) {
+          setInspectionThaiYear_(instance);
+          if (instance.selectedDates[0]) {
+            applyInspectionPickerDisplay_(instance.input, instance.selectedDates[0]);
           }
         },
         onYearChange: adjustInspectionYearDisplay_,
         onMonthChange: adjustInspectionYearDisplay_,
         onChange: function(selectedDates, dateStr, instance) {
-          if (selectedDates[0]) instance.input.value = formatInspectionPickerDisplay_(selectedDates[0]);
+          if (selectedDates[0]) applyInspectionPickerDisplay_(instance.input, selectedDates[0]);
+          setInspectionThaiYear_(instance);
           syncInspInlineFilledClass_(instance.input);
         },
         onClose: function(selectedDates, dateStr, instance) {
           const el = instance.input;
-          const raw = el.value.trim();
-          if (raw) {
-            const d = parseInspectionHandoverDate_(raw);
+          if (selectedDates[0]) {
+            applyInspectionPickerDisplay_(el, selectedDates[0]);
+          } else if (el && el.value) {
+            const d = parseInspectionPickerInput_(el.value);
             if (d) {
-              const formatted = formatInspectionPickerDisplay_(d);
-              if (formatted !== raw) el.value = formatted;
+              instance.setDate(d, false);
+              applyInspectionPickerDisplay_(el, d);
             }
           }
           syncInspInlineFilledClass_(el);
@@ -5159,9 +5184,14 @@
     }
 
     function ensureInspectionInlineDatePicker_(el) {
-      if (!el || el._flatpickr || typeof flatpickr === 'undefined') return;
+      if (!el || typeof flatpickr === 'undefined') return;
+      if (el._flatpickr) {
+        if (el._flatpickr._pwaInspPickerV2) return;
+        try { el._flatpickr.destroy(); } catch (e) {}
+      }
       const parsed = parseInspectionHandoverDate_(el.value);
       const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: true }));
+      fp._pwaInspPickerV2 = true;
       if (parsed) {
         fp.setDate(parsed, false);
         applyInspectionPickerDisplay_(el, parsed);
@@ -5194,9 +5224,12 @@
       ['insp_handoverRound', 'insp_inspectSchedule'].forEach(function(id) {
         const el = document.getElementById(id);
         if (!el) return;
-        if (el._flatpickr) el._flatpickr.destroy();
+        if (el._flatpickr) {
+          try { el._flatpickr.destroy(); } catch (e) {}
+        }
         const parsed = parseInspectionHandoverDate_(el.value);
         const fp = flatpickr(el, getInspectionFlatpickrConfig_({ autoSave: false }));
+        fp._pwaInspPickerV2 = true;
         if (parsed) {
           fp.setDate(parsed, false);
           applyInspectionPickerDisplay_(el, parsed);
