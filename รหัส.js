@@ -1690,6 +1690,11 @@ function verifyInspectionSourceCellWrite_(sheet, row1, col0, expected) {
     if (read === alt) return read;
   }
   if (read && want && read.replace(/\s+/g, ' ') === want.replace(/\s+/g, ' ')) return read;
+  const rd = parseThaiDate_(read);
+  const wd = parseThaiDate_(want);
+  if (rd && wd && rd.getFullYear() === wd.getFullYear() && rd.getMonth() === wd.getMonth() && rd.getDate() === wd.getDate()) {
+    return read;
+  }
   throw new Error('เขียนชีทแล้วแต่ค่าไม่ตรง — คาด "' + want + '" ได้ "' + read + '" (แถว ' + row1 + ' คอล ' + (col0 + 1) + ')');
 }
 
@@ -2343,13 +2348,16 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
   }
   const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  const healKeys = { handoverRound: true, inspectSchedule: true, inspectors: true, committee: true, visited: true };
   const hasFileUrl_ = function(s) {
     const t = String(s || '');
     return /\|https?:\/\//i.test(t) || /^https?:\/\//im.test(t);
   };
+  const healQueue = [];
   const newData = [INSPECTION_HEADERS];
   rows.forEach(function(item) {
     const old = oldById[item.id];
+    const healed = {};
     if (old) {
       preserveKeys.forEach(function(key) {
         const v = old[key];
@@ -2359,14 +2367,22 @@ function syncInspectionsFromSource_(destSheet, precollected) {
           if (item.fields.handoverRound) return;
           if (isInspectionRoundSameAsPlan_(v, old.handoverPlan || item.fields.handoverPlan)) return;
         }
+        if (key === 'inspectSchedule' && item.fields.inspectSchedule) return;
         // File comment: ถ้าชีทต้นทางกู้ URL ได้แล้ว อย่าให้ค่าเก่าที่เหลือแค่ชื่อไฟล์ทับ
         if (key === 'fileComment' && hasFileUrl_(item.fields.fileComment) && !hasFileUrl_(v)) return;
+        const srcEmpty = !(item.fields[key] === true || (item.fields[key] != null && item.fields[key] !== ''));
         item.fields[key] = v;
+        if (srcEmpty && healKeys[key] && isSyncedInspectionId_(item.id)) {
+          healed[key] = v;
+        }
       });
     }
     try {
       item.fields.fileComment = enrichInspectionFileComment_(item.fields.fileComment, null, 0, 0);
     } catch (ignore) {}
+    if (Object.keys(healed).length) {
+      healQueue.push({ id: item.id, fields: healed });
+    }
     newData.push(inspectionFieldsToLocalRow_(item.id, item.fields));
   });
   destSheet.clearContents();
@@ -2380,6 +2396,28 @@ function syncInspectionsFromSource_(destSheet, precollected) {
         if (fc) writeInspectionFileCommentCell_(destSheet, i + 1, 13, fc);
       }
     } catch (ignore) {}
+  }
+  // ซ่อมชีทต้นทางให้ตรงกับค่าที่แอปมี (กรณีเคยบันทึกในแอปแต่ชีทยังว่าง)
+  if (healQueue.length) {
+    const sheetCtx = {};
+    let healedOk = 0;
+    healQueue.forEach(function(job) {
+      try {
+        const onlyKeys = Object.keys(job.fields);
+        writeInspectionBackToSource_(job.id, job.fields, {
+          verify: true,
+          onlyKeys: onlyKeys,
+          sheetCtx: sheetCtx
+        });
+        healedOk++;
+      } catch (e) {
+        Logger.log('heal source failed ' + job.id + ': ' + e.message);
+      }
+    });
+    try { SpreadsheetApp.flush(); } catch (ignore) {}
+    if (healedOk) {
+      try { logAction('ซ่อมซิงก์ชีทต้นทาง ' + healedOk + '/' + healQueue.length + ' รายการ'); } catch (ignore) {}
+    }
   }
   return rows.length;
 }
@@ -2397,7 +2435,7 @@ function getInspectionPlans() {
   return result;
 }
 
-const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v5';
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v6';
 const INSPECTION_SYNC_TTL_SEC = 300;
 const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
 
@@ -2590,6 +2628,9 @@ function writeInspectionBackToSource_(id, fields, opts) {
   if ((!keySet || keySet.inspectSchedule) && cols.inspectSchedule == null && fields.inspectSchedule) {
     throw new Error('ไม่พบคอลัมน์กำหนดตรวจงานในแท็บชีทต้นทาง');
   }
+  if ((!keySet || keySet.handoverRound) && cols.handoverRound == null && fields.handoverRound) {
+    throw new Error('ไม่พบคอลัมน์รอบส่งมอบงานจริงในแท็บชีทต้นทาง');
+  }
   const skipColForKey_ = {};
   const dateWriteInfo = {};
 
@@ -2599,6 +2640,9 @@ function writeInspectionBackToSource_(id, fields, opts) {
     if (col == null) {
       if (key === 'inspectSchedule' && fields.inspectSchedule) {
         throw new Error('ไม่พบคอลัมน์กำหนดตรวจงานในแท็บชีทต้นทาง');
+      }
+      if (key === 'handoverRound' && fields.handoverRound) {
+        throw new Error('ไม่พบคอลัมน์รอบส่งมอบงานจริงในแท็บชีทต้นทาง');
       }
       return;
     }
@@ -2613,7 +2657,7 @@ function writeInspectionBackToSource_(id, fields, opts) {
     }
     if (key === 'inspectSchedule' || key === 'handoverRound') {
       dateWriteInfo[key] = { row: ref.row, col: col + 1, value: val };
-      if (key === 'inspectSchedule' && val && verify) {
+      if (val && (verify || key === 'handoverRound' || key === 'inspectSchedule')) {
         verifyInspectionSourceCellWrite_(srcSheet, ref.row, col, val);
       }
     }
@@ -2628,7 +2672,7 @@ function writeInspectionBackToSource_(id, fields, opts) {
     })
   );
   ordered.forEach(writeKey_);
-  if (verify) SpreadsheetApp.flush();
+  SpreadsheetApp.flush();
   return dateWriteInfo;
 }
 
@@ -2651,7 +2695,7 @@ function pushInspectionPlansToSource(sessionToken) {
     }
     const fields = inspectionFormToFields_(plan);
     try {
-      writeInspectionBackToSource_(plan.id, fields, { verify: false, sheetCtx: sheetCtx });
+      writeInspectionBackToSource_(plan.id, fields, { verify: true, sheetCtx: sheetCtx });
       out.pushed++;
       if (fields.inspectSchedule) out.withSchedule++;
     } catch (e) {
@@ -2735,7 +2779,7 @@ function restoreInspectionHandoverRounds(payload, sessionToken) {
     data[row1 - 1][9] = round;
     if (isSyncedInspectionId_(id)) {
       try {
-        writeInspectionBackToSource_(id, fields, { verify: false, onlyKeys: ['handoverRound'] });
+        writeInspectionBackToSource_(id, fields, { verify: true, onlyKeys: ['handoverRound'] });
       } catch (ignore) {}
     }
     restored++;
@@ -2768,23 +2812,35 @@ function saveInspectionPlan(formObj, sessionToken) {
         if (isSyncedInspectionId_(formObj.id)) {
           try {
             const writeInfo = writeInspectionBackToSource_(formObj.id, fields, {
-              verify: false,
+              verify: true,
               onlyKeys: onlyKeys
             });
             CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY);
-            const sched = writeInfo && writeInfo.inspectSchedule;
-            logAction('แก้ไขแผนตรวจรับ: ' + fields.place + (sched ? (' → ชีท แถว' + sched.row + ' คอล' + sched.col) : ''));
             invalidateInspectionListCache_();
-            return { success: true, message: 'อัปเดตแล้ว (แอป + ชีท)', sheetWrite: writeInfo };
+            const sched = writeInfo && writeInfo.inspectSchedule;
+            const round = writeInfo && writeInfo.handoverRound;
+            logAction('แก้ไขแผนตรวจรับ: ' + fields.place +
+              (round ? (' รอบ→แถว' + round.row) : '') +
+              (sched ? (' กำหนด→แถว' + sched.row) : ''));
+            return {
+              success: true,
+              sheetSynced: true,
+              message: 'อัปเดตแล้ว (แอป + ชีท)',
+              sheetWrite: writeInfo
+            };
           } catch (e) {
             const errMsg = friendlyInspectionSheetWriteError_(e);
             logAction('บันทึกแผนตรวจรับแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg);
-            return { success: true, message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg };
+            return {
+              success: true,
+              sheetSynced: false,
+              message: 'บันทึกในแอปแล้ว แต่เขียนกลับชีทไม่สำเร็จ: ' + errMsg
+            };
           }
         }
         logAction('แก้ไขแผนตรวจรับ: ' + fields.place);
         invalidateInspectionListCache_();
-        return { success: true, message: isSyncedInspectionId_(formObj.id) ? 'อัปเดตแล้ว (แอป + ชีท)' : 'อัปเดตข้อมูลสำเร็จ' };
+        return { success: true, sheetSynced: true, message: 'อัปเดตข้อมูลสำเร็จ' };
       }
     }
     throw new Error('ไม่พบรายการที่ต้องการแก้ไข');
