@@ -803,9 +803,9 @@
           </div>
           <div class="col-md-2">
             <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ตรวจแล้วทั้งหมด</option>
+              <option value="">ทุกสถานะตรวจ</option>
               <option value="done">ตรวจแล้ว</option>
-              <option value="pending">ยังไม่ตรวจ</option>
+              <option value="pending">ยังไม่เข้าตรวจ</option>
             </select>
           </div>
           <div class="col-md-2">
@@ -831,12 +831,34 @@
         <input type="file" id="inspectionFormTemplateInput" accept="application/pdf,.pdf" style="display:none">
       </div>
       <div class="inspection-map-panel">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
-            <small class="text-muted">หมุดตามรายการที่กรองด้านบน — คลิกหมุดเพื่อดูรายละเอียดและนำทาง</small>
+            <small class="text-muted">กรองรอบส่งมอบ / สถานะตรวจ เพื่อวางแผนการเข้าตรวจ — คลิกหมุดเพื่อดูรายละเอียดและนำทาง</small>
           </div>
           <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
+        </div>
+        <div class="row g-2 mb-3 align-items-end" id="inspectionMapFilterBar">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-0" for="inspectionMapRoundSelect">รอบส่งมอบงานจริง</label>
+            <select id="inspectionMapRoundSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="กรองตามรอบส่งมอบงานจริง">
+              <option value="">ทุกรอบส่งมอบงานจริง</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-0" for="inspectionMapVisitedSelect">สถานะเข้าตรวจ</label>
+            <select id="inspectionMapVisitedSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="กรองสถานที่ตรวจแล้ว / ยังไม่เข้าตรวจ">
+              <option value="">ทุกสถานะ</option>
+              <option value="pending">ยังไม่เข้าตรวจ</option>
+              <option value="done">ตรวจแล้ว</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <div class="d-flex flex-wrap gap-2 small text-muted pb-1" id="inspectionMapLegend">
+              <span><i class="fa-solid fa-location-dot text-primary"></i> ยังไม่เข้าตรวจ</span>
+              <span><i class="fa-solid fa-location-dot text-success" style="opacity:0.55"></i> ตรวจแล้ว</span>
+            </div>
+          </div>
         </div>
         <div class="row g-3">
           <div class="col-lg-8">
@@ -4958,7 +4980,8 @@
     function setupInspectionHandoverFilters_(ui) {
       const roundSel = document.getElementById('inspectionHandoverRoundSelect');
       const dateSel = document.getElementById('inspectionHandoverDateSelect');
-      if (!roundSel && !dateSel) return;
+      const mapRoundSel = document.getElementById('inspectionMapRoundSelect');
+      if (!roundSel && !dateSel && !mapRoundSel) return;
       const rounds = [];
       const roundSeen = {};
       const dates = [];
@@ -4980,11 +5003,19 @@
       });
       rounds.sort(function(a, b) { return a.localeCompare(b, 'th'); });
       dates.sort();
+      const roundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
+        '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
+        rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
+      const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
+        ? ui.handoverRound
+        : ((roundSel && roundSel.value) || (mapRoundSel && mapRoundSel.value) || '');
       if (roundSel) {
-        const curRound = (ui && ui.handoverRound) ? ui.handoverRound : roundSel.value;
-        roundSel.innerHTML = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
-          rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
-        if (curRound && rounds.indexOf(curRound) >= 0) roundSel.value = curRound;
+        roundSel.innerHTML = roundOptionsHtml;
+        if (curRound === '__empty__' || rounds.indexOf(curRound) >= 0) roundSel.value = curRound;
+      }
+      if (mapRoundSel) {
+        mapRoundSel.innerHTML = roundOptionsHtml;
+        if (curRound === '__empty__' || rounds.indexOf(curRound) >= 0) mapRoundSel.value = curRound;
       }
       if (dateSel) {
         const curDate = (ui && ui.handoverDate) ? ui.handoverDate : dateSel.value;
@@ -4994,7 +5025,28 @@
           }).join('');
         if (curDate && dates.indexOf(curDate) >= 0) dateSel.value = curDate;
       }
+      syncInspectionMapFilterControls_();
     }
+
+    function syncInspectionMapFilterControls_() {
+      const topRound = document.getElementById('inspectionHandoverRoundSelect');
+      const topVisited = document.getElementById('inspectionVisitedSelect');
+      const mapRound = document.getElementById('inspectionMapRoundSelect');
+      const mapVisited = document.getElementById('inspectionMapVisitedSelect');
+      if (mapRound && topRound && mapRound.value !== topRound.value) mapRound.value = topRound.value;
+      if (mapVisited && topVisited && mapVisited.value !== topVisited.value) mapVisited.value = topVisited.value;
+    }
+
+    function onInspectionMapFilterChange_() {
+      const mapRound = document.getElementById('inspectionMapRoundSelect');
+      const mapVisited = document.getElementById('inspectionMapVisitedSelect');
+      const topRound = document.getElementById('inspectionHandoverRoundSelect');
+      const topVisited = document.getElementById('inspectionVisitedSelect');
+      if (mapRound && topRound) topRound.value = mapRound.value;
+      if (mapVisited && topVisited) topVisited.value = mapVisited.value;
+      filterInspections();
+    }
+    window.onInspectionMapFilterChange_ = onInspectionMapFilterChange_;
 
     function inspectionMatchesPhaseFilter_(p, phaseVal) {
       const ph = String(p.phase || '').trim();
@@ -5921,7 +5973,9 @@
         const matchRegion = !regionVal || (p.region || 'NC').toUpperCase() === regionVal;
         const matchColumns = matchesInspectionColumnFilters_(p);
         let matchRound = true;
-        if (roundVal) {
+        if (roundVal === '__empty__') {
+          matchRound = !String(p.handoverRound || '').trim();
+        } else if (roundVal) {
           const label = formatInspectionHandoverDate_(p.handoverRound, false) || String(p.handoverRound || '').trim();
           matchRound = label === roundVal;
         }
@@ -6221,12 +6275,15 @@
       const panel = document.getElementById('inspectionMapDetails');
       const menu = document.getElementById('menu-inspection');
       if (!menu || menu.style.display === 'none') return;
+      syncInspectionMapFilterControls_();
       initInspectionMapIfNeeded_();
       if (!inspectionMap || !inspectionMarkersLayer) return;
       try { inspectionMap.invalidateSize(); } catch (e) {}
       inspectionMarkersLayer.clearLayers();
       const bounds = [];
       let plotted = 0;
+      let plottedPending = 0;
+      let plottedDone = 0;
       (filteredInspectionData || []).forEach(function(p) {
         const info = getInspectionMapLocation_(p);
         const loc = info.loc;
@@ -6237,8 +6294,11 @@
         const marker = L.marker([lat, lng], { icon: getIcon(p.phase || loc.phase) });
         if (p.visited) {
           try { marker.setOpacity(0.55); } catch (e) {}
+          plottedDone++;
+        } else {
+          plottedPending++;
         }
-        const tip = (info.name || p.place || '') + (p.visited ? ' (ตรวจแล้ว)' : '');
+        const tip = (info.name || p.place || '') + (p.visited ? ' (ตรวจแล้ว)' : ' (ยังไม่เข้าตรวจ)');
         if (tip) marker.bindTooltip(tip, { direction: 'top', offset: [0, -28] });
         marker.on('click', function() {
           showInspectionMapDetails_(p);
@@ -6251,7 +6311,11 @@
         bounds.push([lat, lng]);
         plotted++;
       });
-      if (badge) badge.textContent = plotted + ' จุด';
+      if (badge) {
+        badge.textContent = plotted
+          ? (plotted + ' จุด · ยังไม่เข้าตรวจ ' + plottedPending + ' · ตรวจแล้ว ' + plottedDone)
+          : '0 จุด';
+      }
       if (bounds.length > 1) {
         try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
       } else if (bounds.length === 1) {
@@ -6259,7 +6323,7 @@
       } else {
         inspectionMap.setView([13.7563, 100.5018], 6);
         if (panel) {
-          panel.innerHTML = '<div class="text-center text-muted mt-5"><i class="fa-solid fa-map-location-dot fa-2x mb-2 opacity-50"></i><p class="mb-0">ไม่มีพิกัดตามตัวกรองปัจจุบัน</p></div>';
+          panel.innerHTML = '<div class="text-center text-muted mt-5"><i class="fa-solid fa-filter-circle-xmark fa-2x mb-2 opacity-50"></i><p class="mb-0">ไม่มีจุดตามตัวกรองนี้<br><span class="small">ลองเปลี่ยนรอบส่งมอบหรือสถานะเข้าตรวจ</span></p></div>';
         }
       }
     }
