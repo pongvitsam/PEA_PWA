@@ -1799,7 +1799,7 @@
     let provinceBordersLoaded = false;
     const LOC_LS_KEY = 'pwa_locations_v1';
     const OUTAGE_LS_KEY = 'pwa_outages_v1';
-    const INSPECTION_LS_KEY = 'pwa_inspection_v3';
+    const INSPECTION_LS_KEY = 'pwa_inspection_v4';
     const _assetLoadPromises_ = {};
     let _locationLookupCache_ = null;
     let _outageRegionCache_ = {};
@@ -1832,10 +1832,64 @@
 
     function readCachedInspections_() {
       try {
-        const c = JSON.parse(localStorage.getItem(INSPECTION_LS_KEY) || 'null');
-        if (c && Array.isArray(c.data) && c.data.length) return c.data;
+        const keys = [INSPECTION_LS_KEY, 'pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v1'];
+        for (let i = 0; i < keys.length; i++) {
+          const c = JSON.parse(localStorage.getItem(keys[i]) || 'null');
+          if (c && Array.isArray(c.data) && c.data.length) return c.data;
+        }
       } catch (e) { /* ignore */ }
       return null;
+    }
+
+    /** กู้รอบส่งมอบที่เคยกรอกจาก cache เก่า ถ้าซิงก์ล่าสุดล้างค่าไป */
+    function mergePreservedHandoverRounds_(plans) {
+      if (!plans || !plans.length) return plans;
+      let old = null;
+      try {
+        const keys = ['pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v4', INSPECTION_LS_KEY];
+        for (let i = 0; i < keys.length; i++) {
+          const c = JSON.parse(localStorage.getItem(keys[i]) || 'null');
+          if (c && Array.isArray(c.data) && c.data.length) { old = c.data; break; }
+        }
+      } catch (e) { return plans; }
+      if (!old || !old.length) return plans;
+      const byId = {};
+      old.forEach(function(p) {
+        if (p && p.id != null) byId[String(p.id)] = p;
+      });
+      const recovered = [];
+      plans.forEach(function(p) {
+        if (!p || String(p.handoverRound || '').trim()) return;
+        const o = byId[String(p.id)];
+        if (!o || !String(o.handoverRound || '').trim()) return;
+        const roundRaw = String(o.handoverRound).trim();
+        const planRaw = String(p.handoverPlan || o.handoverPlan || '').trim();
+        if (planRaw) {
+          const rk = inspectionHandoverDateKey_(roundRaw);
+          const pk = inspectionHandoverDateKey_(planRaw);
+          if (rk && pk && rk === pk) return;
+        }
+        p.handoverRound = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
+        recovered.push({ id: p.id, handoverRound: p.handoverRound });
+      });
+      if (recovered.length) {
+        window._inspRecoveredRounds_ = recovered;
+        setTimeout(function() { flushRecoveredInspectionRounds_(); }, 800);
+      }
+      return plans;
+    }
+
+    function flushRecoveredInspectionRounds_() {
+      const list = window._inspRecoveredRounds_;
+      if (!list || !list.length) return;
+      window._inspRecoveredRounds_ = null;
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) { return; }
+      google.script.run.withSuccessHandler(function(res) {
+        if (res && res.restored) {
+          Toast.fire({ icon: 'info', title: 'กู้รอบส่งมอบที่เคยกรอกแล้ว ' + res.restored + ' รายการ' });
+        }
+      }).withFailureHandler(function() {}).restoreInspectionHandoverRounds({ items: list }, auth);
     }
 
     function writeCachedInspections_(data) {
@@ -4845,10 +4899,10 @@
       }
       const shouldUpdate = !!(pack.synced || !(inspectionData && inspectionData.length));
       if (shouldUpdate && pack.plans) {
-        inspectionData = pack.plans || [];
+        inspectionData = mergePreservedHandoverRounds_(pack.plans || []);
         indexInspectionData_(inspectionData);
         _inspMapLocCache_ = {};
-        writeCachedInspections_(pack.plans);
+        writeCachedInspections_(inspectionData);
         setupInspectionPwaFilter(ui);
         if (ui) restoreInspectionUiState_(ui);
         filterInspections(ui || undefined);
@@ -4952,9 +5006,9 @@
       window._inspectionSyncTimer_ = setTimeout(function() {
         window._inspectionSyncTimer_ = null;
         // force ครั้งแรกหลังอัปเดต logic รอบส่งมอบ — ล้างค่าเก่าที่ปนจากแผนส่งมอบ
-        const forceOnce = !sessionStorage.getItem('insp_round_opts_sync_v1');
+        const forceOnce = !sessionStorage.getItem('insp_round_preserve_v1');
         google.script.run.withSuccessHandler(function(pack) {
-          try { sessionStorage.setItem('insp_round_opts_sync_v1', '1'); } catch (e) {}
+          try { sessionStorage.setItem('insp_round_preserve_v1', '1'); } catch (e) {}
           applyInspectionPack(pack, { showError: false, preserveUi: true });
         }).withFailureHandler(function(err) {
           const msg = (err && err.message) ? err.message : String(err || '');
@@ -4988,10 +5042,10 @@
         showInspectionLoading_();
       }
       google.script.run.withSuccessHandler(res => {
-        inspectionData = res || [];
+        inspectionData = mergePreservedHandoverRounds_(res || []);
         indexInspectionData_(inspectionData);
         inspectionInitialized = true;
-        writeCachedInspections_(res || []);
+        writeCachedInspections_(inspectionData);
         setupInspectionPwaFilter();
         filterInspections();
         refreshInspectionTripDatalist_();
@@ -5107,26 +5161,29 @@
       }
       const rounds = [];
       const roundSeen = {};
-      // ใช้รายการจากชีทต้นทางเป็นหลัก — ไม่สร้างจากข้อมูลแอปที่อาจเพี้ยน
-      const sourceList = Array.isArray(inspectionHandoverRoundOptions_) ? inspectionHandoverRoundOptions_ : null;
-      if (sourceList && sourceList.length) {
-        sourceList.forEach(function(raw) {
-          const roundLabel = formatInspectionHandoverDate_(raw, false) || String(raw || '').trim();
-          if (!roundLabel || roundSeen[roundLabel]) return;
+      // ใช้รายการจากชีท + ค่าที่กรอกในแอป (รวมวันที่ที่ยังไม่ขึ้นชีทต้นทาง)
+      const sourceList = Array.isArray(inspectionHandoverRoundOptions_) ? inspectionHandoverRoundOptions_ : [];
+      sourceList.forEach(function(raw) {
+        const roundLabel = formatInspectionHandoverDate_(raw, false) || String(raw || '').trim();
+        if (!roundLabel || roundSeen[roundLabel]) return;
+        roundSeen[roundLabel] = true;
+        rounds.push(roundLabel);
+      });
+      (inspectionData || []).forEach(function(p) {
+        const roundRaw = String(p.handoverRound || '').trim();
+        if (!roundRaw) return;
+        const planRaw = String(p.handoverPlan || '').trim();
+        if (planRaw) {
+          const rk = inspectionHandoverDateKey_(roundRaw);
+          const pk = inspectionHandoverDateKey_(planRaw);
+          if (rk && pk && rk === pk) return; // ข้ามค่าที่คัดลอกจากแผนส่งมอบ
+        }
+        const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
+        if (!roundSeen[roundLabel]) {
           roundSeen[roundLabel] = true;
           rounds.push(roundLabel);
-        });
-      } else {
-        (inspectionData || []).forEach(function(p) {
-          const roundRaw = String(p.handoverRound || '').trim();
-          if (!roundRaw) return;
-          const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
-          if (!roundSeen[roundLabel]) {
-            roundSeen[roundLabel] = true;
-            rounds.push(roundLabel);
-          }
-        });
-      }
+        }
+      });
       rounds.sort(function(a, b) {
         const ka = inspectionHandoverDateKey_(a);
         const kb = inspectionHandoverDateKey_(b);

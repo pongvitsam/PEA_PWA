@@ -185,6 +185,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'debugInspectionSourceSheets': return debugInspectionSourceSheets_();
     case 'debugInspectionSourceRow': return debugInspectionSourceRow_(args[0]);
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
+    case 'restoreInspectionHandoverRounds': return restoreInspectionHandoverRounds(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
     case 'beginPdfChunkUpload': return beginPdfChunkUpload(args[0], args[1] || tok);
     case 'savePdfUploadChunk': return savePdfUploadChunk(args[0], args[1] || tok);
@@ -1260,7 +1261,7 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v2';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v6';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v7';
 const LIST_CACHE_TTL_SEC = 180;
 
 function invalidateOutageListCache_() {
@@ -2223,18 +2224,30 @@ function collectSourceInspectionRows_() {
   return collected;
 }
 
-/** รายการวันที่รอบส่งมอบงานจริงจากชีทต้นทางเท่านั้น (สำหรับ dropdown) */
-function collectInspectionHandoverRoundOptions_(precollected) {
+/** รายการวันที่รอบส่งมอบงานจริงจากชีทต้นทาง + ค่าที่กรอกในแอป (หลัง merge) */
+function collectInspectionHandoverRoundOptions_(precollected, destSheet) {
   const rows = precollected || collectSourceInspectionRows_();
   const seen = {};
   const out = [];
-  rows.forEach(function(item) {
-    const raw = item && item.fields ? item.fields.handoverRound : '';
+  function addLabel_(raw) {
     const label = formatInspectionDateDisplay_(raw) || String(raw || '').trim();
     if (!label || seen[label]) return;
     seen[label] = true;
     out.push(label);
+  }
+  rows.forEach(function(item) {
+    addLabel_(item && item.fields ? item.fields.handoverRound : '');
   });
+  // รวมค่าจากชีทแอปหลัง preserve (เช่น วันที่ 10 ที่กรอกไว้แต่ชีทต้นทางยังว่าง)
+  try {
+    const sheet = destSheet || ensureInspectionSheet_(getSpreadsheet_());
+    const local = readInspectionsMapped_(sheet);
+    local.forEach(function(p) {
+      if (!p || !p.handoverRound) return;
+      if (isInspectionRoundSameAsPlan_(p.handoverRound, p.handoverPlan)) return;
+      addLabel_(p.handoverRound);
+    });
+  } catch (ignore) {}
   out.sort(function(a, b) {
     const da = parseThaiDate_(a);
     const db = parseThaiDate_(b);
@@ -2302,6 +2315,25 @@ function debugInspectionSourceRow_(id) {
   };
 }
 
+function inspectionDateKeyForCompare_(val) {
+  const s = formatInspectionDateDisplay_(val) || cellStr_(val);
+  if (!s) return '';
+  const d = parseThaiDate_(s);
+  if (d && !isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+  return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isInspectionRoundSameAsPlan_(roundVal, planVal) {
+  const rk = inspectionDateKeyForCompare_(roundVal);
+  const pk = inspectionDateKeyForCompare_(planVal);
+  return !!(rk && pk && rk === pk);
+}
+
 function syncInspectionsFromSource_(destSheet, precollected) {
   const rows = precollected || collectSourceInspectionRows_();
   const oldData = destSheet.getDataRange().getValues();
@@ -2310,8 +2342,7 @@ function syncInspectionsFromSource_(destSheet, precollected) {
     const id = oldData[i][0];
     if (id != null && id !== '') oldById[id.toString()] = mapInspectionRow_(oldData[i]);
   }
-  // ไม่ preserve handoverRound — ใช้ค่าจากชีทต้นทางเท่านั้น (กันวันที่แผนส่งมอบ/ค่าเก่าในแอปปนในตัวกรอง)
-  const preserveKeys = ['inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
+  const preserveKeys = ['handoverRound', 'inspectSchedule', 'inspectors', 'committee', 'inspectLetterDate', 'passLetterStatusWork', 'passLetterStatus', 'visited', 'fileComment', 'tcCoordinator', 'tcContact'];
   const hasFileUrl_ = function(s) {
     const t = String(s || '');
     return /\|https?:\/\//i.test(t) || /^https?:\/\//im.test(t);
@@ -2323,6 +2354,11 @@ function syncInspectionsFromSource_(destSheet, precollected) {
       preserveKeys.forEach(function(key) {
         const v = old[key];
         if (!(v === true || (v != null && v !== ''))) return;
+        // รอบส่งมอบ: ชีทมีค่าแล้วใช้ชีท — ชีทว่างให้เก็บค่าที่กรอกในแอป (ยกเว้นค่าที่เหมือนแผนส่งมอบ)
+        if (key === 'handoverRound') {
+          if (item.fields.handoverRound) return;
+          if (isInspectionRoundSameAsPlan_(v, old.handoverPlan || item.fields.handoverPlan)) return;
+        }
         // File comment: ถ้าชีทต้นทางกู้ URL ได้แล้ว อย่าให้ค่าเก่าที่เหลือแค่ชื่อไฟล์ทับ
         if (key === 'fileComment' && hasFileUrl_(item.fields.fileComment) && !hasFileUrl_(v)) return;
         item.fields[key] = v;
@@ -2361,7 +2397,7 @@ function getInspectionPlans() {
   return result;
 }
 
-const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v4';
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v5';
 const INSPECTION_SYNC_TTL_SEC = 300;
 const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
 
@@ -2444,7 +2480,7 @@ function refreshInspectionPlansFromSource(force) {
       const sheet = ensureInspectionSheet_(ss);
       try {
         const n = syncInspectionsFromSource_(sheet, rows);
-        const roundOptions = collectInspectionHandoverRoundOptions_(rows);
+        const roundOptions = collectInspectionHandoverRoundOptions_(rows, sheet);
         cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
         invalidateInspectionListCache_();
         try {
@@ -2671,6 +2707,45 @@ function patchInspectionLocalRow_(sheet, row1, id, fields, onlyKeys) {
     }
     sheet.getRange(row1, col).setValue(val);
   });
+}
+
+function restoreInspectionHandoverRounds(payload, sessionToken) {
+  assertInspectionFromSession_(sessionToken);
+  const items = (payload && payload.items) ? payload.items : [];
+  if (!items.length) return { success: true, restored: 0 };
+  const ss = getSpreadsheet_();
+  const sheet = ensureInspectionSheet_(ss);
+  const data = sheet.getDataRange().getValues();
+  const rowById = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] != null && data[i][0] !== '') rowById[String(data[i][0])] = i + 1;
+  }
+  let restored = 0;
+  items.forEach(function(item) {
+    if (!item || item.id == null) return;
+    const id = String(item.id);
+    const round = formatInspectionDateDisplay_(item.handoverRound) || String(item.handoverRound || '').trim();
+    if (!round) return;
+    const row1 = rowById[id];
+    if (!row1) return;
+    const current = formatInspectionDateDisplay_(data[row1 - 1][9]) || cellStr_(data[row1 - 1][9]);
+    if (current) return;
+    const fields = { handoverRound: round };
+    patchInspectionLocalRow_(sheet, row1, id, fields, ['handoverRound']);
+    data[row1 - 1][9] = round;
+    if (isSyncedInspectionId_(id)) {
+      try {
+        writeInspectionBackToSource_(id, fields, { verify: false, onlyKeys: ['handoverRound'] });
+      } catch (ignore) {}
+    }
+    restored++;
+  });
+  if (restored) {
+    try { CacheService.getScriptCache().remove(INSPECTION_SYNC_CACHE_KEY); } catch (ignore) {}
+    invalidateInspectionListCache_();
+    logAction('กู้รอบส่งมอบงานจริง ' + restored + ' รายการ');
+  }
+  return { success: true, restored: restored };
 }
 
 function saveInspectionPlan(formObj, sessionToken) {
