@@ -283,6 +283,13 @@
     .inspection-sheet-table .insp-edit-cell input {
       font-size: 0.78rem; border: 1px solid #fcd34d; background: #fff;
     }
+    .inspection-sheet-table .insp-locked-date {
+      font-size: 0.78rem; line-height: 1.35; color: #1e293b; font-weight: 600;
+      padding: 0.2rem 0.15rem;
+    }
+    .inspection-sheet-table .insp-locked-date .insp-locked-hint {
+      display: block; font-size: 0.65rem; font-weight: 500; color: #94a3b8; margin-top: 0.15rem;
+    }
     .inspection-sheet-table .phase-pill {
       display: inline-block; min-width: 1.5rem; text-align: center; font-weight: 700;
       border-radius: 6px; padding: 0.1rem 0.35rem; color: #fff;
@@ -5470,7 +5477,6 @@
           if (opts.autoSave !== false) {
             const newVal = el.value.trim();
             if (el.getAttribute('data-last-saved') !== newVal) {
-              el.setAttribute('data-last-saved', newVal);
               saveInspectionInline(el);
             }
           }
@@ -5960,6 +5966,12 @@
 
     function inspectionInlineDateInput_(p, field, placeholder) {
       const display = formatInspectionHandoverDate_(p[field], false);
+      // รอบส่งมอบงานจริง: บันทึกแล้วต้องกดปุ่มแก้ไข (โมดัล) ก่อนถึงจะเปลี่ยนได้
+      if (field === 'handoverRound' && String(display).trim()) {
+        return '<div class="insp-locked-date" title="กดปุ่มแก้ไขเพื่อเปลี่ยน">' +
+          '<span class="insp-locked-date-text">' + escHtml(display) + '</span>' +
+          '<span class="insp-locked-hint"><i class="fa-solid fa-lock me-1"></i>กดแก้ไขเพื่อเปลี่ยน</span></div>';
+      }
       const filledCls = String(display).trim() ? ' has-value' : '';
       return '<input type="text" class="form-control form-control-sm insp-inline insp-inline-date' + filledCls + '" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" data-last-saved="' + escHtml(display) + '" value="' + escHtml(display) + '" placeholder="' + escHtml(placeholder || 'เช่น 15 มกราคม 2568') + '" autocomplete="off">';
     }
@@ -6086,6 +6098,47 @@
       return inspectionData[idx];
     }
 
+    function revertInspectionInlineDate_(el, prevSaved) {
+      if (!el) return;
+      const prev = prevSaved == null ? '' : String(prevSaved);
+      el.value = prev;
+      if (el._flatpickr) {
+        const d = parseInspectionHandoverDate_(prev);
+        if (d) {
+          el._flatpickr.setDate(d, false);
+          applyInspectionPickerDisplay_(el, d);
+        } else {
+          try { el._flatpickr.clear(); } catch (e) {}
+          el.value = prev;
+        }
+      }
+      syncInspInlineFilledClass_(el);
+    }
+
+    function commitInspectionInlineSave_(el, formData, displayVal) {
+      if (!el || !formData) return;
+      const id = el.getAttribute('data-id');
+      const field = el.getAttribute('data-field');
+      let auth;
+      try { auth = gasAuthArgs(); } catch (e) {
+        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+        return;
+      }
+      formData.changedKeys = [field];
+      applyInspectionInlineValueLocal_(id, field, displayVal);
+      el.setAttribute('data-last-saved', String(displayVal == null ? '' : displayVal).trim());
+      syncInspInlineFilledClass_(el);
+      google.script.run.withSuccessHandler(function(res) {
+        handleInspectionSaveResultQuiet_(res);
+        // รอบส่งมอบที่เพิ่งบันทึกครั้งแรก — รีเรนเดอร์ให้ล็อกช่อง
+        if (field === 'handoverRound' && String(displayVal || '').trim()) {
+          filterInspections(captureInspectionUiState_());
+        }
+      }).withFailureHandler(function(err) {
+        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err.message });
+      }).saveInspectionPlan(formData, auth);
+    }
+
     function saveInspectionInline(el) {
       if (!canEditInspection() || !el) return;
       const id = el.getAttribute('data-id');
@@ -6101,24 +6154,44 @@
         formData[field] = rawVal;
       }
       const displayVal = formData[field];
-      if (el.getAttribute('data-last-saved') === String(displayVal == null ? '' : displayVal).trim()) {
+      const prevSaved = el.getAttribute('data-last-saved') || '';
+      const nextSaved = String(displayVal == null ? '' : displayVal).trim();
+      if (prevSaved === nextSaved) {
         syncInspInlineFilledClass_(el);
         return;
       }
-      let auth;
-      try { auth = gasAuthArgs(); } catch (e) {
-        Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
+      // กันแก้รอบส่งมอบที่บันทึกแล้วผ่าน inline (ต้องใช้ปุ่มแก้ไข)
+      if (field === 'handoverRound' && String(prevSaved).trim()) {
+        revertInspectionInlineDate_(el, prevSaved);
+        Swal.fire({
+          icon: 'info',
+          title: 'ต้องกดปุ่มแก้ไขก่อน',
+          text: 'รอบส่งมอบงานจริงที่บันทึกแล้ว ให้กดปุ่มแก้ไขเพื่อเปลี่ยน',
+          confirmButtonText: 'ตกลง'
+        });
         return;
       }
-      formData.changedKeys = [field];
-      applyInspectionInlineValueLocal_(id, field, displayVal);
-      el.setAttribute('data-last-saved', String(displayVal == null ? '' : displayVal).trim());
-      syncInspInlineFilledClass_(el);
-      google.script.run.withSuccessHandler(function(res) {
-        handleInspectionSaveResultQuiet_(res);
-      }).withFailureHandler(function(err) {
-        if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err.message });
-      }).saveInspectionPlan(formData, auth);
+      // กำหนดตรวจงาน: เปลี่ยนได้เลย แต่ต้องยืนยันก่อนบันทึก
+      if (field === 'inspectSchedule') {
+        Swal.fire({
+          title: 'ยืนยันเปลี่ยนกำหนดตรวจงาน?',
+          html: prevSaved
+            ? ('จาก <b>' + escHtml(prevSaved) + '</b><br>เป็น <b>' + escHtml(nextSaved || '(ว่าง)') + '</b>')
+            : ('กำหนดเป็น <b>' + escHtml(nextSaved || '(ว่าง)') + '</b>'),
+          icon: 'question',
+          showCancelButton: true,
+          confirmButtonText: 'ตกลง',
+          cancelButtonText: 'ยกเลิก'
+        }).then(function(res) {
+          if (!res.isConfirmed) {
+            revertInspectionInlineDate_(el, prevSaved);
+            return;
+          }
+          commitInspectionInlineSave_(el, formData, displayVal);
+        });
+        return;
+      }
+      commitInspectionInlineSave_(el, formData, displayVal);
     }
 
     function renderInspectionList(preserveUi) {
