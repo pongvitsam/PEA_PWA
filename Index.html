@@ -171,6 +171,8 @@
     #inspectionMap {
       height: 55vh; min-height: 320px; border-radius: 16px;
       border: 1px solid var(--pwa-border); z-index: 1;
+      /* ให้ทัชแพด/เมาส์เลื่อนซูมแผนที่ได้ — ไม่ใช้ pan-y ของ map-scroll-friendly */
+      touch-action: none;
     }
     .inspection-map-details {
       height: 32vh; min-height: 200px; max-height: 280px; overflow-y: auto;
@@ -6815,10 +6817,19 @@
       if (inspectionMap || typeof L === 'undefined') return;
       const el = document.getElementById('inspectionMap');
       if (!el) return;
-      inspectionMap = L.map('inspectionMap', { center: [13.7563, 100.5018], zoom: 6 });
+      inspectionMap = L.map('inspectionMap', {
+        center: [13.7563, 100.5018],
+        zoom: 6,
+        dragging: true,
+        scrollWheelZoom: true,
+        touchZoom: true,
+        doubleClickZoom: true,
+        boxZoom: true,
+        keyboard: true
+      });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(inspectionMap);
       inspectionMarkersLayer = L.layerGroup().addTo(inspectionMap);
-      if (typeof makeMapPageScrollFriendly_ === 'function') makeMapPageScrollFriendly_(inspectionMap);
+      // ไม่ใช้ makeMapPageScrollFriendly_ — บล็อกทัชแพดเลื่อน/ซูมแผนที่
       if (lastUserGps.lat != null && lastUserGps.lng != null) {
         placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
       }
