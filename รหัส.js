@@ -2229,9 +2229,8 @@ function collectSourceInspectionRows_() {
   return collected;
 }
 
-/** รายการวันที่รอบส่งมอบงานจริงจากชีทต้นทาง + ค่าที่กรอกในแอป (หลัง merge) */
+/** รายการวันที่รอบส่งมอบงานจริงจากข้อมูลในแอป (หลัง merge) — ไม่ดึงวันที่ลอยจากชีทต้นทาง */
 function collectInspectionHandoverRoundOptions_(precollected, destSheet) {
-  const rows = precollected || collectSourceInspectionRows_();
   const seen = {};
   const out = [];
   function addLabel_(raw) {
@@ -2240,19 +2239,19 @@ function collectInspectionHandoverRoundOptions_(precollected, destSheet) {
     seen[label] = true;
     out.push(label);
   }
-  rows.forEach(function(item) {
-    addLabel_(item && item.fields ? item.fields.handoverRound : '');
-  });
-  // รวมค่าจากชีทแอปหลัง preserve (เช่น วันที่ 10 ที่กรอกไว้แต่ชีทต้นทางยังว่าง)
+  function addFromPlan_(p) {
+    if (!p || !p.handoverRound) return;
+    addLabel_(p.handoverRound);
+  }
   try {
     const sheet = destSheet || ensureInspectionSheet_(getSpreadsheet_());
-    const local = readInspectionsMapped_(sheet);
-    local.forEach(function(p) {
-      if (!p || !p.handoverRound) return;
-      if (isInspectionRoundSameAsPlan_(p.handoverRound, p.handoverPlan)) return;
-      addLabel_(p.handoverRound);
+    readInspectionsMapped_(sheet).forEach(addFromPlan_);
+  } catch (ignore) {
+    const rows = precollected || collectSourceInspectionRows_();
+    rows.forEach(function(item) {
+      addFromPlan_(item && item.fields);
     });
-  } catch (ignore) {}
+  }
   out.sort(function(a, b) {
     const da = parseThaiDate_(a);
     const db = parseThaiDate_(b);
