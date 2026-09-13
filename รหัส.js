@@ -570,14 +570,16 @@ function authenticate(username, password, rememberDevice) {
   username = (username || '').toString().trim();
   password = (password || '').toString();
   const remember = !!rememberDevice;
+  const userKey = username.toLowerCase();
+  const passKey = password.toLowerCase();
 
-  if (username === '' || username.toLowerCase() === 'guest') {
+  if (username === '' || userKey === 'guest') {
     return { success: false, message: 'กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่าน' };
   }
 
   let userSheet = ss.getSheetByName(USERS_SHEET);
   if (!userSheet) {
-    if (username === 'admin' && password === '1234') {
+    if (userKey === 'admin' && passKey === '1234') {
       const sess = createSession_('admin', 'admin', remember);
       return {
         success: true, role: 'admin', sessionToken: sess.token, expire: sess.expire,
@@ -590,10 +592,12 @@ function authenticate(username, password, rememberDevice) {
   ensureUsersSheet_(ss);
   const data = ss.getSheetByName(USERS_SHEET).getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0].toString() === username && data[i][1].toString() === password) {
+    const sheetUser = data[i][0].toString();
+    const sheetPass = data[i][1].toString();
+    if (sheetUser.toLowerCase() === userKey && sheetPass.toLowerCase() === passKey) {
       const role = normalizeUserRole_(data[i][2]);
       const roleLabel = roleLabelTh_(role);
-      const sess = createSession_(username, role, remember);
+      const sess = createSession_(sheetUser, role, remember);
       return {
         success: true, role: role, sessionToken: sess.token, expire: sess.expire,
         message: 'เข้าสู่ระบบสำเร็จ (' + roleLabel + ')'
@@ -677,7 +681,7 @@ function createManagedUser(username, password, role, sessionToken) {
   const sheet = ensureUsersSheet_(ss);
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0].toString() === username) throw new Error('ชื่อผู้ใช้นี้มีอยู่แล้ว');
+    if (data[i][0].toString().toLowerCase() === username.toLowerCase()) throw new Error('ชื่อผู้ใช้นี้มีอยู่แล้ว');
   }
   sheet.appendRow([username, password, role]);
   const label = roleLabelTh_(role);

@@ -2521,6 +2521,10 @@
       const metaEl = document.getElementById('inspFormTemplateMeta');
       const actionsEl = document.getElementById('inspFormTemplateActions');
       if (!banner || !metaEl || !actionsEl) return;
+      if (typeof isCompanyUser === 'function' && isCompanyUser()) {
+        banner.style.display = 'none';
+        return;
+      }
       banner.style.display = 'flex';
       const meta = inspectionFormTemplateMeta || { exists: false };
       const isAdmin = canEditAll();
@@ -2599,6 +2603,11 @@
 
     function loadInspectionFormTemplate(opts) {
       opts = opts || {};
+      if (typeof isCompanyUser === 'function' && isCompanyUser()) {
+        const banner = document.getElementById('inspectionFormTemplateBanner');
+        if (banner) banner.style.display = 'none';
+        return;
+      }
       const hasClient = hasInspectionFormTemplateClientMeta_();
       if (hasClient) {
         inspectionFormTemplateLoading_ = false;
@@ -2643,6 +2652,7 @@
     }
 
     function prefetchInspectionFormTemplate_() {
+      if (typeof isCompanyUser === 'function' && isCompanyUser()) return;
       if (window._inspFormTplPrefetch_) return;
       window._inspFormTplPrefetch_ = true;
       setTimeout(function() {
