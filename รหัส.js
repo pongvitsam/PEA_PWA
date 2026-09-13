@@ -114,18 +114,29 @@ function jsonpOutput_(callback, obj) {
 }
 
 function parsePostPayload_(e) {
-  if (e.postData && e.postData.contents) {
-    return JSON.parse(e.postData.contents);
-  }
+  // form POST จาก Pages ส่ง field payload=... — ต้องอ่าน parameter ก่อน postData ดิบ
   if (e.parameter && e.parameter.payload) {
     return JSON.parse(e.parameter.payload);
+  }
+  if (e.postData && e.postData.contents) {
+    const raw = String(e.postData.contents || '');
+    const type = String((e.postData && e.postData.type) || '').toLowerCase();
+    if (type.indexOf('json') >= 0 || raw.charAt(0) === '{') {
+      return JSON.parse(raw);
+    }
   }
   throw new Error('Empty payload');
 }
 
 function postMessageHtml_(obj) {
-  const safe = JSON.stringify(obj).replace(/<\/script/gi, '<\\/script');
-  const html = '<!doctype html><html><body><script>parent.postMessage(' + safe + ',"*");</script></body></html>';
+  const payload = Object.assign({ type: 'GAS_API_DONE' }, obj || {});
+  const safe = JSON.stringify(payload).replace(/<\/script/gi, '<\\/script');
+  const html = '<!doctype html><html><body><script>(function(){var o=' + safe +
+    ';function send(w){try{w.postMessage(o,"*")}catch(e){}}' +
+    'try{if(window.opener&&!window.opener.closed)send(window.opener)}catch(e){}' +
+    'try{if(parent&&parent!==window)send(parent)}catch(e){}' +
+    'try{window.close()}catch(e){}' +
+    '})();</script></body></html>';
   return HtmlService.createHtmlOutput(html)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -3120,11 +3131,27 @@ function appendInspectionFileComment_(inspectionId, fileName, url) {
 function extractDriveFileIdFromUrl_(url) {
   const s = String(url || '').trim();
   if (!s) return '';
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
   let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (m) return m[1];
   m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m) return m[1];
+  m = s.match(/\/uc\?.*?id=([a-zA-Z0-9_-]+)/i);
+  if (m) return m[1];
+  m = s.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
   return '';
+}
+
+function sameDriveFileUrl_(a, b) {
+  const ua = String(a || '').trim();
+  const ub = String(b || '').trim();
+  if (!ua || !ub) return false;
+  if (ua === ub) return true;
+  const ida = extractDriveFileIdFromUrl_(ua);
+  const idb = extractDriveFileIdFromUrl_(ub);
+  if (ida && idb && ida === idb) return true;
+  return ua.replace(/[?#].*$/, '') === ub.replace(/[?#].*$/, '');
 }
 
 function isFolderUnderInspectionRoot_(folder) {
@@ -3166,6 +3193,7 @@ function deleteInspectionDriveFileByUrl_(fileUrl) {
 function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
   const targetUrl = (fileUrl || '').toString().trim();
   if (!targetUrl) throw new Error('ไม่พบ URL ไฟล์');
+  INSPECTION_DRIVE_FILE_INDEX_ = null;
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
   const data = sheet.getDataRange().getValues();
@@ -3173,16 +3201,17 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
     if (data[i][0].toString() !== inspectionId.toString()) continue;
     const row = mapInspectionRow_(data[i]);
     try { row.fileComment = enrichInspectionFileComment_(row.fileComment, sheet, i + 1, 13); } catch (ignore) {}
-    const lines = String(row.fileComment || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean);
-    const nextLines = lines.filter(function(line) {
-      const idx = line.indexOf('|');
-      if (idx > 0 && /^https?:\/\//i.test(line.slice(idx + 1).trim())) {
-        return line.slice(idx + 1).trim() !== targetUrl;
-      }
-      if (/^https?:\/\//i.test(line)) return line !== targetUrl;
-      return true;
+    const entries = parseInspectionFileCommentLines_(row.fileComment);
+    const kept = entries.filter(function(entry) {
+      if (!entry.url) return true;
+      return !sameDriveFileUrl_(entry.url, targetUrl);
     });
-    const nextComment = nextLines.join('\n');
+    if (kept.length === entries.length && entries.some(function(e) { return !!e.url; })) {
+      throw new Error('ไม่พบลิงก์ไฟล์นี้ในรายการ — รีเฟรชหน้าแล้วลองใหม่');
+    }
+    const nextComment = kept.map(function(entry) {
+      return entry.url ? (entry.name + '|' + entry.url) : entry.name;
+    }).join('\n');
     const fields = inspectionFormToFields_({
       id: inspectionId,
       seq: row.seq,
@@ -3208,6 +3237,7 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
     });
     sheet.getRange(i + 1, 1, 1, INSPECTION_HEADERS.length).setValues([inspectionFieldsToLocalRow_(inspectionId, fields)]);
     try { writeInspectionFileCommentCell_(sheet, i + 1, 13, nextComment); } catch (ignore) {}
+    invalidateInspectionListCache_();
     if (isSyncedInspectionId_(inspectionId)) {
       try {
         writeInspectionBackToSource_(inspectionId, fields);
@@ -3224,13 +3254,17 @@ function removeInspectionFileCommentEntry_(inspectionId, fileUrl) {
 function deleteInspectionFileComment(formObj, sessionToken) {
   assertInspectionFromSession_(sessionToken);
   const inspectionId = (formObj && formObj.inspectionId != null ? formObj.inspectionId : '').toString().trim();
-  const fileUrl = (formObj && formObj.fileUrl != null ? formObj.fileUrl : '').toString().trim();
+  let fileUrl = (formObj && formObj.fileUrl != null ? formObj.fileUrl : '').toString().trim();
+  let fileId = (formObj && formObj.fileId != null ? formObj.fileId : '').toString().trim();
+  if (!fileId && fileUrl) fileId = extractDriveFileIdFromUrl_(fileUrl);
+  if (!fileUrl && fileId) fileUrl = fileId;
   if (!inspectionId) throw new Error('ไม่พบรหัสรายการ');
-  if (!fileUrl) throw new Error('ไม่พบ URL ไฟล์');
-  const driveResult = deleteInspectionDriveFileByUrl_(fileUrl);
-  const fileComment = removeInspectionFileCommentEntry_(inspectionId, fileUrl);
+  if (!fileUrl && !fileId) throw new Error('ไม่พบไฟล์ที่จะลบ');
+  const matchKey = fileId || fileUrl;
+  const driveResult = deleteInspectionDriveFileByUrl_(matchKey);
+  const fileComment = removeInspectionFileCommentEntry_(inspectionId, matchKey);
   logAction('ลบ File comment: ' + inspectionId + (driveResult.deleted ? ' (+ Drive)' : ''));
-  return { success: true, fileComment: fileComment, driveDeleted: !!driveResult.deleted };
+  return { success: true, fileComment: fileComment, driveDeleted: !!driveResult.deleted, removedFileId: fileId || driveResult.fileId || '' };
 }
 
 const INSPECTION_FORM_TEMPLATE_PREFIX = '_แบบฟอร์มตรวจ';

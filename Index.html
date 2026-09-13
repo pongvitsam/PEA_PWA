@@ -1155,7 +1155,7 @@
           </div>
           <div class="mb-3">
             <label class="fw-bold small text-muted">1. โครงการ/สถานที่ดับไฟ</label>
-            <input type="text" list="mapSearchList" id="o_project" class="form-control" placeholder="พิมพ์หรือเลือกจากฐานข้อมูล..." onchange="onOutageProjectChange()" oninput="onOutageProjectChange()">
+            <input type="text" list="mapSearchList" id="o_project" class="form-control" placeholder="พิมพ์หรือเลือกจากฐานข้อมูล..." autocomplete="off" name="outage-project" onchange="onOutageProjectChange()" oninput="onOutageProjectChange()">
             <small class="text-muted">เลือกสถานที่แล้วระบบจะแสดงข้อมูลโครงการด้านล่าง (อ่านอย่างเดียว)</small>
           </div>
           <div id="o_locationPanel" class="outage-loc-panel mb-3" style="display:none;"></div>
@@ -1192,40 +1192,41 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body bg-white">
-        <input type="hidden" id="insp_id">
+        <form id="inspectionModalForm" autocomplete="off" onsubmit="return false;">
+        <input type="hidden" id="insp_id" autocomplete="off">
         <div id="insp_sheetSourceNote" class="alert alert-info py-2 px-3 small border-0 mb-3" style="display:none;">
           <i class="fa-solid fa-file-excel"></i> รายการจากชีท — แก้แล้วบันทึกกลับ Google Sheet ได้ (ลบรายการให้ทำที่ชีท)
         </div>
         <div class="row g-2 mb-3">
-          <div class="col-md-3"><label class="fw-bold small text-muted">ลำดับที่</label><input type="text" id="insp_seq" class="form-control form-control-sm"></div>
-          <div class="col-md-3"><label class="fw-bold small text-muted">Phase</label><input type="text" id="insp_phase" class="form-control form-control-sm" placeholder="3 หรือ 4"></div>
-          <div class="col-md-6"><label class="fw-bold small text-muted">สถานที่ *</label><input type="text" list="mapSearchList" id="insp_place" class="form-control form-control-sm" placeholder="ชื่อสถานที่"></div>
+          <div class="col-md-3"><label class="fw-bold small text-muted">ลำดับที่</label><input type="text" id="insp_seq" class="form-control form-control-sm" autocomplete="off"></div>
+          <div class="col-md-3"><label class="fw-bold small text-muted">Phase</label><input type="text" id="insp_phase" class="form-control form-control-sm" placeholder="3 หรือ 4" autocomplete="off"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">สถานที่ *</label><input type="text" list="mapSearchList" id="insp_place" class="form-control form-control-sm" placeholder="ชื่อสถานที่" autocomplete="off" name="inspection-place"></div>
         </div>
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
           <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-building"></i> หน่วยงาน</h6>
           <div class="row g-2">
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. สาขา</label><input type="text" id="insp_pwaBranch" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. เขต</label><input type="text" id="insp_pwaDistrict" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">เขตความรับผิดชอบ กฟภ.</label><input type="text" id="insp_peaZone" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">กฟจ./สำนักงาน กฟภ.</label><input type="text" id="insp_peaOffice" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. สาขา</label><input type="text" id="insp_pwaBranch" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กปภ. เขต</label><input type="text" id="insp_pwaDistrict" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">เขตความรับผิดชอบ กฟภ.</label><input type="text" id="insp_peaZone" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">กฟจ./สำนักงาน กฟภ.</label><input type="text" id="insp_peaOffice" class="form-control form-control-sm" autocomplete="off"></div>
           </div>
         </div>
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
           <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-calendar-check"></i> กำหนดการ</h6>
           <div class="row g-2">
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">แผนส่งมอบงาน</label><input type="text" id="insp_handoverPlan" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">แผนส่งมอบงาน</label><input type="text" id="insp_handoverPlan" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">รอบส่งมอบงานจริง</label><input type="text" id="insp_handoverRound" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">กำหนดตรวจงาน</label><input type="text" id="insp_inspectSchedule" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">วันตรวจงาน / หนังสือตรวจรับ</label><input type="text" id="insp_inspectLetterDate" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">วันตรวจงาน / หนังสือตรวจรับ</label><input type="text" id="insp_inspectLetterDate" class="form-control form-control-sm" autocomplete="off"></div>
           </div>
         </div>
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
           <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-users"></i> ผู้เกี่ยวข้อง</h6>
           <div class="row g-2">
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">รายชื่อคนเข้าตรวจงาน</label><input type="text" id="insp_inspectors" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">คณะกรรมการตรวจรับ (ไปตรวจ)</label><input type="text" id="insp_committee" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">ผู้ประสานงาน TC</label><input type="text" id="insp_tcCoordinator" class="form-control form-control-sm"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">เบอร์ติดต่อ TC</label><input type="text" id="insp_tcContact" class="form-control form-control-sm"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">รายชื่อคนเข้าตรวจงาน</label><input type="text" id="insp_inspectors" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">คณะกรรมการตรวจรับ (ไปตรวจ)</label><input type="text" id="insp_committee" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">ผู้ประสานงาน TC</label><input type="text" id="insp_tcCoordinator" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6"><label class="form-label small text-muted mb-0">เบอร์ติดต่อ TC</label><input type="text" id="insp_tcContact" class="form-control form-control-sm" autocomplete="off" inputmode="tel"></div>
           </div>
         </div>
         <div class="row g-2 mb-2">
@@ -1233,18 +1234,19 @@
             <label class="fw-bold small text-muted">File comment (PDF)</label>
             <div id="insp_fileCommentList" class="small mb-2"></div>
             <div class="d-flex gap-2 flex-wrap">
-              <input type="text" id="insp_fileComment" class="form-control form-control-sm" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)">
+              <input type="text" id="insp_fileComment" class="form-control form-control-sm" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" autocomplete="off">
               <button type="button" class="btn btn-sm btn-success" id="btnInspFileUpload" onclick="openInspectionFileUploadFromModal()" style="display:none;"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>
             </div>
             <small class="text-muted">ไฟล์จะถูกเก็บใน Google Drive แยกโฟลเดอร์ตามชื่อสถานที่</small>
           </div>
-          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจงาน)</label><input type="text" id="insp_passLetterStatusWork" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
-          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจรับ)</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจงาน)</label><input type="text" id="insp_passLetterStatusWork" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว" autocomplete="off" name="letter-status-work"></div>
+          <div class="col-md-6"><label class="fw-bold small text-muted">ทำใบนำตัว (ตรวจรับ)</label><input type="text" id="insp_passLetterStatus" class="form-control form-control-sm" placeholder="เช่น ทำแล้ว" autocomplete="off" name="letter-status-accept"></div>
         </div>
         <div class="form-check form-switch mt-2">
-          <input class="form-check-input" type="checkbox" id="insp_visited">
+          <input class="form-check-input" type="checkbox" id="insp_visited" autocomplete="off">
           <label class="form-check-label fw-bold" for="insp_visited">ไปตรวจแล้ว</label>
         </div>
+        </form>
       </div>
       <div class="modal-footer border-0 bg-light">
         <button class="btn btn-outline-danger me-auto" id="btnDelInspection" onclick="deleteCurrentInspection()" style="display:none;"><i class="fa-solid fa-trash"></i> ลบ</button>
@@ -1264,12 +1266,12 @@
       </div>
       <div class="modal-body">
         <p class="small text-muted mb-3">แอดมินรองสามารถแก้ไขหน้าแผนดับไฟ และอัปโหลดไฟล์ PDF ในข้อมูลโครงการได้</p>
-        <div class="border rounded-3 p-3 mb-3 bg-light">
+        <form class="border rounded-3 p-3 mb-3 bg-light" autocomplete="off" onsubmit="return false;">
           <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างแอดมินรองใหม่</h6>
-          <input type="text" id="newDeputyUser" class="form-control form-control-sm mb-2" placeholder="ชื่อผู้ใช้">
-          <input type="password" id="newDeputyPass" class="form-control form-control-sm mb-2" placeholder="รหัสผ่าน">
-          <button class="btn btn-custom-primary btn-sm w-100" onclick="createDeputyAdmin()"><i class="fa-solid fa-check"></i> สร้างบัญชี</button>
-        </div>
+          <input type="text" id="newDeputyUser" class="form-control form-control-sm mb-2" placeholder="ชื่อผู้ใช้" name="deputy-username" autocomplete="off">
+          <input type="text" id="newDeputyPass" class="form-control form-control-sm mb-2" placeholder="รหัสผ่าน" name="deputy-password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" onfocus="this.type='password'" onblur="if(!this.value)this.type='text'">
+          <button type="button" class="btn btn-custom-primary btn-sm w-100" onclick="createDeputyAdmin()"><i class="fa-solid fa-check"></i> สร้างบัญชี</button>
+        </form>
         <h6 class="fw-bold small mb-2">รายชื่อผู้ใช้ในระบบ</h6>
         <div id="userListContainer" class="small"></div>
       </div>
@@ -2311,8 +2313,8 @@
       try { rememberPref = localStorage.getItem('pwa_remember_device') !== '0'; } catch (e) {}
       Swal.fire({
         title: 'เข้าสู่ระบบ',
-        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน">' +
-          '<input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน">' +
+        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน" name="username" autocomplete="username">' +
+          '<input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน" name="password" autocomplete="current-password">' +
           '<label for="swal-remember" style="display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0 0;cursor:pointer;font-size:0.95rem;user-select:none;">' +
           '<input type="checkbox" id="swal-remember"' + (rememberPref ? ' checked' : '') + ' style="width:1.1rem;height:1.1rem;accent-color:#2563eb;">' +
           'จดจำอุปกรณ์นี้ (30 วัน)</label>',
@@ -2459,6 +2461,65 @@
       return parseInspectionFileCommentEntries_(raw).some(function(e) { return !!e.url; });
     }
 
+    function extractDriveFileIdFromUrl_(url) {
+      const s = String(url || '').trim();
+      if (!s) return '';
+      if (/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;
+      let m = s.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (m) return m[1];
+      m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      if (m) return m[1];
+      m = s.match(/\/uc\?.*?id=([a-zA-Z0-9_-]+)/i);
+      if (m) return m[1];
+      m = s.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (m) return m[1];
+      return '';
+    }
+
+    function sameDriveFileUrl_(a, b) {
+      const ua = String(a || '').trim();
+      const ub = String(b || '').trim();
+      if (!ua || !ub) return false;
+      if (ua === ub) return true;
+      const ida = extractDriveFileIdFromUrl_(ua);
+      const idb = extractDriveFileIdFromUrl_(ub);
+      if (ida && idb && ida === idb) return true;
+      return ua.replace(/[?#].*$/, '') === ub.replace(/[?#].*$/, '');
+    }
+
+    const inspDeletedFileIds_ = {};
+
+    function rememberDeletedInspectionFileUrl_(fileUrl) {
+      const id = extractDriveFileIdFromUrl_(fileUrl);
+      if (id) inspDeletedFileIds_[id] = Date.now();
+    }
+
+    function stripDeletedInspectionFileUrls_(raw) {
+      const now = Date.now();
+      Object.keys(inspDeletedFileIds_).forEach(function(id) {
+        if (now - inspDeletedFileIds_[id] > 15 * 60 * 1000) delete inspDeletedFileIds_[id];
+      });
+      const deletedIds = inspDeletedFileIds_;
+      if (!Object.keys(deletedIds).length) return raw;
+      const kept = parseInspectionFileCommentEntries_(raw).filter(function(entry) {
+        if (!entry.url) return true;
+        const id = extractDriveFileIdFromUrl_(entry.url);
+        return !(id && deletedIds[id]);
+      });
+      return kept.map(function(entry) {
+        return entry.url ? (entry.name + '|' + entry.url) : entry.name;
+      }).join('\n');
+    }
+
+    function removeInspectionFileUrlLocal_(raw, fileUrl) {
+      return parseInspectionFileCommentEntries_(raw).filter(function(entry) {
+        if (!entry.url) return true;
+        return !sameDriveFileUrl_(entry.url, fileUrl);
+      }).map(function(entry) {
+        return entry.url ? (entry.name + '|' + entry.url) : entry.name;
+      }).join('\n');
+    }
+
     function mergeIncomingInspectionPlans_(incoming) {
       const prevById = {};
       (inspectionData || []).forEach(function(p) {
@@ -2467,12 +2528,13 @@
       });
       return (incoming || []).map(function(p) {
         if (!p || p.id == null) return p;
+        let nextComment = stripDeletedInspectionFileUrls_(p.fileComment);
         const prev = prevById[String(p.id)];
-        if (!prev) return p;
-        if (inspectionHasFileUrl_(prev.fileComment) && !inspectionHasFileUrl_(p.fileComment)) {
-          p.fileComment = prev.fileComment;
+        if (prev && inspectionHasFileUrl_(prev.fileComment) && !inspectionHasFileUrl_(nextComment)) {
+          nextComment = stripDeletedInspectionFileUrls_(prev.fileComment);
           if (prev.visited) p.visited = true;
         }
+        p.fileComment = nextComment;
         return p;
       });
     }
@@ -6054,19 +6116,33 @@
           return;
         }
         Swal.fire({ title: 'กำลังลบ...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
+        // Pages JSONP: ส่ง fileId สั้นๆ แทน URL เต็ม — กัน GET ยาว/403 จาก macros/echo
+        const fileId = extractDriveFileIdFromUrl_(fileUrl);
+        const deletePayload = fileId
+          ? { inspectionId: inspectionId, fileId: fileId }
+          : { inspectionId: inspectionId, fileUrl: fileUrl };
         google.script.run.withSuccessHandler(function(res) {
           Swal.close();
+          rememberDeletedInspectionFileUrl_(fileUrl);
           const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(inspectionId); });
-          if (idx > -1 && res && res.fileComment != null) inspectionData[idx].fileComment = res.fileComment;
+          if (idx > -1) {
+            const nextComment = (res && res.fileComment != null)
+              ? res.fileComment
+              : removeInspectionFileUrlLocal_(inspectionData[idx].fileComment, fileUrl);
+            inspectionData[idx].fileComment = stripDeletedInspectionFileUrls_(nextComment);
+            indexInspectionData_([inspectionData[idx]]);
+            writeCachedInspections_(inspectionData);
+          }
           const ui = consumeInspectionUiStash_();
           restoreInspectionUiState_(ui);
           filterInspections(ui);
-          renderInspectionFileCommentListInModal_(inspectionData[idx] || { id: inspectionId, fileComment: res.fileComment });
+          renderInspectionFileCommentListInModal_(inspectionData[idx] || { id: inspectionId, fileComment: res && res.fileComment });
+          refreshMapInspectionFilesPanel_();
           Toast.fire({ icon: 'success', title: 'ลบไฟล์แล้ว' });
         }).withFailureHandler(function(err) {
           Swal.close();
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'ลบไม่สำเร็จ', text: err.message });
-        }).deleteInspectionFileComment({ inspectionId: inspectionId, fileUrl: fileUrl }, auth);
+        }).deleteInspectionFileComment(deletePayload, auth);
       });
     }
 
@@ -6100,9 +6176,9 @@
       const val = p[field] || '';
       const filledCls = String(val).trim() ? ' has-value' : '';
       if (multiline) {
-        return '<textarea class="form-control form-control-sm insp-inline' + filledCls + '" rows="2" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" placeholder="' + escHtml(placeholder || '') + '" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">' + escHtml(val) + '</textarea>';
+        return '<textarea class="form-control form-control-sm insp-inline' + filledCls + '" rows="2" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" placeholder="' + escHtml(placeholder || '') + '" autocomplete="off" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">' + escHtml(val) + '</textarea>';
       }
-      return '<input type="text" class="form-control form-control-sm insp-inline' + filledCls + '" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(val) + '" placeholder="' + escHtml(placeholder || '') + '" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">';
+      return '<input type="text" class="form-control form-control-sm insp-inline' + filledCls + '" data-field="' + field + '" data-id="' + escHtml(String(p.id)) + '" value="' + escHtml(val) + '" placeholder="' + escHtml(placeholder || '') + '" autocomplete="off" name="insp-' + escHtml(field) + '" oninput="syncInspInlineFilledClass_(this)" onchange="syncInspInlineFilledClass_(this); saveInspectionInline(this)">';
     }
 
     function inspectionInlineDateInput_(p, field, placeholder) {
@@ -7302,7 +7378,9 @@
       google.script.run.withSuccessHandler(res => {
         Toast.fire({ icon: 'success', title: res.message });
         document.getElementById('newDeputyUser').value = '';
-        document.getElementById('newDeputyPass').value = '';
+        const passEl = document.getElementById('newDeputyPass');
+        passEl.value = '';
+        passEl.type = 'text';
         loadUserList();
       }).withFailureHandler(err => {
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'สร้างไม่สำเร็จ', text: err.message });
