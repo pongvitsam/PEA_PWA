@@ -3314,14 +3314,27 @@ function rememberInspectionFormFile_(file, fileName) {
   try { setInspectionFormTemplateProps_(file.getId(), fileName || file.getName()); } catch (ignore) {}
 }
 
+function inspectionFormTemplateMetaFromProps_(meta) {
+  const m = meta || getInspectionFormTemplateProps_();
+  if (!m.fileId) return null;
+  return {
+    exists: true,
+    url: 'https://drive.google.com/uc?export=download&id=' + m.fileId,
+    viewUrl: 'https://drive.google.com/file/d/' + m.fileId + '/view',
+    fileName: m.fileName || 'แบบฟอร์มตรวจ.pdf',
+    updatedAt: m.updatedAt || ''
+  };
+}
+
 function findInspectionFormTemplateInFolder_() {
   try {
     const folder = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-    const files = folder.getFiles();
+    const driveName = INSPECTION_FORM_TEMPLATE_PREFIX + '.pdf';
+    const named = folder.getFilesByName(driveName);
     let best = null;
-    while (files.hasNext()) {
-      const f = files.next();
-      if (!inspectionFormFileLooksLikeTemplate_(f)) continue;
+    while (named.hasNext()) {
+      const f = named.next();
+      try { if (f.isTrashed()) continue; } catch (ignore) {}
       if (!best || f.getLastUpdated().getTime() > best.getLastUpdated().getTime()) best = f;
     }
     return best;
@@ -3352,10 +3365,10 @@ function removeInspectionFormTemplateFile_(keepFileId) {
   const keep = keepFileId ? String(keepFileId) : '';
   try {
     const folder = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-    const files = folder.getFiles();
+    const driveName = INSPECTION_FORM_TEMPLATE_PREFIX + '.pdf';
+    const files = folder.getFilesByName(driveName);
     while (files.hasNext()) {
       const f = files.next();
-      if (!inspectionFormFileLooksLikeTemplate_(f)) continue;
       if (keep && f.getId() === keep) continue;
       try { f.setTrashed(true); } catch (ignore) {}
     }
@@ -3367,35 +3380,43 @@ function removeInspectionFormTemplateFile_(keepFileId) {
   if (!keep) clearInspectionFormTemplateProps_();
 }
 
-const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v3';
+const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v4';
 
 function inspectionFormTemplateResult_(found) {
   if (!found || !found.file) return { exists: false };
-  try { found.file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (ignore) {}
+  const props = getInspectionFormTemplateProps_();
   return {
     exists: true,
     url: inspectionFormDownloadUrl_(found.file),
-    viewUrl: found.file.getUrl(),
+    viewUrl: 'https://drive.google.com/file/d/' + found.file.getId() + '/view',
     fileName: found.fileName || found.file.getName(),
-    updatedAt: getInspectionFormTemplateProps_().updatedAt || ''
+    updatedAt: props.updatedAt || ''
   };
 }
 
-/** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ */
+/** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ (เร็ว: props/cache ก่อน แล้วค่อยแตะ Drive) */
 function getInspectionFormTemplate() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
-      if (parsed && parsed.exists) return parsed;
+      if (parsed && typeof parsed === 'object' && parsed.exists === true && (parsed.url || parsed.viewUrl)) {
+        return parsed;
+      }
+      if (parsed && parsed.exists === false) return { exists: false };
     } catch (ignore) {}
+  }
+  const fromProps = inspectionFormTemplateMetaFromProps_();
+  if (fromProps) {
+    try { cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(fromProps), 300); } catch (ignore) {}
+    return fromProps;
   }
   const found = findInspectionFormTemplateFile_();
   const result = inspectionFormTemplateResult_(found);
   try {
     if (result.exists) cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(result), 300);
-    else cache.remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
+    else cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({ exists: false }), 60);
   } catch (ignore) {}
   return result;
 }
@@ -3432,13 +3453,22 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
     throw new Error('อัปโหลดแบบฟอร์มตรวจไม่สำเร็จ: ' + msg);
   }
   logAction('อัปโหลดแบบฟอร์มตรวจ: ' + fileName);
-  return {
+  const uploaded = {
     success: true,
     exists: true,
     url: finalUrl,
+    viewUrl: 'https://drive.google.com/file/d/' + (getInspectionFormTemplateProps_().fileId || '') + '/view',
     fileName: fileName,
     updatedAt: getInspectionFormTemplateProps_().updatedAt
   };
+  try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+    exists: true,
+    url: uploaded.url,
+    viewUrl: uploaded.viewUrl,
+    fileName: uploaded.fileName,
+    updatedAt: uploaded.updatedAt
+  }), 300); } catch (ignore) {}
+  return uploaded;
 }
 
 /** ลบแบบฟอร์มตรวจ — แอดมินหลักเท่านั้น */
@@ -3682,7 +3712,7 @@ function finishResumablePdfUpload_(meta) {
     setInspectionFormTemplateProps_(meta.driveFileId, meta.fileName);
     try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
     logAction('อัปโหลดแบบฟอร์มตรวจ (resumable): ' + meta.fileName);
-    return {
+    const uploaded = {
       success: true,
       exists: true,
       url: inspectionFormDownloadUrl_(file),
@@ -3690,6 +3720,14 @@ function finishResumablePdfUpload_(meta) {
       fileName: meta.fileName,
       updatedAt: getInspectionFormTemplateProps_().updatedAt
     };
+    try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+      exists: true,
+      url: uploaded.url,
+      viewUrl: uploaded.viewUrl,
+      fileName: uploaded.fileName,
+      updatedAt: uploaded.updatedAt
+    }), 300); } catch (ignore) {}
+    return uploaded;
   }
 
   if (meta.kind === 'site') {
@@ -3987,13 +4025,22 @@ function finalizePdfChunkUpload(uploadId, sessionToken) {
       throw new Error('อัปโหลดแบบฟอร์มตรวจไม่สำเร็จ: ' + msg);
     }
     logAction('อัปโหลดแบบฟอร์มตรวจ (chunk): ' + meta.fileName);
-    return {
+    const uploaded = {
       success: true,
       exists: true,
       url: finalUrl,
+      viewUrl: 'https://drive.google.com/file/d/' + (getInspectionFormTemplateProps_().fileId || '') + '/view',
       fileName: meta.fileName,
       updatedAt: getInspectionFormTemplateProps_().updatedAt
     };
+    try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+      exists: true,
+      url: uploaded.url,
+      viewUrl: uploaded.viewUrl,
+      fileName: uploaded.fileName,
+      updatedAt: uploaded.updatedAt
+    }), 300); } catch (ignore) {}
+    return uploaded;
   }
 
   if (meta.kind === 'site') {

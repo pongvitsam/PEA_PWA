@@ -2404,6 +2404,43 @@
 
     let inspectionFormTemplateMeta = { exists: false };
     let inspectionFormTemplateLoadSeq_ = 0;
+    let inspectionFormTemplateLoading_ = false;
+    let inspectionFormTemplateLoadedOnce_ = false;
+    const INSP_FORM_TPL_CLIENT_KEY_ = 'insp_form_tpl_client_v1';
+
+    function readClientInspectionFormTemplate_() {
+      try {
+        const raw = sessionStorage.getItem(INSP_FORM_TPL_CLIENT_KEY_);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.exists && (parsed.url || parsed.viewUrl)) return parsed;
+      } catch (e) {}
+      return null;
+    }
+
+    function writeClientInspectionFormTemplate_(meta) {
+      try {
+        if (meta && meta.exists && (meta.url || meta.viewUrl)) {
+          sessionStorage.setItem(INSP_FORM_TPL_CLIENT_KEY_, JSON.stringify({
+            exists: true,
+            url: meta.url || '',
+            viewUrl: meta.viewUrl || '',
+            fileName: meta.fileName || '',
+            updatedAt: meta.updatedAt || ''
+          }));
+        } else {
+          sessionStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_);
+        }
+      } catch (e) {}
+    }
+
+    (function hydrateInspectionFormTemplateClientCache_() {
+      const cached = readClientInspectionFormTemplate_();
+      if (cached) {
+        inspectionFormTemplateMeta = cached;
+        inspectionFormTemplateLoadedOnce_ = true;
+      }
+    })();
 
     function formatInspectionFormUpdatedAt_(iso) {
       if (!iso) return '';
@@ -2434,6 +2471,10 @@
           html += '<button type="button" class="btn btn-outline-secondary btn-sm" onclick="deleteInspectionFormTemplateConfirm()"><i class="fa-solid fa-trash"></i> ลบ</button>';
         }
         actionsEl.innerHTML = html;
+      } else if (inspectionFormTemplateLoading_ || !inspectionFormTemplateLoadedOnce_) {
+        banner.classList.add('empty');
+        metaEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>กำลังโหลดแบบฟอร์ม...</span>';
+        actionsEl.innerHTML = '';
       } else {
         banner.classList.add('empty');
         metaEl.textContent = isAdmin
@@ -2455,6 +2496,71 @@
         if (inner.fileComment || inner.exists || inner.url || inner.success) return inner;
       }
       return null;
+    }
+
+    function normalizeInspectionFormTemplateMeta_(res) {
+      if (!res || typeof res !== 'object') return null;
+      const url = res.url || res.viewUrl || '';
+      if (!url) return null;
+      return {
+        exists: true,
+        url: res.url || url,
+        viewUrl: res.viewUrl || '',
+        fileName: res.fileName || 'แบบฟอร์มตรวจ.pdf',
+        updatedAt: res.updatedAt || new Date().toISOString()
+      };
+    }
+
+    function applyInspectionFormTemplateResult_(res, opts) {
+      opts = opts || {};
+      inspectionFormTemplateLoadSeq_++;
+      const unwrapped = unwrapInspectionUploadResult_(res) || res;
+      const normalized = normalizeInspectionFormTemplateMeta_(unwrapped);
+      if (normalized) {
+        inspectionFormTemplateLoading_ = false;
+        inspectionFormTemplateLoadedOnce_ = true;
+        inspectionFormTemplateMeta = normalized;
+        writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
+        renderInspectionFormTemplateBanner();
+        return true;
+      }
+      loadInspectionFormTemplate({ showLoading: true });
+      return false;
+    }
+
+    function loadInspectionFormTemplate(opts) {
+      opts = opts || {};
+      const seq = ++inspectionFormTemplateLoadSeq_;
+      if (opts.showLoading || !inspectionFormTemplateMeta.exists) {
+        inspectionFormTemplateLoading_ = true;
+        renderInspectionFormTemplateBanner();
+      }
+      google.script.run.withSuccessHandler(function(res) {
+        if (seq !== inspectionFormTemplateLoadSeq_) return;
+        if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists && !(res && res.exists)) {
+          inspectionFormTemplateLoading_ = false;
+          inspectionFormTemplateLoadedOnce_ = true;
+          renderInspectionFormTemplateBanner();
+          return;
+        }
+        inspectionFormTemplateLoading_ = false;
+        inspectionFormTemplateLoadedOnce_ = true;
+        const normalized = normalizeInspectionFormTemplateMeta_(res);
+        inspectionFormTemplateMeta = normalized || { exists: false };
+        writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
+        renderInspectionFormTemplateBanner();
+      }).withFailureHandler(function() {
+        if (seq !== inspectionFormTemplateLoadSeq_) return;
+        inspectionFormTemplateLoading_ = false;
+        inspectionFormTemplateLoadedOnce_ = true;
+        if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists) {
+          renderInspectionFormTemplateBanner();
+          return;
+        }
+        inspectionFormTemplateMeta = { exists: false };
+        writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
+        renderInspectionFormTemplateBanner();
+      }).getInspectionFormTemplate();
     }
 
     function inspectionHasFileUrl_(raw) {
@@ -2537,33 +2643,6 @@
         p.fileComment = nextComment;
         return p;
       });
-    }
-
-    function applyInspectionFormTemplateResult_(res, opts) {
-      opts = opts || {};
-      inspectionFormTemplateLoadSeq_++;
-      if (res && (res.exists || res.url)) {
-        inspectionFormTemplateMeta = res;
-        renderInspectionFormTemplateBanner();
-        return true;
-      }
-      loadInspectionFormTemplate();
-      return false;
-    }
-
-    function loadInspectionFormTemplate() {
-      const seq = ++inspectionFormTemplateLoadSeq_;
-      google.script.run.withSuccessHandler(function(res) {
-        if (seq !== inspectionFormTemplateLoadSeq_) return;
-        if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists && !(res && res.exists)) return;
-        inspectionFormTemplateMeta = res || { exists: false };
-        renderInspectionFormTemplateBanner();
-      }).withFailureHandler(function() {
-        if (seq !== inspectionFormTemplateLoadSeq_) return;
-        if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists) return;
-        inspectionFormTemplateMeta = { exists: false };
-        renderInspectionFormTemplateBanner();
-      }).getInspectionFormTemplate();
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
@@ -2658,9 +2737,9 @@
         Swal.fire({ title: 'เลือกไฟล์ในหน้าต่างที่เปิดขึ้น', allowOutsideClick: false, showConfirmButton: false, didOpen: function() { Swal.showLoading(); } });
         waitSiteUploadPopup(popup).then(function(res) {
           Swal.close();
-          const payload = unwrapInspectionUploadResult_(res);
-          const shown = applyInspectionFormTemplateResult_(payload);
+          const shown = applyInspectionFormTemplateResult_(res);
           if (shown) Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
+          else Toast.fire({ icon: 'info', title: 'กำลังดึงลิงก์ดาวน์โหลด...' });
         }).catch(function(err) {
           Swal.close();
           if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'อัปโหลดไม่สำเร็จ', text: (err && err.message) ? err.message : String(err) });
@@ -2691,7 +2770,7 @@
       Swal.fire({ title: 'กำลังอัปโหลดแบบฟอร์ม...', allowOutsideClick: false, didOpen: function() { Swal.showLoading(); } });
       const onDone = function(res) {
         Swal.close();
-        applyInspectionFormTemplateResult_(unwrapInspectionUploadResult_(res) || res);
+        applyInspectionFormTemplateResult_(res);
         Toast.fire({ icon: 'success', title: 'อัปโหลดแบบฟอร์มตรวจแล้ว' });
       };
       const onFail = function(err) {
@@ -2732,7 +2811,10 @@
         google.script.run.withSuccessHandler(function() {
           Swal.close();
           inspectionFormTemplateLoadSeq_++;
+          inspectionFormTemplateLoading_ = false;
+          inspectionFormTemplateLoadedOnce_ = true;
           inspectionFormTemplateMeta = { exists: false };
+          writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
           renderInspectionFormTemplateBanner();
           Toast.fire({ icon: 'success', title: 'ลบแบบฟอร์มแล้ว' });
         }).withFailureHandler(function(err) {
@@ -7695,9 +7777,11 @@ function submitSiteDoc() {
 function waitSiteUploadPopup(popup) {
   return new Promise(function (resolve, reject) {
     let settled = false;
+    let closedTimer = null;
     function cleanup() {
       window.removeEventListener('message', onMessage);
       clearInterval(watch);
+      if (closedTimer) clearTimeout(closedTimer);
     }
     function finishOk(res) {
       if (settled) return;
@@ -7720,9 +7804,15 @@ function waitSiteUploadPopup(popup) {
     window.addEventListener('message', onMessage);
     const watch = setInterval(function () {
       if (settled) return;
-      // ปิดหน้าต่างหลังอัปโหลดสำเร็จบ่อยครั้งที่ postMessage ไม่ถึง — ถือว่าสำเร็จแล้วรีเฟรชรายการ
-      if (popup.closed) finishOk({ closed: true });
-    }, 400);
+      // หน่วงหลังปิดป๊อปอัป — ให้ postMessage ช้าจาก GAS ทันก่อน resolve เป็น closed
+      if (popup.closed) {
+        if (!closedTimer) {
+          closedTimer = setTimeout(function () {
+            if (!settled) finishOk({ closed: true });
+          }, 450);
+        }
+      }
+    }, 250);
   });
 }
 
