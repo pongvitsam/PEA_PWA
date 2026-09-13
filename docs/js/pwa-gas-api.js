@@ -73,8 +73,8 @@
   }
 
   /**
-   * POST ผ่านป๊อปอัป — ใช้เมื่อ JSONP URL ยาวหรือโหลดสคริปต์ 403
-   * doPost(client:'pages') ตอบกลับด้วย postMessage (รวม opener)
+   * POST ผ่าน iframe ซ่อน — ใช้เมื่อ JSONP URL ยาวหรือโหลดสคริปต์ 403
+   * doPost(client:'pages') ตอบกลับด้วย postMessage ไปยัง parent (ไม่เด้งหน้าต่าง)
    */
   function gasCallPopupPost_(action, args, requestId) {
     return new Promise(function (resolve, reject) {
@@ -84,8 +84,9 @@
       }
 
       let settled = false;
-      const popupName = 'gas_api_' + requestId.replace(/[^\w]/g, '');
-      let popup = null;
+      const frameName = 'gas_api_frame_' + requestId.replace(/[^\w]/g, '');
+      let iframe = null;
+      let form = null;
 
       const timeout = setTimeout(function () {
         finishErr(new Error('API timeout'));
@@ -95,8 +96,13 @@
         clearTimeout(timeout);
         window.removeEventListener('message', onMessage);
         try {
-          if (popup && !popup.closed) popup.close();
+          if (form && form.parentNode) form.parentNode.removeChild(form);
         } catch (e) {}
+        try {
+          if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        } catch (e2) {}
+        form = null;
+        iframe = null;
       }
 
       function finishOk(result) {
@@ -123,12 +129,6 @@
 
       window.addEventListener('message', onMessage);
 
-      popup = window.open('', popupName, 'width=360,height=220,menubar=no,toolbar=no,location=yes,status=no');
-      if (!popup) {
-        finishErr(new Error('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปแล้วลองใหม่'));
-        return;
-      }
-
       const payload = {
         action: action,
         args: args || [],
@@ -136,36 +136,36 @@
         requestId: requestId,
         client: 'pages'
       };
-      const payloadStr = JSON.stringify(payload);
-      const actionUrl = String(window.GAS_API_URL).replace(/"/g, '');
 
       try {
-        const doc = popup.document;
-        doc.open();
-        doc.write(
-          '<!doctype html><html><head><meta charset="utf-8"><title>PEA API</title>' +
-          '<style>body{font-family:sans-serif;padding:16px;color:#334155;background:#f8fafc;text-align:center}' +
-          '.box{display:inline-block;margin-top:20px;padding:14px 16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px}</style></head><body>' +
-          '<div class="box"><p>กำลังเชื่อมต่อเซิร์ฟเวอร์...<br><small>หน้าต่างนี้อาจปิดเอง — ถ้าไม่ปิดให้กด X ได้</small></p></div>' +
-          '<form id="gasPostForm" method="POST" accept-charset="UTF-8"></form>' +
-          '<script>(function(){' +
-          'var f=document.getElementById("gasPostForm");' +
-          'f.action=' + JSON.stringify(actionUrl) + ';' +
-          'var i=document.createElement("input");i.type="hidden";i.name="payload";' +
-          'i.value=' + JSON.stringify(payloadStr) + ';' +
-          'f.appendChild(i);f.submit();' +
-          '})();<\/script></body></html>'
-        );
-        doc.close();
+        iframe = document.createElement('iframe');
+        iframe.name = frameName;
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;left:-9999px;opacity:0;pointer-events:none;';
+        document.body.appendChild(iframe);
+
+        form = document.createElement('form');
+        form.method = 'POST';
+        form.action = String(window.GAS_API_URL);
+        form.target = frameName;
+        form.acceptCharset = 'UTF-8';
+        form.style.display = 'none';
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'payload';
+        input.value = JSON.stringify(payload);
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
       } catch (e) {
-        finishErr(new Error('เปิดช่องทาง API ไม่สำเร็จ — อนุญาตป๊อปอัปแล้วลองใหม่'));
+        finishErr(new Error('เปิดช่องทาง API ไม่สำเร็จ'));
       }
     });
   }
 
   /**
-   * JSONP เป็นหลัก — หลีกเลี่ยง iframe→macros/echo
-   * ถ้า URL ยาวหรือ JSONP 403 จะใช้ POST ผ่านป๊อปอัปแทน
+   * JSONP เป็นหลัก
+   * ถ้า URL ยาวหรือ JSONP 403 จะใช้ POST ผ่าน iframe ซ่อนแทน (ไม่เด้งหน้าต่าง)
    */
   function gasCall(action, args) {
     const requestId = newRequestId();
