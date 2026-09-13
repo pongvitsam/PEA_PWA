@@ -476,8 +476,8 @@
         </ul>
         
         <div class="d-flex align-items-center">
-          <button id="btnManageUsers" class="btn btn-sm btn-outline-primary me-2" style="display:none;" onclick="openUserManageModal()" title="จัดการแอดมินรอง">
-            <i class="fa-solid fa-users-gear"></i> <span class="d-none d-md-inline">แอดมินรอง</span>
+          <button id="btnManageUsers" class="btn btn-sm btn-outline-primary me-2" style="display:none;" onclick="openUserManageModal()" title="จัดการผู้ใช้">
+            <i class="fa-solid fa-users-gear"></i> <span class="d-none d-md-inline">ผู้ใช้</span>
           </button>
           <span id="userStatus" class="me-3 fw-bold text-muted"><i class="fa-solid fa-user-circle"></i> รอเข้าสู่ระบบ</span>
           <button id="authBtn" class="btn btn-sm btn-custom-secondary" onclick="showLogin()"><i class="fa-solid fa-right-to-bracket"></i> Login</button>
@@ -1261,16 +1261,20 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content" style="border-radius: 16px; border: none;">
       <div class="modal-header bg-light">
-        <h5 class="modal-title fw-bold"><i class="fa-solid fa-users-gear text-success"></i> จัดการแอดมินรอง</h5>
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-users-gear text-success"></i> จัดการผู้ใช้</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted mb-3">แอดมินรองสามารถแก้ไขหน้าแผนดับไฟ และอัปโหลดไฟล์ PDF ในข้อมูลโครงการได้</p>
+        <p class="small text-muted mb-3">แอดมินรองแก้ไขแผนดับไฟ/อัปโหลด PDF ได้ — ผู้ใช้บริษัทดูได้อย่างเดียว (ไม่มีเมนูข้อมูลโครงการ/ฐานข้อมูล และไม่เห็นเลข CA/มิเตอร์)</p>
         <form class="border rounded-3 p-3 mb-3 bg-light" autocomplete="off" onsubmit="return false;">
-          <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างแอดมินรองใหม่</h6>
+          <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างบัญชีใหม่</h6>
+          <select id="newUserRole" class="form-select form-select-sm mb-2" name="user-role">
+            <option value="editor">แอดมินรอง</option>
+            <option value="user">ผู้ใช้บริษัท (USER)</option>
+          </select>
           <input type="text" id="newDeputyUser" class="form-control form-control-sm mb-2" placeholder="ชื่อผู้ใช้" name="deputy-username" autocomplete="off">
           <input type="text" id="newDeputyPass" class="form-control form-control-sm mb-2" placeholder="รหัสผ่าน" name="deputy-password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" onfocus="this.type='password'" onblur="if(!this.value)this.type='text'">
-          <button type="button" class="btn btn-custom-primary btn-sm w-100" onclick="createDeputyAdmin()"><i class="fa-solid fa-check"></i> สร้างบัญชี</button>
+          <button type="button" class="btn btn-custom-primary btn-sm w-100" onclick="createManagedUser()"><i class="fa-solid fa-check"></i> สร้างบัญชี</button>
         </form>
         <h6 class="fw-bold small mb-2">รายชื่อผู้ใช้ในระบบ</h6>
         <div id="userListContainer" class="small"></div>
@@ -1833,7 +1837,19 @@
     }
 
     function isLoggedIn() {
-      return userRole === 'admin' || userRole === 'editor';
+      return userRole === 'admin' || userRole === 'editor' || userRole === 'user';
+    }
+
+    function isCompanyUser() {
+      return userRole === 'user';
+    }
+
+    function canViewMeterCa() {
+      return !isCompanyUser();
+    }
+
+    function canAccessDocsDbMenus() {
+      return !isCompanyUser();
     }
 
     let appStarted = false;
@@ -2040,6 +2056,7 @@
         document.getElementById('loading').style.display = 'none';
         Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
       }).getLocations();
+      prefetchInspectionFormTemplate_();
     }
 
     function loadProvinceBordersLazy_() {
@@ -2302,7 +2319,7 @@
     }
 
     function showLogin(mandatory) {
-      if(userRole === 'admin' || userRole === 'editor') {
+      if(userRole === 'admin' || userRole === 'editor' || userRole === 'user') {
         Swal.fire({
           title: 'ออกจากระบบ?', text: "คุณต้องการออกจากระบบหรือไม่", icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787'
         }).then((res) => {
@@ -2373,6 +2390,9 @@
   } else if (userRole === 'editor') {
     statusEl.innerHTML = '<i class="fa-solid fa-user-pen text-warning"></i> แอดมินรอง';
     authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
+  } else if (userRole === 'user') {
+    statusEl.innerHTML = '<i class="fa-solid fa-building-user text-primary"></i> ผู้ใช้บริษัท';
+    authBtn.innerHTML = '<i class="fa-solid fa-sign-out-alt"></i> Logout'; authBtn.className = 'btn btn-sm btn-custom-danger';
   } else {
     statusEl.innerHTML = '<i class="fa-solid fa-user-lock text-secondary"></i> ยังไม่ได้เข้าสู่ระบบ';
     authBtn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login'; authBtn.className = 'btn btn-sm btn-custom-secondary';
@@ -2390,6 +2410,22 @@
   const btnUsers = document.getElementById('btnManageUsers');
   if (btnUsers) btnUsers.style.display = canEditAll() ? 'inline-block' : 'none';
 
+  const docsDbOk = canAccessDocsDbMenus();
+  ['tab-docs', 'tab-db'].forEach(function(id) {
+    const tab = document.getElementById(id);
+    if (!tab) return;
+    const li = tab.closest('li');
+    if (li) li.style.display = docsDbOk ? '' : 'none';
+    else tab.style.display = docsDbOk ? '' : 'none';
+  });
+  if (!docsDbOk) {
+    const docsMenu = document.getElementById('menu-docs');
+    const dbMenu = document.getElementById('menu-db');
+    const docsActive = docsMenu && docsMenu.style.display !== 'none';
+    const dbActive = dbMenu && dbMenu.style.display !== 'none';
+    if (docsActive || dbActive) switchMenu('map');
+  }
+
   let docBtnContainer = document.getElementById('docActionButtons');
   if(docBtnContainer) docBtnContainer.style.display = canEditAll() ? 'flex' : 'none';
 
@@ -2406,14 +2442,37 @@
     let inspectionFormTemplateLoadSeq_ = 0;
     let inspectionFormTemplateLoading_ = false;
     let inspectionFormTemplateLoadedOnce_ = false;
-    const INSP_FORM_TPL_CLIENT_KEY_ = 'insp_form_tpl_client_v1';
+    let inspectionFormTemplateInflight_ = false;
+    const INSP_FORM_TPL_CLIENT_KEY_ = 'insp_form_tpl_client_v2';
+    const INSP_FORM_TPL_CLIENT_TTL_MS_ = 7 * 24 * 60 * 60 * 1000;
 
     function readClientInspectionFormTemplate_() {
       try {
-        const raw = sessionStorage.getItem(INSP_FORM_TPL_CLIENT_KEY_);
+        let raw = localStorage.getItem(INSP_FORM_TPL_CLIENT_KEY_);
+        if (!raw) {
+          try {
+            const legacy = sessionStorage.getItem('insp_form_tpl_client_v1');
+            if (legacy) {
+              raw = legacy;
+              sessionStorage.removeItem('insp_form_tpl_client_v1');
+            }
+          } catch (e2) {}
+        }
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        if (parsed && parsed.exists && (parsed.url || parsed.viewUrl)) return parsed;
+        if (!(parsed && parsed.exists && (parsed.url || parsed.viewUrl))) return null;
+        const at = Number(parsed.cachedAt || 0);
+        if (at && (Date.now() - at) > INSP_FORM_TPL_CLIENT_TTL_MS_) {
+          try { localStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_); } catch (e3) {}
+          return null;
+        }
+        return {
+          exists: true,
+          url: parsed.url || '',
+          viewUrl: parsed.viewUrl || '',
+          fileName: parsed.fileName || '',
+          updatedAt: parsed.updatedAt || ''
+        };
       } catch (e) {}
       return null;
     }
@@ -2421,15 +2480,16 @@
     function writeClientInspectionFormTemplate_(meta) {
       try {
         if (meta && meta.exists && (meta.url || meta.viewUrl)) {
-          sessionStorage.setItem(INSP_FORM_TPL_CLIENT_KEY_, JSON.stringify({
+          localStorage.setItem(INSP_FORM_TPL_CLIENT_KEY_, JSON.stringify({
             exists: true,
             url: meta.url || '',
             viewUrl: meta.viewUrl || '',
             fileName: meta.fileName || '',
-            updatedAt: meta.updatedAt || ''
+            updatedAt: meta.updatedAt || '',
+            cachedAt: Date.now()
           }));
         } else {
-          sessionStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_);
+          localStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_);
         }
       } catch (e) {}
     }
@@ -2449,6 +2509,11 @@
         if (isNaN(d.getTime())) return '';
         return d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
       } catch (e) { return ''; }
+    }
+
+    function hasInspectionFormTemplateClientMeta_() {
+      const meta = inspectionFormTemplateMeta;
+      return !!(meta && meta.exists && (meta.url || meta.viewUrl));
     }
 
     function renderInspectionFormTemplateBanner() {
@@ -2485,6 +2550,10 @@
           : '';
       }
     }
+
+    try {
+      if (hasInspectionFormTemplateClientMeta_()) renderInspectionFormTemplateBanner();
+    } catch (e) {}
 
     function unwrapInspectionUploadResult_(res) {
       if (!res || typeof res !== 'object') return null;
@@ -2524,18 +2593,27 @@
         renderInspectionFormTemplateBanner();
         return true;
       }
-      loadInspectionFormTemplate({ showLoading: true });
+      loadInspectionFormTemplate({ showLoading: true, force: true });
       return false;
     }
 
     function loadInspectionFormTemplate(opts) {
       opts = opts || {};
+      const hasClient = hasInspectionFormTemplateClientMeta_();
+      if (hasClient) {
+        inspectionFormTemplateLoading_ = false;
+        inspectionFormTemplateLoadedOnce_ = true;
+        renderInspectionFormTemplateBanner();
+      }
+      if (inspectionFormTemplateInflight_ && !opts.force) return;
       const seq = ++inspectionFormTemplateLoadSeq_;
-      if (opts.showLoading || !inspectionFormTemplateMeta.exists) {
+      if (opts.showLoading || (!hasClient && !opts.background)) {
         inspectionFormTemplateLoading_ = true;
         renderInspectionFormTemplateBanner();
       }
+      inspectionFormTemplateInflight_ = true;
       google.script.run.withSuccessHandler(function(res) {
+        inspectionFormTemplateInflight_ = false;
         if (seq !== inspectionFormTemplateLoadSeq_) return;
         if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists && !(res && res.exists)) {
           inspectionFormTemplateLoading_ = false;
@@ -2550,6 +2628,7 @@
         writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
         renderInspectionFormTemplateBanner();
       }).withFailureHandler(function() {
+        inspectionFormTemplateInflight_ = false;
         if (seq !== inspectionFormTemplateLoadSeq_) return;
         inspectionFormTemplateLoading_ = false;
         inspectionFormTemplateLoadedOnce_ = true;
@@ -2561,6 +2640,14 @@
         writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
         renderInspectionFormTemplateBanner();
       }).getInspectionFormTemplate();
+    }
+
+    function prefetchInspectionFormTemplate_() {
+      if (window._inspFormTplPrefetch_) return;
+      window._inspFormTplPrefetch_ = true;
+      setTimeout(function() {
+        try { loadInspectionFormTemplate({ background: true }); } catch (e) {}
+      }, 500);
     }
 
     function inspectionHasFileUrl_(raw) {
@@ -3314,6 +3401,12 @@
         ? '<div class="d-flex gap-2 mt-2"><button class="btn btn-custom-primary flex-grow-1" onclick="navTo(' + index + ')"><i class="fa-brands fa-google"></i> เริ่มนำทางจากจุดที่ฉันอยู่</button></div>'
         : '';
 
+      const showIds = canViewMeterCa();
+      const kwpLine = showIds
+        ? '<small class="text-muted d-block"><b>kWp:</b> ' + escHtml(loc.kwp || '-') + ' | <b>CA:</b> ' + escHtml(loc.caNum || '-') + '</small>' +
+          '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + escHtml(loc.meterNum || '-') + '</small>'
+        : '<small class="text-muted d-block"><b>kWp:</b> ' + escHtml(loc.kwp || '-') + '</small>';
+
       return '' +
         '<h5 class="fw-bold" style="color:#2563eb;">' + escHtml(loc.name || 'ไม่มีชื่อ') + '</h5>' +
         '<div class="badge bg-secondary mb-3">เฟส ' + escHtml(loc.phase || '-') + '</div>' +
@@ -3321,8 +3414,7 @@
         '<div class="info-card">' +
           '<h6><i class="fa-solid fa-building-circle-check"></i> ข้อมูลโครงการ</h6>' +
           '<small class="text-muted d-block"><b>กฟภ. เขต:</b> ' + escHtml(loc.peaRegion || '-') + ' | <b>กปภ. เขต:</b> ' + escHtml(loc.pwaRegion || '-') + '</small>' +
-          '<small class="text-muted d-block"><b>kWp:</b> ' + escHtml(loc.kwp || '-') + ' | <b>CA:</b> ' + escHtml(loc.caNum || '-') + '</small>' +
-          '<small class="text-muted d-block"><b>มิเตอร์:</b> ' + escHtml(loc.meterNum || '-') + '</small>' +
+          kwpLine +
           '<small class="text-muted d-block"><b>พิกัด:</b> ' + escHtml(loc.lat || '-') + ', ' + escHtml(loc.lng || '-') + '</small>' +
           combinedLinks +
           inspFilesBlock +
@@ -3869,8 +3961,12 @@
       if (menuId === 'inspection') {
         startMapGpsTracking();
         ensureFlatpickr_().catch(function() {});
+        if (typeof renderInspectionFormTemplateBanner === 'function') renderInspectionFormTemplateBanner();
         if (!inspectionInitialized) initInspectionSystem();
-        else filterInspections();
+        else {
+          filterInspections();
+          if (typeof loadInspectionFormTemplate === 'function') loadInspectionFormTemplate({ background: true });
+        }
         setTimeout(function() {
           initInspectionMapIfNeeded_();
           if (inspectionMap) {
@@ -4576,10 +4672,13 @@
       let links = '';
       if (loc.link) links += `<a href="${escHtml(loc.link)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary me-1 mb-1"><i class="fa-solid fa-file-pdf"></i> SLD Asbuilt</a>`;
       if (loc.linkPEA) links += `<a href="${escHtml(loc.linkPEA)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mb-1"><i class="fa-solid fa-file-signature"></i> SLD PEA</a>`;
+      const idLine = canViewMeterCa()
+        ? `<div class="loc-row"><b>kWp:</b> ${esc(loc.kwp)} &nbsp;|&nbsp; <b>CA:</b> ${esc(loc.caNum)} &nbsp;|&nbsp; <b>มิเตอร์:</b> ${esc(loc.meterNum)}</div>`
+        : `<div class="loc-row"><b>kWp:</b> ${esc(loc.kwp)}</div>`;
       return `
         <h6 class="fw-bold text-success mb-2"><i class="fa-solid fa-building"></i> ${esc(loc.name)} <span class="badge bg-secondary ms-1">เฟส ${esc(loc.phase)}</span></h6>
         <div class="loc-row"><b>กฟภ. เขต:</b> ${esc(loc.peaRegion)} &nbsp;|&nbsp; <b>กปภ. เขต:</b> ${esc(loc.pwaRegion)}</div>
-        <div class="loc-row"><b>kWp:</b> ${esc(loc.kwp)} &nbsp;|&nbsp; <b>CA:</b> ${esc(loc.caNum)} &nbsp;|&nbsp; <b>มิเตอร์:</b> ${esc(loc.meterNum)}</div>
+        ${idLine}
         <div class="loc-row"><b>พิกัด:</b> ${esc(loc.latlngRaw)}</div>
         <div class="loc-row"><b>กฟภ. ผู้ดูแล 1:</b> ${esc(loc.pea1Name)} (${esc(loc.pea1Phone)}) ${esc(loc.pea1Pos)}</div>
         <div class="loc-row"><b>กฟภ. ผู้ดูแล 2:</b> ${esc(loc.pea2Name)} (${esc(loc.pea2Phone)}) ${esc(loc.pea2Pos)}</div>
@@ -5276,7 +5375,8 @@
       if (inspectionInitialized) return;
       loadInspectionTripPlan_();
       renderInspectionTripPanel_();
-      loadInspectionFormTemplate();
+      if (typeof renderInspectionFormTemplateBanner === 'function') renderInspectionFormTemplateBanner();
+      loadInspectionFormTemplate({ background: hasInspectionFormTemplateClientMeta_() });
       const cached = readCachedInspections_();
       if (cached) {
         inspectionData = cached;
@@ -5288,23 +5388,25 @@
       } else {
         showInspectionLoading_();
       }
-      google.script.run.withSuccessHandler(res => {
-        inspectionData = mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(res || []));
-        indexInspectionData_(inspectionData);
-        inspectionInitialized = true;
-        writeCachedInspections_(inspectionData);
-        setupInspectionPwaFilter();
-        filterInspections();
-        refreshInspectionTripDatalist_();
-        scheduleInspectionBackgroundSync_();
-      }).withFailureHandler(err => {
-        if (!cached) {
-          inspectionData = [];
+      setTimeout(function() {
+        google.script.run.withSuccessHandler(res => {
+          inspectionData = mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(res || []));
+          indexInspectionData_(inspectionData);
           inspectionInitialized = true;
+          writeCachedInspections_(inspectionData);
+          setupInspectionPwaFilter();
           filterInspections();
-          Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
-        }
-      }).getInspectionPlans();
+          refreshInspectionTripDatalist_();
+          scheduleInspectionBackgroundSync_();
+        }).withFailureHandler(err => {
+          if (!cached) {
+            inspectionData = [];
+            inspectionInitialized = true;
+            filterInspections();
+            Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
+          }
+        }).getInspectionPlans();
+      }, hasInspectionFormTemplateClientMeta_() ? 0 : 80);
     }
 
     function refreshInspectionFromSheet() {
@@ -7405,7 +7507,7 @@
       }
     }
 
-    // --- จัดการแอดมินรอง (แอดมินหลักเท่านั้น) ---
+    // --- จัดการผู้ใช้ (แอดมินหลักเท่านั้น) ---
     let userManageModalObj;
 
     function openUserManageModal() {
@@ -7413,6 +7515,13 @@
       if (!userManageModalObj) userManageModalObj = new bootstrap.Modal(document.getElementById('userManageModal'));
       loadUserList();
       userManageModalObj.show();
+    }
+
+    function roleLabelUi_(role) {
+      if (role === 'admin') return 'แอดมินหลัก';
+      if (role === 'editor') return 'แอดมินรอง';
+      if (role === 'user') return 'ผู้ใช้บริษัท';
+      return role || '-';
     }
 
     function loadUserList() {
@@ -7429,9 +7538,9 @@
         }
         box.innerHTML = users.map(u => {
           const isAdmin = u.role === 'admin';
-          const label = isAdmin ? 'แอดมินหลัก' : (u.role === 'editor' ? 'แอดมินรอง' : u.role);
-          const badge = isAdmin ? 'bg-success' : (u.role === 'editor' ? 'bg-warning text-dark' : 'bg-secondary');
-          const delBtn = (!isAdmin && u.role === 'editor')
+          const label = roleLabelUi_(u.role);
+          const badge = isAdmin ? 'bg-success' : (u.role === 'editor' ? 'bg-warning text-dark' : (u.role === 'user' ? 'bg-primary' : 'bg-secondary'));
+          const delBtn = (!isAdmin && (u.role === 'editor' || u.role === 'user'))
             ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteDeputyUser('${u.username.replace(/'/g, "\\'")}')"><i class="fa-solid fa-trash"></i></button>`
             : '';
           const pwd = escHtml(u.password || '-');
@@ -7447,10 +7556,11 @@
       }).getUsers(auth);
     }
 
-    function createDeputyAdmin() {
+    function createManagedUser() {
       if (!canEditAll()) return;
       const username = document.getElementById('newDeputyUser').value.trim();
       const password = document.getElementById('newDeputyPass').value.trim();
+      const role = (document.getElementById('newUserRole') || {}).value || 'editor';
       if (!username || !password) { Swal.fire({ icon: 'warning', title: 'กรอกชื่อผู้ใช้และรหัสผ่าน' }); return; }
       let auth;
       try { auth = gasAuthArgs(); } catch (e) {
@@ -7466,7 +7576,13 @@
         loadUserList();
       }).withFailureHandler(err => {
         if (!handleOutageAuthError(err)) Swal.fire({ icon: 'error', title: 'สร้างไม่สำเร็จ', text: err.message });
-      }).createDeputyAdmin(username, password, auth);
+      }).createManagedUser(username, password, role, auth);
+    }
+
+    function createDeputyAdmin() {
+      const roleEl = document.getElementById('newUserRole');
+      if (roleEl) roleEl.value = 'editor';
+      createManagedUser();
     }
 
     function deleteDeputyUser(username) {
@@ -7476,7 +7592,7 @@
         Swal.fire({ icon: 'warning', title: 'กรุณาเข้าสู่ระบบ', text: e.message });
         return;
       }
-      Swal.fire({ title: 'ลบแอดมินรอง ' + username + '?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' })
+      Swal.fire({ title: 'ลบบัญชี ' + username + '?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ff8787' })
         .then(r => {
           if (!r.isConfirmed) return;
           google.script.run.withSuccessHandler(res => {

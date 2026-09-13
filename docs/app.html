@@ -2043,6 +2043,7 @@
         document.getElementById('loading').style.display = 'none';
         Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
       }).getLocations();
+      prefetchInspectionFormTemplate_();
     }
 
     function loadProvinceBordersLazy_() {
@@ -2409,14 +2410,37 @@
     let inspectionFormTemplateLoadSeq_ = 0;
     let inspectionFormTemplateLoading_ = false;
     let inspectionFormTemplateLoadedOnce_ = false;
-    const INSP_FORM_TPL_CLIENT_KEY_ = 'insp_form_tpl_client_v1';
+    let inspectionFormTemplateInflight_ = false;
+    const INSP_FORM_TPL_CLIENT_KEY_ = 'insp_form_tpl_client_v2';
+    const INSP_FORM_TPL_CLIENT_TTL_MS_ = 7 * 24 * 60 * 60 * 1000;
 
     function readClientInspectionFormTemplate_() {
       try {
-        const raw = sessionStorage.getItem(INSP_FORM_TPL_CLIENT_KEY_);
+        let raw = localStorage.getItem(INSP_FORM_TPL_CLIENT_KEY_);
+        if (!raw) {
+          try {
+            const legacy = sessionStorage.getItem('insp_form_tpl_client_v1');
+            if (legacy) {
+              raw = legacy;
+              sessionStorage.removeItem('insp_form_tpl_client_v1');
+            }
+          } catch (e2) {}
+        }
         if (!raw) return null;
         const parsed = JSON.parse(raw);
-        if (parsed && parsed.exists && (parsed.url || parsed.viewUrl)) return parsed;
+        if (!(parsed && parsed.exists && (parsed.url || parsed.viewUrl))) return null;
+        const at = Number(parsed.cachedAt || 0);
+        if (at && (Date.now() - at) > INSP_FORM_TPL_CLIENT_TTL_MS_) {
+          try { localStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_); } catch (e3) {}
+          return null;
+        }
+        return {
+          exists: true,
+          url: parsed.url || '',
+          viewUrl: parsed.viewUrl || '',
+          fileName: parsed.fileName || '',
+          updatedAt: parsed.updatedAt || ''
+        };
       } catch (e) {}
       return null;
     }
@@ -2424,15 +2448,16 @@
     function writeClientInspectionFormTemplate_(meta) {
       try {
         if (meta && meta.exists && (meta.url || meta.viewUrl)) {
-          sessionStorage.setItem(INSP_FORM_TPL_CLIENT_KEY_, JSON.stringify({
+          localStorage.setItem(INSP_FORM_TPL_CLIENT_KEY_, JSON.stringify({
             exists: true,
             url: meta.url || '',
             viewUrl: meta.viewUrl || '',
             fileName: meta.fileName || '',
-            updatedAt: meta.updatedAt || ''
+            updatedAt: meta.updatedAt || '',
+            cachedAt: Date.now()
           }));
         } else {
-          sessionStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_);
+          localStorage.removeItem(INSP_FORM_TPL_CLIENT_KEY_);
         }
       } catch (e) {}
     }
@@ -2452,6 +2477,11 @@
         if (isNaN(d.getTime())) return '';
         return d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
       } catch (e) { return ''; }
+    }
+
+    function hasInspectionFormTemplateClientMeta_() {
+      const meta = inspectionFormTemplateMeta;
+      return !!(meta && meta.exists && (meta.url || meta.viewUrl));
     }
 
     function renderInspectionFormTemplateBanner() {
@@ -2488,6 +2518,10 @@
           : '';
       }
     }
+
+    try {
+      if (hasInspectionFormTemplateClientMeta_()) renderInspectionFormTemplateBanner();
+    } catch (e) {}
 
     function unwrapInspectionUploadResult_(res) {
       if (!res || typeof res !== 'object') return null;
@@ -2609,18 +2643,27 @@
         renderInspectionFormTemplateBanner();
         return true;
       }
-      loadInspectionFormTemplate({ showLoading: true });
+      loadInspectionFormTemplate({ showLoading: true, force: true });
       return false;
     }
 
     function loadInspectionFormTemplate(opts) {
       opts = opts || {};
+      const hasClient = hasInspectionFormTemplateClientMeta_();
+      if (hasClient) {
+        inspectionFormTemplateLoading_ = false;
+        inspectionFormTemplateLoadedOnce_ = true;
+        renderInspectionFormTemplateBanner();
+      }
+      if (inspectionFormTemplateInflight_ && !opts.force) return;
       const seq = ++inspectionFormTemplateLoadSeq_;
-      if (opts.showLoading || !inspectionFormTemplateMeta.exists) {
+      if (opts.showLoading || (!hasClient && !opts.background)) {
         inspectionFormTemplateLoading_ = true;
         renderInspectionFormTemplateBanner();
       }
+      inspectionFormTemplateInflight_ = true;
       google.script.run.withSuccessHandler(function(res) {
+        inspectionFormTemplateInflight_ = false;
         if (seq !== inspectionFormTemplateLoadSeq_) return;
         if (inspectionFormTemplateMeta && inspectionFormTemplateMeta.exists && !(res && res.exists)) {
           inspectionFormTemplateLoading_ = false;
@@ -2635,6 +2678,7 @@
         writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
         renderInspectionFormTemplateBanner();
       }).withFailureHandler(function() {
+        inspectionFormTemplateInflight_ = false;
         if (seq !== inspectionFormTemplateLoadSeq_) return;
         inspectionFormTemplateLoading_ = false;
         inspectionFormTemplateLoadedOnce_ = true;
@@ -2646,6 +2690,14 @@
         writeClientInspectionFormTemplate_(inspectionFormTemplateMeta);
         renderInspectionFormTemplateBanner();
       }).getInspectionFormTemplate();
+    }
+
+    function prefetchInspectionFormTemplate_() {
+      if (window._inspFormTplPrefetch_) return;
+      window._inspFormTplPrefetch_ = true;
+      setTimeout(function() {
+        try { loadInspectionFormTemplate({ background: true }); } catch (e) {}
+      }, 500);
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
@@ -3872,8 +3924,12 @@
       if (menuId === 'inspection') {
         startMapGpsTracking();
         ensureFlatpickr_().catch(function() {});
+        if (typeof renderInspectionFormTemplateBanner === 'function') renderInspectionFormTemplateBanner();
         if (!inspectionInitialized) initInspectionSystem();
-        else filterInspections();
+        else {
+          filterInspections();
+          if (typeof loadInspectionFormTemplate === 'function') loadInspectionFormTemplate({ background: true });
+        }
         setTimeout(function() {
           initInspectionMapIfNeeded_();
           if (inspectionMap) {
@@ -5279,7 +5335,8 @@
       if (inspectionInitialized) return;
       loadInspectionTripPlan_();
       renderInspectionTripPanel_();
-      loadInspectionFormTemplate();
+      if (typeof renderInspectionFormTemplateBanner === 'function') renderInspectionFormTemplateBanner();
+      loadInspectionFormTemplate({ background: hasInspectionFormTemplateClientMeta_() });
       const cached = readCachedInspections_();
       if (cached) {
         inspectionData = cached;
@@ -5291,23 +5348,25 @@
       } else {
         showInspectionLoading_();
       }
-      google.script.run.withSuccessHandler(res => {
-        inspectionData = mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(res || []));
-        indexInspectionData_(inspectionData);
-        inspectionInitialized = true;
-        writeCachedInspections_(inspectionData);
-        setupInspectionPwaFilter();
-        filterInspections();
-        refreshInspectionTripDatalist_();
-        scheduleInspectionBackgroundSync_();
-      }).withFailureHandler(err => {
-        if (!cached) {
-          inspectionData = [];
+      setTimeout(function() {
+        google.script.run.withSuccessHandler(res => {
+          inspectionData = mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(res || []));
+          indexInspectionData_(inspectionData);
           inspectionInitialized = true;
+          writeCachedInspections_(inspectionData);
+          setupInspectionPwaFilter();
           filterInspections();
-          Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
-        }
-      }).getInspectionPlans();
+          refreshInspectionTripDatalist_();
+          scheduleInspectionBackgroundSync_();
+        }).withFailureHandler(err => {
+          if (!cached) {
+            inspectionData = [];
+            inspectionInitialized = true;
+            filterInspections();
+            Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
+          }
+        }).getInspectionPlans();
+      }, hasInspectionFormTemplateClientMeta_() ? 0 : 80);
     }
 
     function refreshInspectionFromSheet() {

@@ -211,6 +211,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'updateLocation': return updateLocation(args[0], args[1] || tok);
     case 'getUsers': return getUsers(args[0] || tok);
     case 'createDeputyAdmin': return createDeputyAdmin(args[0], args[1], args[2] || tok);
+    case 'createManagedUser': return createManagedUser(args[0], args[1], args[2], args[3] || tok);
     case 'deleteUserAccount': return deleteUserAccount(args[0], args[1] || tok);
     case 'getProjectDocs': return getProjectDocs();
     case 'updateDocOrders': return updateDocOrders(args[0], args[1] || tok);
@@ -590,8 +591,8 @@ function authenticate(username, password, rememberDevice) {
   const data = ss.getSheetByName(USERS_SHEET).getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === username && data[i][1].toString() === password) {
-      const role = data[i][2].toString();
-      const roleLabel = role === 'admin' ? 'แอดมินหลัก' : (role === 'editor' ? 'แอดมินรอง' : role);
+      const role = normalizeUserRole_(data[i][2]);
+      const roleLabel = roleLabelTh_(role);
       const sess = createSession_(username, role, remember);
       return {
         success: true, role: role, sessionToken: sess.token, expire: sess.expire,
@@ -642,16 +643,35 @@ function getUsers(sessionToken) {
   return data.map(row => ({
     username: row[0].toString(),
     password: row[1].toString(),
-    role: row[2].toString()
+    role: normalizeUserRole_(row[2])
   }));
 }
 
+function normalizeUserRole_(raw) {
+  const role = (raw == null ? '' : raw).toString().trim().toLowerCase();
+  if (role === 'admin' || role === 'editor' || role === 'user') return role;
+  return role;
+}
+
+function roleLabelTh_(role) {
+  if (role === 'admin') return 'แอดมินหลัก';
+  if (role === 'editor') return 'แอดมินรอง';
+  if (role === 'user') return 'ผู้ใช้บริษัท';
+  return role || '-';
+}
+
 function createDeputyAdmin(username, password, sessionToken) {
+  return createManagedUser(username, password, 'editor', sessionToken);
+}
+
+function createManagedUser(username, password, role, sessionToken) {
   assertAdminFromSession_(sessionToken);
   username = (username || '').toString().trim();
   password = (password || '').toString().trim();
+  role = normalizeUserRole_(role);
   if (!username || !password) throw new Error('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');
   if (username.toLowerCase() === 'admin') throw new Error('ไม่สามารถใช้ชื่อ admin ได้');
+  if (role !== 'editor' && role !== 'user') throw new Error('บทบาทต้องเป็นแอดมินรองหรือผู้ใช้บริษัทเท่านั้น');
 
   const ss = getSpreadsheet_();
   const sheet = ensureUsersSheet_(ss);
@@ -659,9 +679,10 @@ function createDeputyAdmin(username, password, sessionToken) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === username) throw new Error('ชื่อผู้ใช้นี้มีอยู่แล้ว');
   }
-  sheet.appendRow([username, password, 'editor']);
-  logAction('สร้างแอดมินรอง: ' + username);
-  return { success: true, message: 'สร้างแอดมินรองสำเร็จ' };
+  sheet.appendRow([username, password, role]);
+  const label = roleLabelTh_(role);
+  logAction('สร้าง' + label + ': ' + username);
+  return { success: true, message: 'สร้าง' + label + 'สำเร็จ' };
 }
 
 function deleteUserAccount(username, sessionToken) {
@@ -675,7 +696,8 @@ function deleteUserAccount(username, sessionToken) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0].toString() === username) {
-      if (data[i][2].toString() === 'admin') throw new Error('ไม่สามารถลบแอดมินหลักได้');
+      const rowRole = normalizeUserRole_(data[i][2]);
+      if (rowRole === 'admin') throw new Error('ไม่สามารถลบแอดมินหลักได้');
       sheet.deleteRow(i + 1);
       logAction('ลบผู้ใช้: ' + username);
       return { success: true, message: 'ลบผู้ใช้สำเร็จ' };
@@ -3273,11 +3295,11 @@ const INSPECTION_FORM_PROP_FILE_NAME = 'inspectionFormTemplateFileName';
 const INSPECTION_FORM_PROP_UPDATED = 'inspectionFormTemplateUpdatedAt';
 
 function getInspectionFormTemplateProps_() {
-  const props = PropertiesService.getScriptProperties();
+  const all = PropertiesService.getScriptProperties().getProperties();
   return {
-    fileId: props.getProperty(INSPECTION_FORM_PROP_FILE_ID) || '',
-    fileName: props.getProperty(INSPECTION_FORM_PROP_FILE_NAME) || '',
-    updatedAt: props.getProperty(INSPECTION_FORM_PROP_UPDATED) || ''
+    fileId: all[INSPECTION_FORM_PROP_FILE_ID] || '',
+    fileName: all[INSPECTION_FORM_PROP_FILE_NAME] || '',
+    updatedAt: all[INSPECTION_FORM_PROP_UPDATED] || ''
   };
 }
 
@@ -3380,7 +3402,8 @@ function removeInspectionFormTemplateFile_(keepFileId) {
   if (!keep) clearInspectionFormTemplateProps_();
 }
 
-const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v4';
+const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v5';
+const INSPECTION_FORM_TEMPLATE_CACHE_TTL_ = 21600; // 6 ชม. (สูงสุดของ CacheService)
 
 function inspectionFormTemplateResult_(found) {
   if (!found || !found.file) return { exists: false };
@@ -3394,7 +3417,17 @@ function inspectionFormTemplateResult_(found) {
   };
 }
 
-/** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ (เร็ว: props/cache ก่อน แล้วค่อยแตะ Drive) */
+function putInspectionFormTemplateCache_(obj, ttlSec) {
+  try {
+    CacheService.getScriptCache().put(
+      INSPECTION_FORM_TEMPLATE_CACHE_KEY,
+      JSON.stringify(obj),
+      ttlSec == null ? INSPECTION_FORM_TEMPLATE_CACHE_TTL_ : ttlSec
+    );
+  } catch (ignore) {}
+}
+
+/** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ (เร็ว: Cache → ScriptProperties เท่านั้น; ไม่แตะ Drive/setSharing) */
 function getInspectionFormTemplate() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
@@ -3409,15 +3442,14 @@ function getInspectionFormTemplate() {
   }
   const fromProps = inspectionFormTemplateMetaFromProps_();
   if (fromProps) {
-    try { cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(fromProps), 300); } catch (ignore) {}
+    putInspectionFormTemplateCache_(fromProps);
     return fromProps;
   }
+  // ไม่มี props = ไฟล์เก่าก่อนระบบ props → สแกน Drive ครั้งเดียวแล้วจำใน props
   const found = findInspectionFormTemplateFile_();
   const result = inspectionFormTemplateResult_(found);
-  try {
-    if (result.exists) cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(result), 300);
-    else cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({ exists: false }), 60);
-  } catch (ignore) {}
+  if (result.exists) putInspectionFormTemplateCache_(result);
+  else putInspectionFormTemplateCache_({ exists: false }, 120);
   return result;
 }
 
@@ -3461,13 +3493,13 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
     fileName: fileName,
     updatedAt: getInspectionFormTemplateProps_().updatedAt
   };
-  try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+  putInspectionFormTemplateCache_({
     exists: true,
     url: uploaded.url,
     viewUrl: uploaded.viewUrl,
     fileName: uploaded.fileName,
     updatedAt: uploaded.updatedAt
-  }), 300); } catch (ignore) {}
+  });
   return uploaded;
 }
 
@@ -3720,13 +3752,13 @@ function finishResumablePdfUpload_(meta) {
       fileName: meta.fileName,
       updatedAt: getInspectionFormTemplateProps_().updatedAt
     };
-    try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+    putInspectionFormTemplateCache_({
       exists: true,
       url: uploaded.url,
       viewUrl: uploaded.viewUrl,
       fileName: uploaded.fileName,
       updatedAt: uploaded.updatedAt
-    }), 300); } catch (ignore) {}
+    });
     return uploaded;
   }
 
@@ -4033,13 +4065,13 @@ function finalizePdfChunkUpload(uploadId, sessionToken) {
       fileName: meta.fileName,
       updatedAt: getInspectionFormTemplateProps_().updatedAt
     };
-    try { CacheService.getScriptCache().put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify({
+    putInspectionFormTemplateCache_({
       exists: true,
       url: uploaded.url,
       viewUrl: uploaded.viewUrl,
       fileName: uploaded.fileName,
       updatedAt: uploaded.updatedAt
-    }), 300); } catch (ignore) {}
+    });
     return uploaded;
   }
 
