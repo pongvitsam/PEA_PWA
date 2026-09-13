@@ -1314,7 +1314,7 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <!-- GitHub Pages: polyfill google.script.run ผ่าน JSONP (ห้ามลบเมื่อ sync จาก Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=14"></script>
+  <script src="js/pwa-gas-api.js?v=15"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2756,7 +2756,8 @@
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
-    const PDF_UPLOAD_CHUNK_THRESHOLD_ = 2 * 1024 * 1024;
+    /** ใช้ direct Drive เสมอ — เลี่ยงส่ง base64 ผ่าน GAS ที่ทำให้ API timeout */
+    const PDF_UPLOAD_CHUNK_THRESHOLD_ = 0;
 
     function readFileSliceAsBase64_(blob) {
       return new Promise(function(resolve, reject) {

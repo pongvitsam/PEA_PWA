@@ -64,7 +64,8 @@
       var lastUploadResult = null;
       var selectedFile = null;
       var PDF_MAX = 100 * 1024 * 1024;
-      var PDF_CHUNK_THRESHOLD = 2 * 1024 * 1024;
+      /** ใช้ direct Drive เสมอ — เลี่ยงส่ง base64 ผ่าน GAS ที่ทำให้ timeout */
+      var PDF_CHUNK_THRESHOLD = 0;
       if (isInspectionForm) {
         document.querySelector('h1').textContent = 'อัปโหลดแบบฟอร์มตรวจรับ';
       }

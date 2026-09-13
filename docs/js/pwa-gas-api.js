@@ -4,6 +4,24 @@
 
   /** GET ยาวเกินนี้มักได้ 403 จาก script.google.com / macros/echo */
   var JSONP_URL_SOFT_LIMIT = 1600;
+  var DEFAULT_TIMEOUT_MS = 180000;
+  var UPLOAD_TIMEOUT_MS = 600000;
+  var UPLOAD_ACTIONS_ = {
+    beginPdfDirectUpload: 1,
+    finalizePdfDirectUpload: 1,
+    beginPdfChunkUpload: 1,
+    savePdfUploadChunk: 1,
+    finalizePdfChunkUpload: 1,
+    saveSiteDoc: 1,
+    saveSiteDocChunk: 1,
+    saveInspectionFileComment: 1,
+    uploadInspectionFormTemplate: 1,
+    saveProjectDoc: 1
+  };
+
+  function timeoutForAction_(action) {
+    return UPLOAD_ACTIONS_[action] ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  }
 
   function getStoredSessionToken() {
     try {
@@ -39,15 +57,16 @@
     return window.GAS_API_URL + '?' + params.toString();
   }
 
-  function gasCallJsonp_(action, argsJson, requestId) {
+  function gasCallJsonp_(action, argsJson, requestId, timeoutMs) {
     return new Promise(function (resolve, reject) {
       const cbName = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
       let script = null;
+      const waitMs = timeoutMs || DEFAULT_TIMEOUT_MS;
 
       const timeout = setTimeout(function () {
         cleanup();
         reject(new Error('API timeout'));
-      }, 90000);
+      }, waitMs);
 
       function cleanup() {
         clearTimeout(timeout);
@@ -76,7 +95,7 @@
    * POST ผ่าน iframe ซ่อน — ใช้เมื่อ JSONP URL ยาวหรือโหลดสคริปต์ 403
    * doPost(client:'pages') ตอบกลับด้วย postMessage ไปยัง parent (ไม่เด้งหน้าต่าง)
    */
-  function gasCallPopupPost_(action, args, requestId) {
+  function gasCallPopupPost_(action, args, requestId, timeoutMs) {
     return new Promise(function (resolve, reject) {
       if (!window.GAS_API_URL) {
         reject(new Error('ไม่พบ GAS_API_URL'));
@@ -87,10 +106,11 @@
       const frameName = 'gas_api_frame_' + requestId.replace(/[^\w]/g, '');
       let iframe = null;
       let form = null;
+      const waitMs = timeoutMs || DEFAULT_TIMEOUT_MS;
 
       const timeout = setTimeout(function () {
         finishErr(new Error('API timeout'));
-      }, 90000);
+      }, waitMs);
 
       function cleanup() {
         clearTimeout(timeout);
@@ -171,6 +191,7 @@
     const requestId = newRequestId();
     const compact = compactArgs_(args);
     const argsJson = JSON.stringify(compact || []);
+    const waitMs = timeoutForAction_(action);
 
     if (argsJson.length > 50000) {
       return Promise.reject(new Error('คำขอนี้ใหญ่เกินไป'));
@@ -179,13 +200,13 @@
     const probeCb = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
     const urlLen = buildJsonpUrl_(action, argsJson, requestId, probeCb).length;
     if (urlLen > JSONP_URL_SOFT_LIMIT || argsJson.length > 2500) {
-      return gasCallPopupPost_(action, compact, requestId);
+      return gasCallPopupPost_(action, compact, requestId, waitMs);
     }
 
-    return gasCallJsonp_(action, argsJson, requestId).catch(function (err) {
+    return gasCallJsonp_(action, argsJson, requestId, waitMs).catch(function (err) {
       const msg = (err && err.message) ? err.message : String(err || '');
       if (/script load failed|403/i.test(msg)) {
-        return gasCallPopupPost_(action, compact, requestId);
+        return gasCallPopupPost_(action, compact, requestId, waitMs);
       }
       throw err;
     });

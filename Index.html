@@ -2753,7 +2753,8 @@
     }
 
     const PDF_UPLOAD_MAX_BYTES_ = 100 * 1024 * 1024;
-    const PDF_UPLOAD_CHUNK_THRESHOLD_ = 2 * 1024 * 1024;
+    /** ใช้ direct Drive เสมอ — เลี่ยงส่ง base64 ผ่าน GAS ที่ทำให้ API timeout */
+    const PDF_UPLOAD_CHUNK_THRESHOLD_ = 0;
 
     function readFileSliceAsBase64_(blob) {
       return new Promise(function(resolve, reject) {
