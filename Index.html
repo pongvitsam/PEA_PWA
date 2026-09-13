@@ -2330,11 +2330,12 @@
       try { rememberPref = localStorage.getItem('pwa_remember_device') !== '0'; } catch (e) {}
       Swal.fire({
         title: 'เข้าสู่ระบบ',
-        html: '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน" name="username" autocomplete="username">' +
+        html: '<form id="swal-login-form" autocomplete="on" onsubmit="return false;" style="display:contents;">' +
+          '<input type="text" id="swal-user" class="swal2-input" placeholder="ชื่อผู้ใช้งาน" name="username" autocomplete="username">' +
           '<input type="password" id="swal-pass" class="swal2-input" placeholder="รหัสผ่าน" name="password" autocomplete="current-password">' +
           '<label for="swal-remember" style="display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0 0;cursor:pointer;font-size:0.95rem;user-select:none;">' +
           '<input type="checkbox" id="swal-remember"' + (rememberPref ? ' checked' : '') + ' style="width:1.1rem;height:1.1rem;accent-color:#2563eb;">' +
-          'จดจำอุปกรณ์นี้ (30 วัน)</label>',
+          'จดจำอุปกรณ์นี้ (30 วัน)</label></form>',
         confirmButtonText: 'เข้าสู่ระบบ',
         confirmButtonColor: '#2563eb',
         allowOutsideClick: !mandatory,
@@ -4065,37 +4066,17 @@
       return (rows || []).map(normalizeOutageRecord_);
     }
 
-    function _dbg153e7b_(location, message, data, hypothesisId) {
-      // #region agent log
-      fetch('http://127.0.0.1:7789/ingest/7a45a6b0-687f-46dc-b317-ba27173fd4da',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'153e7b'},body:JSON.stringify({sessionId:'153e7b',location:location,message:message,data:data,hypothesisId:hypothesisId,runId:'post-fix',timestamp:Date.now()})}).catch(function(){});
-      // #endregion
-    }
-
     function formatCalendarTitleTh_(input) {
       let d = null;
-      let branch = 'fallback';
       if (input && typeof input === 'object' && !(input instanceof Date)) {
         const info = input.date || input.start;
         if (info && typeof info.year === 'number') {
           d = new Date(info.year, info.month, info.day || 1);
-          branch = 'fc-verbose';
         }
       }
       if (!d) d = normalizeGregorianDate_(input) || new Date();
       const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
-      const title = months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
-      // #region agent log
-      _dbg153e7b_('Index.html:formatCalendarTitleTh_', 'title computed', {
-        branch: branch,
-        inputType: input == null ? 'null' : (input instanceof Date ? 'Date' : typeof input),
-        inputKeys: input && typeof input === 'object' && !(input instanceof Date) ? Object.keys(input) : [],
-        info: input && input.date ? { year: input.date.year, month: input.date.month, day: input.date.day } : (input && input.start ? { year: input.start.year, month: input.start.month, day: input.start.day } : null),
-        parsedMonth: d.getMonth(),
-        parsedYear: d.getFullYear(),
-        title: title
-      }, 'H1');
-      // #endregion
-      return title;
+      return months[d.getMonth()] + ' ' + toBuddhistYearForDisplay_(d.getFullYear());
     }
 
     function syncOutageCalendarTitle_(info) {
@@ -4104,13 +4085,6 @@
       const title = formatCalendarTitleTh_(d);
       const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
       if (titleEl) titleEl.textContent = title;
-      // #region agent log
-      _dbg153e7b_('Index.html:syncOutageCalendarTitle_', 'title synced', {
-        calDate: d.toISOString(),
-        title: title,
-        domTitle: titleEl ? titleEl.textContent : null
-      }, 'H2');
-      // #endregion
       return title;
     }
 
@@ -4329,15 +4303,6 @@
       const focusDate = getOutageCalendarFocusDate();
       const calDateBefore = calendar ? calendar.getDate() : null;
       const preserveDate = outageCalendarViewDate_ || calDateBefore || focusDate;
-      // #region agent log
-      _dbg153e7b_('Index.html:refreshOutageCalendar', 'refresh called', {
-        hasCalendar: !!calendar,
-        focusDate: focusDate ? focusDate.toISOString() : null,
-        calDateBefore: calDateBefore ? calDateBefore.toISOString() : null,
-        preserveDate: preserveDate ? preserveDate.toISOString() : null,
-        eventCount: events.length
-      }, 'H3');
-      // #endregion
       if (calendar) {
         calendar.setOption('height', calHeight);
         calendar.getEventSources().forEach(function(src) { src.remove(); });
@@ -4345,12 +4310,6 @@
         calendar.gotoDate(preserveDate);
         syncOutageCalendarTitle_();
         calendar.updateSize();
-        // #region agent log
-        _dbg153e7b_('Index.html:refreshOutageCalendar', 'after refresh', {
-          calDateAfter: calendar.getDate().toISOString(),
-          domTitle: (document.querySelector('.calendar-container .fc-toolbar-title') || {}).textContent || ''
-        }, 'H3');
-        // #endregion
         setTimeout(function() {
           document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
             el.style.minHeight = dayMinH + 'px';
@@ -4390,13 +4349,6 @@
         eventOrder: 'start',
         headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,listMonth' },
         titleFormat: function(date) {
-          // #region agent log
-          _dbg153e7b_('Index.html:titleFormat', 'titleFormat invoked', {
-            argType: date == null ? 'null' : (date instanceof Date ? 'Date' : typeof date),
-            argKeys: date && typeof date === 'object' && !(date instanceof Date) ? Object.keys(date) : [],
-            hasDateInfo: !!(date && date.date && typeof date.date.year === 'number')
-          }, 'H2');
-          // #endregion
           return formatCalendarTitleTh_(date);
         },
         buttonText: { today: 'วันนี้', month: 'เดือน', week: 'สัปดาห์', list: 'รายการ' },
@@ -4429,16 +4381,6 @@
         datesSet: function(info) {
           if (calendar) outageCalendarViewDate_ = calendar.getDate();
           syncOutageCalendarTitle_(info);
-          const titleEl = document.querySelector('.calendar-container .fc-toolbar-title');
-          // #region agent log
-          _dbg153e7b_('Index.html:datesSet', 'dates changed', {
-            start: info && info.start ? info.start.toISOString() : null,
-            calDate: calendar ? calendar.getDate().toISOString() : null,
-            viewType: info && info.view ? info.view.type : null,
-            domTitle: titleEl ? titleEl.textContent : null,
-            viewTitle: info && info.view ? info.view.title : null
-          }, 'H2');
-          // #endregion
           setTimeout(function() {
             document.querySelectorAll('.fc .fc-daygrid-day').forEach(function(el) {
               el.style.minHeight = dayMinH + 'px';
@@ -5194,13 +5136,6 @@
     function filterOutages() {
       let textVal = document.getElementById('outageSearchInput').value.toLowerCase().trim();
       let regionVal = document.getElementById('outageRegionSelect').value;
-      // #region agent log
-      _dbg153e7b_('Index.html:filterOutages', 'filter triggered', {
-        textLen: textVal.length,
-        regionVal: regionVal,
-        resultCount: (outageData || []).length
-      }, 'H5');
-      // #endregion
 
       filteredOutageData = outageData.filter(o => {
         let matchText = (o.projectName || '').toLowerCase().includes(textVal);
