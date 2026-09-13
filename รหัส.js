@@ -454,7 +454,7 @@ function validateHttpUrl_(url) {
   return url;
 }
 
-const LOCATIONS_CACHE_KEY = 'loc_v2';
+const LOCATIONS_CACHE_KEY = 'loc_v3';
 const LOCATIONS_CACHE_TTL = 180; // 3 นาที — มือถือได้ข้อมูลเร็วขึ้นมาก
 
 function cachePutChunks_(baseKey, json, ttl) {
@@ -503,8 +503,15 @@ function invalidateLocationsCache_() {
 function getLocationsUncached_() {
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-  const data = sheet.getDataRange().getValues();
-  data.shift();
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), 21);
+  if (lastRow < 2) return [];
+  const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let richLink = null, richPea = null, formulaLink = null, formulaPea = null;
+  try { richLink = sheet.getRange(2, 3, lastRow - 1, 1).getRichTextValues(); } catch (ignore) {}
+  try { richPea = sheet.getRange(2, 21, lastRow - 1, 1).getRichTextValues(); } catch (ignore) {}
+  try { formulaLink = sheet.getRange(2, 3, lastRow - 1, 1).getFormulas(); } catch (ignore) {}
+  try { formulaPea = sheet.getRange(2, 21, lastRow - 1, 1).getFormulas(); } catch (ignore) {}
 
   return data.map((row, index) => {
     let lat = null, lng = null;
@@ -513,16 +520,22 @@ function getLocationsUncached_() {
       lat = parseFloat(parts[0].trim());
       lng = parseFloat(parts[1].trim());
     }
+    const richL = richLink && richLink[index] ? richLink[index][0] : null;
+    const richP = richPea && richPea[index] ? richPea[index][0] : null;
+    const fL = formulaLink && formulaLink[index] ? formulaLink[index][0] : '';
+    const fP = formulaPea && formulaPea[index] ? formulaPea[index][0] : '';
 
     return {
       row: index + 2,
-      phase: row[0], seq: row[1], link: row[2], peaRegion: row[3], name: row[4], latlngRaw: row[5],
+      phase: row[0], seq: row[1],
+      link: resolveSheetHttpUrl_(row[2], richL, fL),
+      peaRegion: row[3], name: row[4], latlngRaw: row[5],
       lat: lat, lng: lng,
       pea1Name: row[6], pea1Phone: row[7], pea1Pos: row[8],
       pea2Name: row[9], pea2Phone: row[10], pea2Pos: row[11],
       comp1Name: row[12], comp1Phone: row[13], comp2Name: row[14], comp2Phone: row[15],
       kwp: row[16], caNum: row[17], meterNum: row[18], pwaRegion: row[19],
-      linkPEA: row[20] || ''
+      linkPEA: resolveSheetHttpUrl_(row[20], richP, fP) || ''
     };
   }).filter(loc => loc.lat !== null && loc.lng !== null);
 }
@@ -740,6 +753,52 @@ function cellStr_(val) {
     return Utilities.formatDate(val, Session.getScriptTimeZone() || 'Asia/Bangkok', 'd MMM yyyy');
   }
   return val.toString().replace(/\u00a0/g, ' ').trim();
+}
+
+/** ดึง URL จากสูตร HYPERLINK — รวมกรณีแก้ลิงก์ในชีทแล้วข้อความที่เห็นยังเป็นของเก่า */
+function httpUrlFromHyperlinkFormula_(formula) {
+  const f = String(formula || '');
+  if (!f) return '';
+  const m = f.match(/HYPERLINK\s*\(\s*["'](https?:\/\/[^"']+)["']/i);
+  return m ? m[1] : '';
+}
+
+function firstHttpUrlFromRichText_(rich) {
+  if (!rich) return '';
+  try {
+    const u = rich.getLinkUrl && rich.getLinkUrl();
+    if (u && /^https?:\/\//i.test(u)) return u;
+  } catch (ignore) {}
+  try {
+    const runs = rich.getRuns && rich.getRuns();
+    if (runs) {
+      for (let i = 0; i < runs.length; i++) {
+        let u = '';
+        try { u = runs[i].getLinkUrl() || ''; } catch (ignore) {}
+        if (u && /^https?:\/\//i.test(u)) return u;
+      }
+    }
+  } catch (ignore) {}
+  return '';
+}
+
+function unwrapPlainHttpUrl_(raw) {
+  let p = cellStr_(raw).replace(/^["']+|["']+$/g, '').trim();
+  if (!p) return '';
+  const fromFormula = httpUrlFromHyperlinkFormula_(p);
+  if (fromFormula) return fromFormula;
+  if (/^https?:\/\//i.test(p)) return p;
+  if (/^(drive|docs)\.google\.com\//i.test(p)) return 'https://' + p;
+  return p;
+}
+
+/** URL จริงของเซลล์ — ใช้ลิงก์ที่ผู้ใช้เพิ่งแก้ในชีท ไม่ใช้ข้อความแสดงผลเก่า */
+function resolveSheetHttpUrl_(plain, rich, formula) {
+  const fromLink = firstHttpUrlFromRichText_(rich);
+  if (fromLink) return fromLink;
+  const fromFormula = httpUrlFromHyperlinkFormula_(formula);
+  if (fromFormula) return fromFormula;
+  return unwrapPlainHttpUrl_(plain);
 }
 
 const THAI_MONTH_MAP_ = {
@@ -1252,24 +1311,48 @@ function readOutagesMapped_(sheet) {
   if (lastRow <= 1) return [];
   const numCols = Math.max(sheet.getLastColumn(), OUTAGE_HEADERS.length);
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-  return data.map(mapOutageRow_).filter(function(o) {
+  let richFiles = null, formulas = null;
+  try { richFiles = sheet.getRange(2, 6, lastRow - 1, 1).getRichTextValues(); } catch (ignore) {}
+  try { formulas = sheet.getRange(2, 6, lastRow - 1, 1).getFormulas(); } catch (ignore) {}
+  return data.map(function(row, i) {
+    const o = mapOutageRow_(row);
+    const rich = richFiles && richFiles[i] ? richFiles[i][0] : null;
+    const formula = formulas && formulas[i] ? formulas[i][0] : '';
+    o.fileUrl = resolveSheetHttpUrl_(row[5], rich, formula);
+    return o;
+  }).filter(function(o) {
     if (o.id == null || o.id === '' || !cellStr_(o.projectName)) return false;
+    const id = String(o.id);
+    const name = cellStr_(o.projectName);
+    if (id === 'ID' || name === 'projectName' || name === 'สถานที่') return false;
+    if (String(o.fileUrl || '') === 'fileUrl') o.fileUrl = '';
     // ไม่แสดงงานปี 68 และเก่ากว่า
     if (isOutageYear2568OrOlder_(o.start)) return false;
     return true;
   });
 }
 
-const OUTAGE_LIST_CACHE_KEY = 'outage_list_v2';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v7';
+const OUTAGE_LIST_CACHE_KEY = 'outage_list_v3';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v9';
+const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v9';
 const LIST_CACHE_TTL_SEC = 180;
 
 function invalidateOutageListCache_() {
   try { CacheService.getScriptCache().remove(OUTAGE_LIST_CACHE_KEY); } catch (ignore) {}
 }
 
+function inspectionListCacheGen_() {
+  try {
+    return CacheService.getScriptCache().get(INSPECTION_LIST_CACHE_GEN_KEY) || '0';
+  } catch (e) {
+    return '0';
+  }
+}
+
 function invalidateInspectionListCache_() {
-  try { CacheService.getScriptCache().remove(INSPECTION_LIST_CACHE_KEY); } catch (ignore) {}
+  const cache = CacheService.getScriptCache();
+  try { cache.remove(INSPECTION_LIST_CACHE_KEY); } catch (ignore) {}
+  try { cache.put(INSPECTION_LIST_CACHE_GEN_KEY, String(new Date().getTime()), 21600); } catch (ignore) {}
 }
 
 /** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
@@ -1538,7 +1621,17 @@ function writeInspectionSourceCellValue_(sheet, row1, col0, val) {
   range.setValue(text);
 }
 
-/** อ่าน File comment จากเซลล์ — กู้ URL จาก rich text / HYPERLINK ที่ Sheets แปลงให้ */
+function fileCommentNameFromDisplay_(text) {
+  const t = cellStr_(text);
+  if (!t) return 'เปิดไฟล์ PDF';
+  const idx = t.indexOf('|');
+  if (idx > 0 && /^https?:\/\//i.test(unwrapPlainHttpUrl_(t.slice(idx + 1)))) {
+    return t.slice(0, idx).trim() || 'เปิดไฟล์ PDF';
+  }
+  return t;
+}
+
+/** อ่าน File comment จากเซลล์ — ใช้ URL ของไฮเปอร์ลิงก์ที่เพิ่งแก้ ไม่ยึดข้อความเก่า */
 function inspectionFileCommentFromRichText_(rich, plainFallback) {
   const plain = cellStr_(plainFallback);
   if (!rich) return plain;
@@ -1551,18 +1644,20 @@ function inspectionFileCommentFromRichText_(rich, plainFallback) {
         let u = '';
         try { u = runs[i].getLinkUrl() || ''; } catch (ignore) {}
         if (!t && !u) continue;
-        if (u) lines.push((t || 'เปิดไฟล์ PDF') + '|' + u);
-        else if (t) lines.push(t);
+        if (u && /^https?:\/\//i.test(u)) {
+          lines.push(fileCommentNameFromDisplay_(t) + '|' + u);
+        } else if (t && !/^\|?https?:\/\//i.test(t)) {
+          lines.push(t);
+        }
       }
       if (lines.length) return lines.join('\n');
     }
   } catch (ignore) {}
   try {
-    const u = rich.getLinkUrl && rich.getLinkUrl();
+    const u = firstHttpUrlFromRichText_(rich);
     if (u) {
-      const t = cellStr_(rich.getText()) || 'เปิดไฟล์ PDF';
-      if (plain && plain.indexOf('|http') >= 0) return plain;
-      return t + '|' + u;
+      const t = cellStr_(rich.getText()) || plain;
+      return fileCommentNameFromDisplay_(t) + '|' + u;
     }
   } catch (ignore) {}
   return plain;
@@ -1570,14 +1665,11 @@ function inspectionFileCommentFromRichText_(rich, plainFallback) {
 
 function inspectionFileCommentFromFormula_(formula, plainFallback) {
   const plain = cellStr_(plainFallback);
-  const f = String(formula || '');
-  if (!f) return plain;
-  const m = f.match(/HYPERLINK\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]*)")?\s*\)/i);
-  if (!m) return plain;
-  const url = m[1];
-  const label = (m[2] && String(m[2]).trim()) || cellStr_(plain) || 'เปิดไฟล์ PDF';
-  if (plain && plain.indexOf('|http') >= 0) return plain;
-  return label + '|' + url;
+  const url = httpUrlFromHyperlinkFormula_(formula);
+  if (!url) return plain;
+  const m = String(formula || '').match(/HYPERLINK\s*\(\s*["']https?:\/\/[^"']+["']\s*[;,]\s*["']([^"']*)["']/i);
+  const label = (m && m[1] && String(m[1]).trim()) || fileCommentNameFromDisplay_(plain);
+  return fileCommentNameFromDisplay_(label) + '|' + url;
 }
 
 function readInspectionFileCommentCell_(sheet, row1, col1, plainVal) {
@@ -1594,7 +1686,7 @@ function readInspectionFileCommentCell_(sheet, row1, col1, plainVal) {
   return plain;
 }
 
-/** เขียน File comment เป็นข้อความล้วน (กัน Sheets แปลง URL แล้วตัด |url หาย) */
+/** เขียน File comment เป็นไฮเปอร์ลิงก์จริง — กัน Sheets แปลงแล้วเหลือแค่ชื่อไฟล์ */
 function writeInspectionFileCommentCell_(sheet, row1, col1, text) {
   const range = sheet.getRange(row1, col1);
   try {
@@ -1603,16 +1695,45 @@ function writeInspectionFileCommentCell_(sheet, row1, col1, text) {
   } catch (ignore) {}
   try { range.clearFormat(); } catch (ignore) {}
   range.setNumberFormat('@');
-  range.setValue(text == null ? '' : String(text));
+  const entries = parseInspectionFileCommentLines_(text);
+  if (!entries.length) {
+    range.setValue('');
+    return;
+  }
+  if (entries.length === 1 && entries[0].url) {
+    const name = String(entries[0].name || 'เปิดไฟล์ PDF').replace(/"/g, '""');
+    const url = String(entries[0].url).replace(/"/g, '""');
+    range.setFormula('=HYPERLINK("' + url + '","' + name + '")');
+    return;
+  }
+  const lines = entries.map(function(e) {
+    return e.url ? (e.name + '|' + e.url) : e.name;
+  });
+  try {
+    const builder = SpreadsheetApp.newRichTextValue().setText(lines.join('\n'));
+    let pos = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const line = lines[i];
+      if (entries[i].url) builder.setLinkUrl(pos, pos + line.length, entries[i].url);
+      pos += line.length + 1;
+    }
+    range.setRichTextValue(builder.build());
+    return;
+  } catch (ignore) {}
+  range.setValue(lines.join('\n'));
 }
 
 function parseInspectionFileCommentLines_(raw) {
   return String(raw || '').split(/\n/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
+    const hm = line.match(/HYPERLINK\s*\(\s*["'](https?:\/\/[^"']+)["'](?:\s*[;,]\s*["']([^"']*)["'])?/i);
+    if (hm) return { name: fileCommentNameFromDisplay_(hm[2] || 'เปิดไฟล์ PDF'), url: hm[1] };
     const idx = line.indexOf('|');
-    if (idx > 0 && /^https?:\/\//i.test(line.slice(idx + 1).trim())) {
-      return { name: line.slice(0, idx).trim(), url: line.slice(idx + 1).trim() };
+    if (idx > 0) {
+      const url = unwrapPlainHttpUrl_(line.slice(idx + 1));
+      if (/^https?:\/\//i.test(url)) return { name: line.slice(0, idx).trim(), url: url };
     }
-    if (/^https?:\/\//i.test(line)) return { name: 'เปิดไฟล์ PDF', url: line };
+    const url2 = unwrapPlainHttpUrl_(line);
+    if (/^https?:\/\//i.test(url2)) return { name: 'เปิดไฟล์ PDF', url: url2 };
     return { name: line, url: '' };
   });
 }
@@ -1632,10 +1753,11 @@ function getInspectionDriveFileIndex_() {
         const name = String(file.getName() || '').trim();
         if (!name) continue;
         const url = file.getUrl();
-        index[name.toLowerCase()] = url;
-        if (name.toLowerCase().endsWith('.pdf')) {
-          index[name.toLowerCase().slice(0, -4)] = url;
-        }
+        const lower = name.toLowerCase();
+        index[lower] = url;
+        if (lower.endsWith('.pdf')) index[lower.slice(0, -4)] = url;
+        const norm = normInspectionPdfKey_(name);
+        if (norm) index[norm] = url;
       }
     }
   } catch (e) {
@@ -1643,6 +1765,23 @@ function getInspectionDriveFileIndex_() {
   }
   INSPECTION_DRIVE_FILE_INDEX_ = index;
   return index;
+}
+
+function normInspectionPdfKey_(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/\.pdf$/i, '')
+    .replace(/^pea[\s_\-]*/, '')
+    .replace(/[_\s\-]+/g, ' ')
+    .trim();
+}
+
+function lookupInspectionDriveUrl_(index, name) {
+  if (!index || !name) return '';
+  const lower = String(name).toLowerCase();
+  const noExt = lower.replace(/\.pdf$/i, '');
+  const norm = normInspectionPdfKey_(name);
+  return index[lower] || index[noExt] || (norm ? index[norm] : '') || '';
 }
 
 /** กู้ URL ที่หายจากชื่อไฟล์ในโฟลเดอร์ Drive แผนตรวจรับ */
@@ -1656,7 +1795,7 @@ function recoverInspectionFileCommentUrls_(raw) {
     const name = entry.name;
     if (!name || !/\.pdf$/i.test(name)) return name;
     if (!index) index = getInspectionDriveFileIndex_();
-    const url = index[name.toLowerCase()] || index[name.toLowerCase().replace(/\.pdf$/i, '')];
+    const url = lookupInspectionDriveUrl_(index, name);
     if (!url) return name;
     changed = true;
     return name + '|' + url;
@@ -1963,11 +2102,15 @@ function readInspectionsMapped_(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   const numCols = Math.max(sheet.getLastColumn(), INSPECTION_HEADERS.length);
-  const data = sheet.getRange(2, 1, lastRow, numCols).getValues();
+  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const fileCommentCol = 13; // FileComment (1-based)
   let richComments = null;
+  let formulas = null;
   try {
-    richComments = sheet.getRange(2, fileCommentCol, lastRow, fileCommentCol).getRichTextValues();
+    richComments = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getRichTextValues();
+  } catch (ignore) {}
+  try {
+    formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
   } catch (ignore) {}
   const out = [];
   for (let i = 0; i < data.length; i++) {
@@ -1977,6 +2120,9 @@ function readInspectionsMapped_(sheet) {
     const sheetRow = i + 2;
     let comment = mapped.fileComment;
     try {
+      if (formulas && formulas[i] && formulas[i][0]) {
+        comment = inspectionFileCommentFromFormula_(formulas[i][0], comment);
+      }
       if (richComments && richComments[i] && richComments[i][0]) {
         comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
       }
@@ -2389,7 +2535,7 @@ function syncInspectionsFromSource_(destSheet, precollected) {
   // เขียน FileComment เป็นข้อความล้วน กัน Sheets แปลงลิงก์แล้วตัด |url
   if (newData.length > 1) {
     try {
-      destSheet.getRange(2, 13, newData.length, 13).setNumberFormat('@');
+        destSheet.getRange(2, 13, newData.length - 1, 1).setNumberFormat('@');
       for (let i = 1; i < newData.length; i++) {
         const fc = newData[i][12];
         if (fc) writeInspectionFileCommentCell_(destSheet, i + 1, 13, fc);
@@ -2423,6 +2569,7 @@ function syncInspectionsFromSource_(destSheet, precollected) {
 
 function getInspectionPlans() {
   const cache = CacheService.getScriptCache();
+  const gen = inspectionListCacheGen_();
   try {
     const hit = cache.get(INSPECTION_LIST_CACHE_KEY);
     if (hit) return JSON.parse(hit);
@@ -2430,7 +2577,11 @@ function getInspectionPlans() {
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
   const result = readInspectionsMapped_(sheet);
-  try { cache.put(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC); } catch (ignore) {}
+  try {
+    if (inspectionListCacheGen_() === gen) {
+      cache.put(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC);
+    }
+  } catch (ignore) {}
   return result;
 }
 
@@ -3110,45 +3261,108 @@ function clearInspectionFormTemplateProps_() {
   props.deleteProperty(INSPECTION_FORM_PROP_UPDATED);
 }
 
+function inspectionFormFileLooksLikeTemplate_(file) {
+  if (!file) return false;
+  try { if (file.isTrashed()) return false; } catch (ignore) {}
+  const name = String(file.getName() || '');
+  if (name.indexOf(INSPECTION_FORM_TEMPLATE_PREFIX) >= 0) return true;
+  if (/แบบฟอร์มตรวจ/.test(name) && /\.pdf$/i.test(name)) return true;
+  return false;
+}
+
+function inspectionFormDownloadUrl_(file) {
+  const id = file.getId();
+  return 'https://drive.google.com/uc?export=download&id=' + id;
+}
+
+function rememberInspectionFormFile_(file, fileName) {
+  if (!file) return;
+  try { setInspectionFormTemplateProps_(file.getId(), fileName || file.getName()); } catch (ignore) {}
+}
+
+function findInspectionFormTemplateInFolder_() {
+  try {
+    const folder = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    const files = folder.getFiles();
+    let best = null;
+    while (files.hasNext()) {
+      const f = files.next();
+      if (!inspectionFormFileLooksLikeTemplate_(f)) continue;
+      if (!best || f.getLastUpdated().getTime() > best.getLastUpdated().getTime()) best = f;
+    }
+    return best;
+  } catch (e) {
+    return null;
+  }
+}
+
 function findInspectionFormTemplateFile_() {
   const meta = getInspectionFormTemplateProps_();
-  if (!meta.fileId) return null;
-  try {
-    const file = DriveApp.getFileById(meta.fileId);
-    if (file && isInspectionDriveFile_(file)) {
-      return { file: file, fileName: meta.fileName || file.getName() };
-    }
-  } catch (e) {}
+  if (meta.fileId) {
+    try {
+      const file = DriveApp.getFileById(meta.fileId);
+      if (file && !file.isTrashed()) {
+        return { file: file, fileName: meta.fileName || file.getName() };
+      }
+    } catch (e) {}
+  }
+  const fromFolder = findInspectionFormTemplateInFolder_();
+  if (fromFolder) {
+    rememberInspectionFormFile_(fromFolder, meta.fileName || fromFolder.getName());
+    return { file: fromFolder, fileName: meta.fileName || fromFolder.getName() };
+  }
   return null;
 }
 
-function removeInspectionFormTemplateFile_() {
-  const found = findInspectionFormTemplateFile_();
-  if (found && found.file) {
-    try {
-      found.file.setTrashed(true);
-    } catch (e) {}
+function removeInspectionFormTemplateFile_(keepFileId) {
+  const keep = keepFileId ? String(keepFileId) : '';
+  try {
+    const folder = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+    const files = folder.getFiles();
+    while (files.hasNext()) {
+      const f = files.next();
+      if (!inspectionFormFileLooksLikeTemplate_(f)) continue;
+      if (keep && f.getId() === keep) continue;
+      try { f.setTrashed(true); } catch (ignore) {}
+    }
+  } catch (ignore) {}
+  const meta = getInspectionFormTemplateProps_();
+  if (meta.fileId && meta.fileId !== keep) {
+    try { DriveApp.getFileById(meta.fileId).setTrashed(true); } catch (ignore) {}
   }
-  clearInspectionFormTemplateProps_();
+  if (!keep) clearInspectionFormTemplateProps_();
 }
 
-const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v1';
+const INSPECTION_FORM_TEMPLATE_CACHE_KEY = 'insp_form_tpl_meta_v3';
+
+function inspectionFormTemplateResult_(found) {
+  if (!found || !found.file) return { exists: false };
+  try { found.file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (ignore) {}
+  return {
+    exists: true,
+    url: inspectionFormDownloadUrl_(found.file),
+    viewUrl: found.file.getUrl(),
+    fileName: found.fileName || found.file.getName(),
+    updatedAt: getInspectionFormTemplateProps_().updatedAt || ''
+  };
+}
 
 /** แบบฟอร์มตรวจรับ — ทุกคนดาวน์โหลดได้ */
 function getInspectionFormTemplate() {
   const cache = CacheService.getScriptCache();
   const cached = cache.get(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
   if (cached) {
-    try { return JSON.parse(cached); } catch (ignore) {}
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.exists) return parsed;
+    } catch (ignore) {}
   }
   const found = findInspectionFormTemplateFile_();
-  const result = found ? {
-    exists: true,
-    url: found.file.getUrl(),
-    fileName: found.fileName || found.file.getName(),
-    updatedAt: getInspectionFormTemplateProps_().updatedAt || ''
-  } : { exists: false };
-  try { cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(result), 300); } catch (ignore) {}
+  const result = inspectionFormTemplateResult_(found);
+  try {
+    if (result.exists) cache.put(INSPECTION_FORM_TEMPLATE_CACHE_KEY, JSON.stringify(result), 300);
+    else cache.remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY);
+  } catch (ignore) {}
   return result;
 }
 
@@ -3162,7 +3376,6 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
   if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf') {
     throw new Error('อัปโหลดได้เฉพาะไฟล์ PDF เท่านั้น');
   }
-  removeInspectionFormTemplateFile_();
   let finalUrl = '';
   try {
     const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
@@ -3173,7 +3386,8 @@ function uploadInspectionFormTemplate(formObj, sessionToken) {
     try {
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     } catch (shareErr) {}
-    finalUrl = file.getUrl();
+    removeInspectionFormTemplateFile_(file.getId());
+    finalUrl = inspectionFormDownloadUrl_(file);
     setInspectionFormTemplateProps_(file.getId(), fileName);
     try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
   } catch (e) {
@@ -3286,7 +3500,6 @@ function buildPdfUploadInfo_(meta, sessionToken) {
   }
 
   info.driveName = resolvePdfUploadDriveName_(info);
-  if (kind === 'inspectionForm') removeInspectionFormTemplateFile_();
   info.folderId = resolvePdfUploadTargetFolderId_(info);
   return info;
 }
@@ -3431,13 +3644,15 @@ function finishResumablePdfUpload_(meta) {
   }
 
   if (meta.kind === 'inspectionForm') {
+    removeInspectionFormTemplateFile_(meta.driveFileId);
     setInspectionFormTemplateProps_(meta.driveFileId, meta.fileName);
     try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
     logAction('อัปโหลดแบบฟอร์มตรวจ (resumable): ' + meta.fileName);
     return {
       success: true,
       exists: true,
-      url: finalUrl,
+      url: inspectionFormDownloadUrl_(file),
+      viewUrl: finalUrl,
       fileName: meta.fileName,
       updatedAt: getInspectionFormTemplateProps_().updatedAt
     };
@@ -3721,13 +3936,13 @@ function finalizePdfChunkUpload(uploadId, sessionToken) {
   }
 
   if (meta.kind === 'inspectionForm') {
-    removeInspectionFormTemplateFile_();
     let finalUrl = '';
     try {
       const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
       const file = parent.createFile(blob.setName(INSPECTION_FORM_TEMPLATE_PREFIX + '.pdf'));
       try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (shareErr) {}
-      finalUrl = file.getUrl();
+      removeInspectionFormTemplateFile_(file.getId());
+      finalUrl = inspectionFormDownloadUrl_(file);
       setInspectionFormTemplateProps_(file.getId(), meta.fileName);
       try { CacheService.getScriptCache().remove(INSPECTION_FORM_TEMPLATE_CACHE_KEY); } catch (ignore) {}
     } catch (e) {
@@ -4189,6 +4404,12 @@ function runOutageSelfTest() {
   let urlErr = false;
   try { validateHttpUrl_('javascript:alert(1)'); } catch (e) { urlErr = true; }
   assert('validateHttpUrl block js', urlErr);
+  assert('HYPERLINK formula url', httpUrlFromHyperlinkFormula_('=HYPERLINK("https://drive.google.com/file/d/abc/view","ไฟล์")') === 'https://drive.google.com/file/d/abc/view');
+  assert('unwrap quoted url', unwrapPlainHttpUrl_('"https://docs.google.com/x"') === 'https://docs.google.com/x');
+  assert('unwrap drive host', unwrapPlainHttpUrl_('drive.google.com/file/d/abc/view') === 'https://drive.google.com/file/d/abc/view');
+  assert('file comment name strips stale url', fileCommentNameFromDisplay_('งาน.pdf|https://old.example/x') === 'งาน.pdf');
+  assert('resolve prefers formula over stale plain', resolveSheetHttpUrl_('https://old.example/a', null, '=HYPERLINK("https://new.example/b","x")') === 'https://new.example/b');
+  assert('pdf key ignores pea prefix', normInspectionPdfKey_('PEA_ตรวจงาน บ้าน.pdf') === 'ตรวจงาน บ้าน');
   assert('ALLOWED fields concept', ['checkVendor', 'checkPEAPwa', 'checkPEASite', 'checkPEAPhone', 'checkDone'].length === 5);
   const d1 = parseThaiDate_('4 ส.ค. 2569');
   assert('parseThaiDate ส.ค. 2569', d1 && d1.getFullYear() === 2026 && d1.getMonth() === 7 && d1.getDate() === 4);
