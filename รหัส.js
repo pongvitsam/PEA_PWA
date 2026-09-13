@@ -131,11 +131,22 @@ function parsePostPayload_(e) {
 function postMessageHtml_(obj) {
   const payload = Object.assign({ type: 'GAS_API_DONE' }, obj || {});
   const safe = JSON.stringify(payload).replace(/<\/script/gi, '<\\/script');
-  const html = '<!doctype html><html><body><script>(function(){var o=' + safe +
-    ';function send(w){try{w.postMessage(o,"*")}catch(e){}}' +
+  const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>PEA API</title>' +
+    '<style>body{font-family:Prompt,Segoe UI,sans-serif;margin:0;padding:20px;background:#f8fafc;color:#334155;text-align:center}' +
+    '.box{max-width:280px;margin:24px auto;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px}' +
+    'button{margin-top:12px;padding:8px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style></head><body>' +
+    '<div class="box"><p id="m">กำลังส่งผลกลับ...</p><button type="button" onclick="tryClose()">ปิดหน้าต่างนี้</button></div>' +
+    '<script>(function(){var o=' + safe + ';' +
+    'function send(w){try{w.postMessage(o,"*")}catch(e){}}' +
+    'function tryClose(){try{window.close()}catch(e){}' +
+    'var el=document.getElementById("m");if(el)el.textContent="ปิดหน้าต่างนี้ได้ หรือกดปุ่มด้านล่าง";}' +
+    'window.tryClose=tryClose;' +
     'try{if(window.opener&&!window.opener.closed)send(window.opener)}catch(e){}' +
     'try{if(parent&&parent!==window)send(parent)}catch(e){}' +
-    'try{window.close()}catch(e){}' +
+    'setTimeout(tryClose,120);' +
+    'setTimeout(tryClose,500);' +
+    'setTimeout(tryClose,1200);' +
     '})();</script></body></html>';
   return HtmlService.createHtmlOutput(html)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

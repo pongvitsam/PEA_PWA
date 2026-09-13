@@ -143,8 +143,10 @@
         const doc = popup.document;
         doc.open();
         doc.write(
-          '<!doctype html><html><head><meta charset="utf-8"><title>PEA API</title></head><body>' +
-          '<p style="font-family:sans-serif;padding:12px">กำลังดำเนินการ...</p>' +
+          '<!doctype html><html><head><meta charset="utf-8"><title>PEA API</title>' +
+          '<style>body{font-family:sans-serif;padding:16px;color:#334155;background:#f8fafc;text-align:center}' +
+          '.box{display:inline-block;margin-top:20px;padding:14px 16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px}</style></head><body>' +
+          '<div class="box"><p>กำลังเชื่อมต่อเซิร์ฟเวอร์...<br><small>หน้าต่างนี้อาจปิดเอง — ถ้าไม่ปิดให้กด X ได้</small></p></div>' +
           '<form id="gasPostForm" method="POST" accept-charset="UTF-8"></form>' +
           '<script>(function(){' +
           'var f=document.getElementById("gasPostForm");' +
