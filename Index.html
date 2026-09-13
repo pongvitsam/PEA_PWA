@@ -3906,6 +3906,10 @@
     }
 
     function switchMenu(menuId) {
+      if ((menuId === 'docs' || menuId === 'db') && !canAccessDocsDbMenus()) {
+        Toast.fire({ icon: 'warning', title: 'ผู้ใช้บริษัทเข้าเมนูนี้ไม่ได้' });
+        menuId = 'map';
+      }
       ['dash', 'map', 'route', 'db', 'outage', 'inspection', 'docs'].forEach(id => {
         var menuEl = document.getElementById('menu-' + id);
         var tabEl = document.getElementById('tab-' + id);
