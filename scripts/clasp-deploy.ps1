@@ -9,8 +9,21 @@ Write-Host "==> clasp push --force" -ForegroundColor Cyan
 clasp push --force
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "==> clasp deploy" -ForegroundColor Cyan
-clasp deploy -i AKfycbwEIi5cZDzvdGqcfqcsJcPjW1pBnTALtZFlGYZDkCYl9MTvOL0wuv4mBOEny4UUzyk9 -d $Description
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# @HEAD deployment — อัปเดตทันทีหลัง push โดยไม่สร้าง version ใหม่
+$HeadDeploymentId = "AKfycbz9zsy1GKzPwQQcE2J6EWYCq1UYVJ5yBvCdx7DqxVM"
+Write-Host "==> clasp redeploy HEAD ($Description)" -ForegroundColor Cyan
+clasp redeploy $HeadDeploymentId -V HEAD -d $Description
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "HEAD redeploy failed; push แล้ว — @HEAD ยังใช้โค้ดล่าสุดอยู่" -ForegroundColor Yellow
+}
+
+# พยายามอัปเดต deployment เดิมด้วย (อาจล้มเหลวถ้าเต็ม 200 versions)
+$LegacyDeploymentId = "AKfycbwEIi5cZDzvdGqcfqcsJcPjW1pBnTALtZFlGYZDkCYl9MTvOL0wuv4mBOEny4UUzyk9"
+Write-Host "==> clasp deploy legacy id (optional)" -ForegroundColor DarkGray
+clasp deploy -i $LegacyDeploymentId -d $Description
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Legacy deploy skipped (likely 200-version limit). Pages ใช้ @HEAD แล้ว" -ForegroundColor Yellow
+  exit 0
+}
 
 Write-Host "==> done" -ForegroundColor Green
