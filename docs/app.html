@@ -1217,7 +1217,6 @@
             <div class="col-md-6"><label class="form-label small text-muted mb-0">แผนส่งมอบงาน</label><input type="text" id="insp_handoverPlan" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">รอบส่งมอบงานจริง</label><input type="text" id="insp_handoverRound" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">กำหนดตรวจงาน</label><input type="text" id="insp_inspectSchedule" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">วันตรวจงาน / หนังสือตรวจรับ</label><input type="text" id="insp_inspectLetterDate" class="form-control form-control-sm" autocomplete="off"></div>
           </div>
         </div>
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
@@ -5200,7 +5199,7 @@
       ['pwaBranch', 'กปภ. สาขา'], ['pwaDistrict', 'กปภ. เขต'], ['peaZone', 'เขต กฟภ.'], ['peaOffice', 'กฟจ./สำนักงาน กฟภ.'],
       ['handoverPlan', 'แผนส่งมอบงาน'], ['handoverRound', 'รอบส่งมอบงานจริง'], ['inspectSchedule', 'กำหนดตรวจงาน'],
       ['inspectors', 'รายชื่อคนเข้าตรวจ'], ['fileComment', 'File comment'], ['committee', 'คณะกรรมการตรวจรับ'],
-      ['inspectLetterDate', 'วันตรวจงาน / หนังสือตรวจรับ'], ['passLetterStatusWork', 'ใบนำตัว (ตรวจงาน)'], ['passLetterStatus', 'ใบนำตัว (ตรวจรับ)'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
+      ['passLetterStatusWork', 'ใบนำตัว (ตรวจงาน)'], ['passLetterStatus', 'ใบนำตัว (ตรวจรับ)'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
     const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'mapLocation', 'peaZone', 'handoverPlan', 'handoverRound'];
@@ -5215,7 +5214,6 @@
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 มกราคม 2568' },
       { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
       { key: 'fileComment', label: 'File comment', type: 'fileComment' },
-      { key: 'inspectLetterDate', label: 'วันตรวจงาน / หนังสือตรวจรับ', editable: true },
       { key: 'visited', label: 'ไปแล้ว', type: 'visited' }
     ];
 
@@ -6702,7 +6700,6 @@
       const uploadBtn = document.getElementById('btnInspFileUpload');
       if (uploadBtn) uploadBtn.style.display = canEditInspection() ? 'inline-block' : 'none';
       document.getElementById('insp_committee').value = p.committee || '';
-      document.getElementById('insp_inspectLetterDate').value = p.inspectLetterDate || '';
       document.getElementById('insp_passLetterStatusWork').value = p.passLetterStatusWork || '';
       document.getElementById('insp_passLetterStatus').value = p.passLetterStatus || '';
       document.getElementById('insp_tcCoordinator').value = p.tcCoordinator || '';
@@ -6712,8 +6709,10 @@
     }
 
     function readInspectionForm_() {
+      const existingId = document.getElementById('insp_id').value;
+      const existing = existingId ? inspectionData.find(function(x) { return String(x.id) === String(existingId); }) : null;
       return {
-        id: document.getElementById('insp_id').value,
+        id: existingId,
         seq: document.getElementById('insp_seq').value.trim(),
         phase: document.getElementById('insp_phase').value.trim(),
         place: document.getElementById('insp_place').value.trim(),
@@ -6726,12 +6725,10 @@
         inspectSchedule: normalizeInspectionDateField_(document.getElementById('insp_inspectSchedule').value.trim()),
         inspectors: document.getElementById('insp_inspectors').value.trim(),
         fileComment: (function() {
-          const id = document.getElementById('insp_id').value;
-          const ex = id ? inspectionData.find(function(x) { return String(x.id) === String(id); }) : null;
-          return mergeInspectionFileCommentNotes_(ex ? ex.fileComment : '', document.getElementById('insp_fileComment').value.trim());
+          return mergeInspectionFileCommentNotes_(existing ? existing.fileComment : '', document.getElementById('insp_fileComment').value.trim());
         })(),
         committee: document.getElementById('insp_committee').value.trim(),
-        inspectLetterDate: document.getElementById('insp_inspectLetterDate').value.trim(),
+        inspectLetterDate: existing ? (existing.inspectLetterDate || '') : '',
         passLetterStatusWork: document.getElementById('insp_passLetterStatusWork').value.trim(),
         passLetterStatus: document.getElementById('insp_passLetterStatus').value.trim(),
         visited: document.getElementById('insp_visited').checked,
