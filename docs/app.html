@@ -160,11 +160,11 @@
     .inspection-stat-card:hover { transform: translateY(-2px); }
     .inspection-stat-card h4 { font-size: 1.75rem; font-weight: 700; margin: 0; line-height: 1.1; }
     .inspection-stat-card small { opacity: 0.92; font-weight: 500; }
-    .inspection-list-panel {
-      background: #fff; border-radius: 20px; padding: 1.25rem;
+    .inspection-map-panel {
+      background: #fff; border-radius: 20px; padding: 1.25rem; margin-top: 0;
       box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
     }
-    .inspection-map-panel {
+    .inspection-list-panel {
       background: #fff; border-radius: 20px; padding: 1.25rem; margin-top: 1.25rem;
       box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
     }
@@ -946,70 +946,6 @@
         </div>
         <div class="small mt-2 opacity-90" id="inspectionStatsSummaryText"></div>
       </div>
-      <div class="inspection-list-panel">
-        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
-          <div>
-            <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small">(ทุกภาค · ทุกคอลัมน์)</span></h5>
-            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit?gid=0#gid=0" target="_blank" rel="noopener" class="small text-primary text-decoration-none mt-1 d-inline-block js-sheet-access">
-              <i class="fa-solid fa-table me-1"></i>เปิดชีทต้นทาง
-            </a>
-          </div>
-          <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
-        </div>
-        <div id="inspectionFormTemplateBanner" class="inspection-form-template-banner empty mb-3">
-          <div class="insp-form-icon"><i class="fa-solid fa-clipboard-list"></i></div>
-          <div class="flex-grow-1">
-            <p class="insp-form-title mb-0"><i class="fa-solid fa-file-pdf text-danger me-1"></i> แบบฟอร์มตรวจรับงาน</p>
-            <div class="insp-form-meta" id="inspFormTemplateMeta">กำลังโหลด...</div>
-          </div>
-          <div class="d-flex flex-wrap gap-2 align-items-center" id="inspFormTemplateActions"></div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-4">
-            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspectionsDebounced_()">
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="inspectionOnRegionFilterChange()">
-              <option value="" selected>ทุกภาค NC+NE+S</option>
-              <option value="NC">NC ภาคกลาง-เหนือ</option>
-              <option value="NE">NE ภาคอีสาน</option>
-              <option value="S">S ภาคใต้</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
-              <option value="">ทุกเฟส</option>
-              <option value="3">เฟส 3</option>
-              <option value="4">เฟส 4</option>
-              <option value="1">เฟส 1</option>
-              <option value="2">เฟส 2</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ทุกสถานะตรวจ</option>
-              <option value="done">ตรวจแล้ว</option>
-              <option value="pending">ยังไม่เข้าตรวจ</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionPwaSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ทุกเขต กปภ.</option>
-            </select>
-          </div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-12">
-            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="กรองเฉพาะคอลัมน์รอบส่งมอบงานจริง">
-              <option value="">ทุกรอบส่งมอบงานจริง</option>
-            </select>
-          </div>
-        </div>
-        <div id="inspectionListContainer"></div>
-        <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
-        <input type="file" id="inspectionFormTemplateInput" accept="application/pdf,.pdf" style="display:none">
-      </div>
       <div class="inspection-map-panel">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
@@ -1110,6 +1046,70 @@
             </div>
           </div>
         </div>
+      </div>
+      <div class="inspection-list-panel">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small">(ทุกภาค · ทุกคอลัมน์)</span></h5>
+            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit?gid=0#gid=0" target="_blank" rel="noopener" class="small text-primary text-decoration-none mt-1 js-sheet-access" style="display:inline-block">
+              <i class="fa-solid fa-table me-1"></i>เปิดชีทต้นทาง
+            </a>
+          </div>
+          <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
+        </div>
+        <div id="inspectionFormTemplateBanner" class="inspection-form-template-banner empty mb-3">
+          <div class="insp-form-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+          <div class="flex-grow-1">
+            <p class="insp-form-title mb-0"><i class="fa-solid fa-file-pdf text-danger me-1"></i> แบบฟอร์มตรวจรับงาน</p>
+            <div class="insp-form-meta" id="inspFormTemplateMeta">กำลังโหลด...</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 align-items-center" id="inspFormTemplateActions"></div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspectionsDebounced_()">
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="inspectionOnRegionFilterChange()">
+              <option value="" selected>ทุกภาค NC+NE+S</option>
+              <option value="NC">NC ภาคกลาง-เหนือ</option>
+              <option value="NE">NE ภาคอีสาน</option>
+              <option value="S">S ภาคใต้</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
+              <option value="">ทุกเฟส</option>
+              <option value="3">เฟส 3</option>
+              <option value="4">เฟส 4</option>
+              <option value="1">เฟส 1</option>
+              <option value="2">เฟส 2</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="">ทุกสถานะตรวจ</option>
+              <option value="done">ตรวจแล้ว</option>
+              <option value="pending">ยังไม่เข้าตรวจ</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select id="inspectionPwaSelect" class="form-select form-select-sm" onchange="filterInspections()">
+              <option value="">ทุกเขต กปภ.</option>
+            </select>
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-12">
+            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="กรองเฉพาะคอลัมน์รอบส่งมอบงานจริง">
+              <option value="">ทุกรอบส่งมอบงานจริง</option>
+            </select>
+          </div>
+        </div>
+        <div id="inspectionListContainer"></div>
+        <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
+        <input type="file" id="inspectionFormTemplateInput" accept="application/pdf,.pdf" style="display:none">
       </div>
     </div>
   
@@ -1463,6 +1463,9 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- GitHub Pages: polyfill google.script.run → Apps Script API (อย่าลบเมื่อ sync จาก Index.html) -->
+  <script src="js/config.js"></script>
+  <script src="js/pwa-gas-api.js?v=16"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2696,7 +2699,30 @@
 
   const sheetOk = canAccessGoogleSheets();
   document.querySelectorAll('.js-sheet-access').forEach(function(el) {
-    el.style.display = sheetOk ? '' : 'none';
+    // ใช้ d-none (!important) — กัน Bootstrap utility อื่นบัง display:none แบบธรรมดา
+    el.classList.toggle('d-none', !sheetOk);
+    if (sheetOk) {
+      el.style.display = '';
+      if (el.tagName === 'A') {
+        if (el.dataset.sheetHref) {
+          el.setAttribute('href', el.dataset.sheetHref);
+          delete el.dataset.sheetHref;
+        }
+        el.removeAttribute('aria-disabled');
+        el.style.pointerEvents = '';
+      }
+    } else {
+      el.style.display = 'none';
+      if (el.tagName === 'A') {
+        const href = el.getAttribute('href');
+        if (href) {
+          el.dataset.sheetHref = href;
+          el.removeAttribute('href');
+        }
+        el.setAttribute('aria-disabled', 'true');
+        el.style.pointerEvents = 'none';
+      }
+    }
   });
   const inspField = document.getElementById('inspInspectorsFieldWrap');
   if (inspField) inspField.style.display = canViewInspectors() ? '' : 'none';
