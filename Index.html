@@ -236,6 +236,37 @@
     .insp-map-tip .insp-map-tip-meta { color: #64748b; font-size: 0.72rem; }
     .insp-map-tip .insp-map-tip-row { margin-top: 0.2rem; }
     .insp-map-tip .insp-map-tip-row i { width: 14px; color: #2563eb; }
+    .leaflet-div-icon.insp-map-marker-wrap {
+      background: transparent; border: none;
+    }
+    .insp-map-marker {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; line-height: 1;
+      border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+      color: #fff;
+    }
+    .insp-map-marker.is-done { background: #2563eb; }
+    .insp-map-marker.is-ready { background: #d97706; font-size: 15px; }
+    .insp-map-marker.is-pending {
+      background: #475569; color: transparent;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35), inset 0 0 0 3px #fff;
+    }
+    .insp-map-marker.is-pending::after {
+      content: ''; width: 10px; height: 10px; border-radius: 50%;
+      border: 2.5px solid #fff; box-sizing: border-box;
+    }
+    #inspectionMapLegend .insp-lg-swatch {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 50%; color: #fff;
+      font-size: 11px; font-weight: 800; vertical-align: -3px; margin-right: 0.25rem;
+      border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(15,23,42,.15);
+    }
+    #inspectionMapLegend .insp-lg-swatch.is-done { background: #2563eb; }
+    #inspectionMapLegend .insp-lg-swatch.is-ready { background: #d97706; }
+    #inspectionMapLegend .insp-lg-swatch.is-pending {
+      background: #475569; box-shadow: 0 0 0 1px rgba(15,23,42,.15), inset 0 0 0 2px #fff;
+    }
     .inspection-form-template-banner {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
       padding: 0.85rem 1rem; border-radius: 14px;
@@ -396,8 +427,13 @@
     .btn-custom-danger { background: linear-gradient(135deg, #f87171, #ef4444); color: white; border: none; border-radius: 10px; font-weight: 600; }
     #map { height: 75vh; border-radius: 18px; border: 1px solid var(--pwa-border); box-shadow: var(--pwa-shadow); z-index: 1; }
     .details-panel { height: 75vh; overflow-y: auto; background: var(--pwa-surface); border-radius: 18px; padding: 20px; box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border); }
-    /* มือถือ: นิ้วเดียวเลื่อนหน้าได้ — อย่าให้ Leaflet บล็อก touch */
-    .leaflet-container.map-scroll-friendly { touch-action: pan-y !important; }
+    /* มือถือเท่านั้น: นิ้วเดียวเลื่อนหน้า — อย่าใช้กับทัชแพดเดสก์ท็อป */
+    @media (pointer: coarse) {
+      .leaflet-container.map-scroll-friendly { touch-action: pan-y !important; }
+    }
+    @media (pointer: fine) {
+      .leaflet-container.map-scroll-friendly { touch-action: none; }
+    }
     @media (max-width: 991.98px) {
       #map { height: 52vh; max-height: 420px; }
       .details-panel { height: auto; min-height: 280px; max-height: none; overflow-y: visible; }
@@ -920,9 +956,9 @@
           </div>
           <div class="col-12">
             <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
-              <span><i class="fa-solid fa-location-dot text-success"></i> ตรวจแล้ว (เขียว)</span>
-              <span><i class="fa-solid fa-location-dot" style="color:#fd7e14"></i> พร้อมเข้าตรวจ (ส้ม)</span>
-              <span><i class="fa-solid fa-location-dot text-secondary"></i> ยังไม่พร้อม (เทา)</span>
+              <span><span class="insp-lg-swatch is-done" aria-hidden="true">✓</span> ตรวจแล้ว</span>
+              <span><span class="insp-lg-swatch is-ready" aria-hidden="true">!</span> พร้อมเข้าตรวจ</span>
+              <span><span class="insp-lg-swatch is-pending" aria-hidden="true"></span> ยังไม่พร้อม</span>
               <span><i class="fa-solid fa-circle" style="color:#0ea5e9"></i> ตำแหน่งของฉัน</span>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
@@ -977,7 +1013,7 @@
                 <button type="button" class="btn btn-outline-danger" id="inspectionTripSavedDeleteBtn" onclick="deleteInspectionSavedTrip_()" title="ลบเส้นทางที่เลือก" disabled><i class="fa-solid fa-trash"></i></button>
               </div>
               <div id="inspectionTripSummary" class="small text-muted mb-2"></div>
-              <div class="insp-trip-hint" id="inspectionTripHint"><i class="fa-solid fa-grip-vertical"></i> ลากจุดเพื่อเปลี่ยนลำดับ — เส้นทางแสดงบนแผนที่สถานที่ตามลำดับ</div>
+              <div class="insp-trip-hint" id="inspectionTripHint"><i class="fa-solid fa-grip-vertical"></i> ลากจุดเพื่อเปลี่ยนลำดับก่อนกดนำทาง</div>
               <div id="inspectionTripList"><p class="text-muted small mb-0">ยังไม่มีจุดในแผน — คลิกหมุดแล้วกด「เพิ่มในแผน」</p></div>
             </div>
             </div>
@@ -1349,7 +1385,6 @@
     let routeMap, routeMarkersLayer, routeLineLayer;
     let inspectionMap = null, inspectionMarkersLayer = null;
     let inspectionMyLocationMarker = null;
-    let inspectionTripRouteLayer = null;
     let inspectionTripSortable_ = null;
     let _inspTripRouteGen_ = 0;
     let inspectionTripStops = [];
@@ -2182,11 +2217,24 @@
       return icons.blue;
     }
 
-    /** สีหมุดแผนที่ตรวจรับ: ตามสถานะเข้าตรวจ ไม่ใช้สีเฟส (เฟส 3-4 เป็นแดงทั้งแผนที่) */
+    /** หมุดแผนที่ตรวจรับ: สี + สัญลักษณ์ (รองรับตาบอดสี) — ไม่ใช้สีเฟส */
+    function getInspectionMapStatusKey_(p) {
+      if (p && p.visited) return 'done';
+      if (inspectionHasHandoverRound_(p)) return 'ready';
+      return 'pending';
+    }
+
     function getInspectionMapIcon_(p) {
-      if (p && p.visited) return icons.green;
-      if (inspectionHasHandoverRound_(p)) return icons.orange;
-      return icons.grey;
+      const key = getInspectionMapStatusKey_(p);
+      const symbol = key === 'done' ? '✓' : (key === 'ready' ? '!' : '');
+      const label = key === 'done' ? 'ตรวจแล้ว' : (key === 'ready' ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม');
+      return L.divIcon({
+        className: 'insp-map-marker-wrap',
+        html: '<div class="insp-map-marker is-' + key + '" title="' + label + '" aria-label="' + label + '">' + symbol + '</div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14]
+      });
     }
 
     function buildInspectionMapTooltipHtml_(p, info) {
@@ -2195,11 +2243,13 @@
       const schedule = formatInspectionHandoverDate_(p && p.inspectSchedule, false) || String((p && p.inspectSchedule) || '').trim();
       const inspectors = String((p && p.inspectors) || '').replace(/\s+/g, ' ').trim();
       const hasRound = inspectionHasHandoverRound_(p);
+      const statusKey = getInspectionMapStatusKey_(p);
+      const statusSymbol = statusKey === 'done' ? '✓ ' : (statusKey === 'ready' ? '! ' : '○ ');
       let html = '<div class="insp-map-tip"><div class="insp-map-tip-name">' + escHtml(name) + '</div>';
       if (info && info.province) {
         html += '<div class="insp-map-tip-meta">จ.' + escHtml(info.province) + '</div>';
       }
-      html += '<div class="insp-map-tip-meta">' +
+      html += '<div class="insp-map-tip-meta">' + statusSymbol +
         (p && p.visited ? 'ตรวจแล้ว' : 'ยังไม่เข้าตรวจ') +
         ' · ' + (hasRound ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม') +
         '</div>';
@@ -2315,7 +2365,15 @@
         let streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' });
         let satelliteLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: 'Google Satellite' });
 
-        map = L.map('map', { center: [13.7563, 100.5018], zoom: 6, layers: [streetLayer] });
+        map = L.map('map', {
+          center: [13.7563, 100.5018],
+          zoom: 6,
+          layers: [streetLayer],
+          dragging: true,
+          scrollWheelZoom: true,
+          touchZoom: true,
+          doubleClickZoom: true
+        });
         L.control.layers({ "แผนที่ถนน (Street)": streetLayer, "ดาวเทียม (Satellite)": satelliteLayer }).addTo(map);
         markersLayer = L.layerGroup().addTo(map);
         makeMapPageScrollFriendly_(map);
@@ -3949,17 +4007,29 @@
       }
     }
 
-    /** มือถือ: นิ้วเดียวเลื่อนหน้า / สองนิ้วเลื่อนแผนที่ */
+    /** มือถือ: นิ้วเดียวเลื่อนหน้า / สองนิ้วเลื่อนแผนที่ — เดสก์ท็อป/ทัชแพดเลื่อนแผนที่ได้ปกติ */
     function makeMapPageScrollFriendly_(m) {
       if (!m || m._pwaScrollFriendly) return;
       m._pwaScrollFriendly = true;
       var el = m.getContainer();
+
+      function enableDesktopMapGestures_() {
+        try { m.dragging.enable(); } catch (e) {}
+        try { if (m.scrollWheelZoom) m.scrollWheelZoom.enable(); } catch (e2) {}
+        el.classList.remove('map-scroll-friendly');
+        el.style.touchAction = 'none';
+      }
+
+      if (!isCoarseTouchUi_()) {
+        enableDesktopMapGestures_();
+        return;
+      }
+
       el.classList.add('map-scroll-friendly');
 
       function applyFingerMode(touchCount) {
         if (!isCoarseTouchUi_()) {
-          m.dragging.enable();
-          el.style.touchAction = '';
+          enableDesktopMapGestures_();
           return;
         }
         if (touchCount >= 2) {
@@ -7268,7 +7338,7 @@
       }
       if (!inspectionTripStops.length) {
         listEl.innerHTML = '<p class="text-muted small mb-0">ยังไม่มีจุดในแผน — คลิกหมุดแล้วกด「เพิ่มในแผน」</p>';
-        updateInspectionTripRouteVisual_({ fit: false });
+        updateInspectionTripRouteVisual_();
         return;
       }
       listEl.innerHTML = inspectionTripStops.map(function(stop, idx) {
@@ -7286,7 +7356,7 @@
           '</div>';
       }).join('');
       bindInspectionTripSortable_();
-      updateInspectionTripRouteVisual_({ fit: true });
+      updateInspectionTripRouteVisual_();
     }
 
     function bindInspectionTripSortable_() {
@@ -7316,117 +7386,40 @@
       }).catch(function() {});
     }
 
-    function createInspectionTripNumberIcon_(num, isStart, isEnd) {
-      const color = isStart ? '#2563eb' : (isEnd ? '#ef4444' : '#0ea5e9');
-      return L.divIcon({
-        className: 'insp-trip-num-marker',
-        html: '<div style="background:' + color + ';color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:12px;">' + num + '</div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14]
-      });
-    }
-
-    function ensureInspectionTripMapLayers_() {
-      if (!inspectionMap || typeof L === 'undefined') return false;
-      if (!inspectionTripRouteLayer) {
-        inspectionTripRouteLayer = L.layerGroup().addTo(inspectionMap);
-      }
-      return true;
-    }
-
-    function paintInspectionTripLayer_(layer, pts, routeLatLngs) {
-      if (!layer) return;
-      layer.clearLayers();
-      pts.forEach(function(stop, idx) {
-        const isStart = idx === 0;
-        const isEnd = idx === pts.length - 1;
-        const marker = L.marker([Number(stop.lat), Number(stop.lng)], {
-          icon: createInspectionTripNumberIcon_(idx + 1, isStart, isEnd),
-          zIndexOffset: 600
-        });
-        let popup = '<div class="small"><b>จุดที่ ' + (idx + 1) + (isStart ? ' (เริ่มต้น)' : (isEnd ? ' (สุดท้าย)' : '')) + '</b><br>' +
-          escHtml(stop.name || '-');
-        if (stop.province || stop.region) {
-          popup += '<br><span class="text-muted">' + escHtml([stop.province ? ('จ.' + stop.province) : '', stop.region].filter(Boolean).join(' · ')) + '</span>';
-        }
-        popup += '</div>';
-        marker.bindPopup(popup);
-        layer.addLayer(marker);
-      });
-      if (routeLatLngs && routeLatLngs.length > 1) {
-        L.polyline(routeLatLngs, { color: '#1c7ed6', weight: 6, opacity: 0.9 }).addTo(layer);
-      } else if (pts.length > 1) {
-        const straight = pts.map(function(s) { return [Number(s.lat), Number(s.lng)]; });
-        L.polyline(straight, { color: '#94a3b8', weight: 4, opacity: 0.75, dashArray: '10,8' }).addTo(layer);
-      }
-    }
-
-    function updateInspectionTripRouteVisual_(opts) {
-      opts = opts || {};
-      const fit = !!opts.fit;
+    function updateInspectionTripRouteVisual_() {
       const summaryEl = document.getElementById('inspectionTripSummary');
       const gen = ++_inspTripRouteGen_;
       const pts = (inspectionTripStops || []).filter(function(s) {
         return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
       });
 
-      initInspectionMapIfNeeded_();
-      if (!ensureInspectionTripMapLayers_()) {
-        if (summaryEl) {
-          summaryEl.innerHTML = pts.length < 2
-            ? (pts.length === 1 ? '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเส้นทางบนแผนที่</span>' : '')
-            : '';
-        }
-        return;
-      }
-
       if (!pts.length) {
-        inspectionTripRouteLayer.clearLayers();
         if (summaryEl) summaryEl.innerHTML = '';
         return;
       }
-
-      paintInspectionTripLayer_(inspectionTripRouteLayer, pts, null);
-
       if (pts.length < 2) {
         if (summaryEl) {
-          summaryEl.innerHTML = '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเส้นทางบนแผนที่</span>';
-        }
-        if (fit && inspectionMap) {
-          try { inspectionMap.setView([Number(pts[0].lat), Number(pts[0].lng)], 12); } catch (e) {}
+          summaryEl.innerHTML = '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเวลาระหว่างจุด</span>';
         }
         return;
       }
-
-      const straight = pts.map(function(s) { return [Number(s.lat), Number(s.lng)]; });
-      if (fit && inspectionMap) {
-        try { inspectionMap.fitBounds(straight, { padding: [48, 48], maxZoom: 13 }); } catch (e) {}
-      }
       if (summaryEl) {
-        summaryEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณเส้นทางบนแผนที่...</span>';
+        summaryEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณเวลาเดินทาง...</span>';
       }
 
       const coords = pts.map(function(s) { return Number(s.lng) + ',' + Number(s.lat); }).join(';');
       const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const t = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, 18000) : null;
       const fetchOpts = ctrl ? { signal: ctrl.signal } : {};
-      fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=full&geometries=geojson', fetchOpts)
+      fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=false', fetchOpts)
         .then(function(res) { if (t) clearTimeout(t); return res.json(); })
         .then(function(data) {
           if (gen !== _inspTripRouteGen_) return;
           if (!(data.code === 'Ok' && data.routes && data.routes[0])) {
-            if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">คำนวณเส้นทางไม่สำเร็จ — แสดงเส้นตรงตามลำดับ</span>';
+            if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">คำนวณเส้นทางไม่สำเร็จ — ยังกดนำทางได้</span>';
             return;
           }
           const route = data.routes[0];
-          let latlngs = null;
-          if (route.geometry && route.geometry.coordinates && route.geometry.coordinates.length) {
-            latlngs = route.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
-          }
-          paintInspectionTripLayer_(inspectionTripRouteLayer, pts, latlngs);
-          if (fit && inspectionMap && latlngs && latlngs.length > 1) {
-            try { inspectionMap.fitBounds(latlngs, { padding: [48, 48], maxZoom: 13 }); } catch (e) {}
-          }
           const distKm = (route.distance / 1000).toFixed(1);
           const timeMin = Math.round(route.duration / 60);
           const hour = Math.floor(timeMin / 60);
@@ -7446,19 +7439,18 @@
               '<div class="alert alert-success py-2 mb-0 small">' +
               '<i class="fa-solid fa-car"></i> รวม <b>' + distKm + ' กม.</b> · ' +
               '<i class="fa-regular fa-clock"></i> ~<b>' + hour + ' ชม. ' + minute + ' นาที</b>' +
-              '<div class="text-muted mt-1" style="font-size:0.72rem">เส้นสีน้ำเงินบนแผนที่สถานที่ = ลำดับเส้นทาง</div>' +
               legsHtml + '</div>';
           }
         })
         .catch(function() {
           if (t) clearTimeout(t);
           if (gen !== _inspTripRouteGen_) return;
-          if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">เซิร์ฟเวอร์เส้นทางไม่พร้อม — แสดงเส้นตรงตามลำดับบนแผนที่</span>';
+          if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">เซิร์ฟเวอร์เส้นทางไม่พร้อม — ยังกดนำทางได้</span>';
         });
     }
 
     function refreshInspectionTripRouteSummary_() {
-      updateInspectionTripRouteVisual_({ fit: false });
+      updateInspectionTripRouteVisual_();
     }
 
     window.addInspectionToTripPlan_ = function(inspectionId) {
@@ -7722,7 +7714,6 @@
       });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(inspectionMap);
       inspectionMarkersLayer = L.layerGroup().addTo(inspectionMap);
-      inspectionTripRouteLayer = L.layerGroup().addTo(inspectionMap);
       // ไม่ใช้ makeMapPageScrollFriendly_ — บล็อกทัชแพดเลื่อน/ซูมแผนที่
       if (lastUserGps.lat != null && lastUserGps.lng != null) {
         placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
@@ -7802,17 +7793,12 @@
           ? (plotted + ' จุด · ส่งมอบแล้ว ' + plottedReady + ' · ตรวจแล้ว ' + plottedDone + (plottedNotReady ? ' · ยังไม่ส่งมอบ ' + plottedNotReady : '') + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : ''))
           : (mapPlans.length ? ('0 จุด · มี ' + mapPlans.length + ' รายการแต่ไม่มีพิกัด') : '0 จุด');
       }
-      const tripPtsCount = (inspectionTripStops || []).filter(function(s) {
-        return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
-      }).length;
-      if (tripPtsCount < 2) {
-        if (bounds.length > 1) {
-          try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
-        } else if (bounds.length === 1) {
-          inspectionMap.setView(bounds[0], 12);
-        } else {
-          inspectionMap.setView([13.7563, 100.5018], 6);
-        }
+      if (bounds.length > 1) {
+        try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
+      } else if (bounds.length === 1) {
+        inspectionMap.setView(bounds[0], 12);
+      } else {
+        inspectionMap.setView([13.7563, 100.5018], 6);
       }
       if (panel) {
         const selectedId = panel.dataset.inspSelected || '';

@@ -1410,10 +1410,11 @@ function readOutagesMapped_(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   const numCols = Math.max(sheet.getLastColumn(), OUTAGE_HEADERS.length);
-  const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+  // อ่านถึงแถวสุดท้ายที่มีข้อมูล (เดิมใช้ lastRow-1 ทำให้หายแถวท้าย)
+  const data = sheet.getRange(2, 1, lastRow, numCols).getValues();
   let richFiles = null, formulas = null;
-  try { richFiles = sheet.getRange(2, 6, lastRow - 1, 1).getRichTextValues(); } catch (ignore) {}
-  try { formulas = sheet.getRange(2, 6, lastRow - 1, 1).getFormulas(); } catch (ignore) {}
+  try { richFiles = sheet.getRange(2, 6, lastRow, 1).getRichTextValues(); } catch (ignore) {}
+  try { formulas = sheet.getRange(2, 6, lastRow, 1).getFormulas(); } catch (ignore) {}
   return data.map(function(row, i) {
     const o = mapOutageRow_(row);
     const rich = richFiles && richFiles[i] ? richFiles[i][0] : null;
@@ -1432,7 +1433,7 @@ function readOutagesMapped_(sheet) {
   });
 }
 
-const OUTAGE_LIST_CACHE_KEY = 'outage_list_v3';
+const OUTAGE_LIST_CACHE_KEY = 'outage_list_v4';
 const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v9';
 const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v9';
 const LIST_CACHE_TTL_SEC = 180;
