@@ -726,7 +726,7 @@
             <small class="opacity-90">ดึงจากชีทกำหนดการอัตโนมัติเมื่อเปิดเมนู — แก้ใน Excel แล้วเปิดใหม่หรือกดรีเฟรช</small>
           </div>
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm" onclick="refreshOutageFromSheet()" id="btnRefreshOutageSheet" title="ดึงข้อมูลล่าสุดจาก Excel/ชีท">
+            <button class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm js-sheet-access" onclick="refreshOutageFromSheet()" id="btnRefreshOutageSheet" title="ดึงข้อมูลล่าสุดจาก Excel/ชีท">
               <i class="fa-solid fa-file-excel"></i> รีเฟรชจากชีท
             </button>
             <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openOutageModal()" id="btnAddOutageTop" disabled>
@@ -784,7 +784,7 @@
             <small class="opacity-90">ซิงก์กับ Google Sheet อัตโนมัติ</small>
           </div>
           <div class="d-flex flex-wrap gap-2">
-            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit" target="_blank" rel="noopener" class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm">
+            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit" target="_blank" rel="noopener" class="btn btn-outline-light fw-bold rounded-pill px-3 shadow-sm js-sheet-access">
               <i class="fa-solid fa-file-excel"></i> เปิดชีท
             </a>
             <button class="btn btn-light fw-bold rounded-pill px-4 shadow-sm" onclick="openInspectionModal()" id="btnAddInspectionTop" disabled>
@@ -803,7 +803,7 @@
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary"></i> รายการตรวจรับงาน <span class="text-muted fw-normal small">(ทุกภาค · ทุกคอลัมน์)</span></h5>
-            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit?gid=0#gid=0" target="_blank" rel="noopener" class="small text-primary text-decoration-none mt-1 d-inline-block">
+            <a href="https://docs.google.com/spreadsheets/d/18IPB1OWOKo0mSxXBWfSFTyaIePNlZvPR655UCTQPzsc/edit?gid=0#gid=0" target="_blank" rel="noopener" class="small text-primary text-decoration-none mt-1 d-inline-block js-sheet-access">
               <i class="fa-solid fa-table me-1"></i>เปิดชีทต้นทาง
             </a>
           </div>
@@ -1265,7 +1265,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted mb-3">แอดมินรองแก้ไขแผนดับไฟ/อัปโหลด PDF ได้ — ผู้ใช้บริษัทดูได้อย่างเดียว (ไม่มีแดชบอร์ด/ข้อมูลโครงการ/ฐานข้อมูล และไม่เห็นเลข CA/มิเตอร์/ผู้ดูแล/ผู้ประสานงาน)</p>
+        <p class="small text-muted mb-3">แอดมินรองแก้ไขแผนดับไฟ/อัปโหลด PDF ได้ — ผู้ใช้บริษัทดูได้อย่างเดียว (ไม่มีแดชบอร์ด/ข้อมูลโครงการ/ฐานข้อมูล/ลิงก์ชีท และไม่เห็นเลข CA/มิเตอร์/ผู้ดูแล/ผู้ประสานงาน)</p>
         <form class="border rounded-3 p-3 mb-3 bg-light" autocomplete="off" onsubmit="return false;">
           <h6 class="fw-bold small text-success mb-2"><i class="fa-solid fa-user-plus"></i> สร้างบัญชีใหม่</h6>
           <select id="newUserRole" class="form-select form-select-sm mb-2" name="user-role">
@@ -1860,6 +1860,14 @@
       return canAccessRestrictedMenus();
     }
 
+    function canAccessGoogleSheets() {
+      return !isCompanyUser();
+    }
+
+    function isGoogleSheetUrl_(url) {
+      return /docs\.google\.com\/spreadsheets/i.test(String(url || ''));
+    }
+
     let appStarted = false;
     let mapInitialized = false;
     let dashboardEverOpened = false;
@@ -2435,6 +2443,11 @@
     });
     if (anyActive) switchMenu('map');
   }
+
+  const sheetOk = canAccessGoogleSheets();
+  document.querySelectorAll('.js-sheet-access').forEach(function(el) {
+    el.style.display = sheetOk ? '' : 'none';
+  });
 
   let docBtnContainer = document.getElementById('docActionButtons');
   if(docBtnContainer) docBtnContainer.style.display = canEditAll() ? 'flex' : 'none';
@@ -4155,10 +4168,14 @@
           filterOutages();
           Swal.fire({ icon: 'error', title: 'โหลดแผนดับไฟไม่สำเร็จ', text: err.message });
         }
-      }).getOutages();
+      }).getOutages(sessionToken || null);
     }
 
     function refreshOutageFromSheet() {
+      if (!canAccessGoogleSheets()) {
+        Swal.fire({ icon: 'warning', title: 'ไม่มีสิทธิ์', text: 'ผู้ใช้บริษัทไม่สามารถเข้าถึง Google Sheet ได้' });
+        return;
+      }
       const btn = document.getElementById('btnRefreshOutageSheet');
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังดึง...'; }
       Toast.fire({ icon: 'info', title: 'กำลังดึงจาก Excel...' });
@@ -4809,12 +4826,16 @@
         if (o.fromSheet) statusBadge += ' <span class="badge bg-info text-dark mb-2"><i class="fa-solid fa-file-excel"></i> จากชีท</span>';
 
         let fileBtn = '';
-        if (o.fromSheet) {
-          const href = (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) ? o.fileUrl : (o.sourceUrl || OUTAGE_SOURCE_SHEET_URL);
-          const title = o.sourceTitle || OUTAGE_SOURCE_SHEET_TITLE;
-          fileBtn = `<a href="${escHtml(href)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-file-excel"></i> ${escHtml(title)}</a>`;
-        } else if (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) {
-          fileBtn = `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> ${escHtml(OUTAGE_SOURCE_SHEET_TITLE)}</a>`;
+        if (canAccessGoogleSheets()) {
+          if (o.fromSheet) {
+            const href = (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) ? o.fileUrl : (o.sourceUrl || OUTAGE_SOURCE_SHEET_URL);
+            const title = o.sourceTitle || OUTAGE_SOURCE_SHEET_TITLE;
+            fileBtn = `<a href="${escHtml(href)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-file-excel"></i> ${escHtml(title)}</a>`;
+          } else if (o.fileUrl && /^https?:\/\//i.test(o.fileUrl)) {
+            fileBtn = `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> ${escHtml(OUTAGE_SOURCE_SHEET_TITLE)}</a>`;
+          }
+        } else if (o.fileUrl && /^https?:\/\//i.test(o.fileUrl) && !isGoogleSheetUrl_(o.fileUrl)) {
+          fileBtn = `<a href="${escHtml(o.fileUrl)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill"><i class="fa-solid fa-link"></i> เปิดลิงก์</a>`;
         }
         
         let dateHtml = formatOutageDateRange(o);
@@ -5309,7 +5330,7 @@
         filterInspections(ui);
       }).withFailureHandler(function(err) {
         Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
-      }).getInspectionPlans();
+      }).getInspectionPlans(sessionToken || null);
     }
 
     function scheduleInspectionBackgroundSync_() {
@@ -5371,11 +5392,15 @@
             filterInspections();
             Swal.fire({ icon: 'error', title: 'โหลดแผนตรวจรับไม่สำเร็จ', text: err.message });
           }
-        }).getInspectionPlans();
+        }).getInspectionPlans(sessionToken || null);
       }, hasInspectionFormTemplateClientMeta_() ? 0 : 80);
     }
 
     function refreshInspectionFromSheet() {
+      if (!canAccessGoogleSheets()) {
+        Swal.fire({ icon: 'warning', title: 'ไม่มีสิทธิ์', text: 'ผู้ใช้บริษัทไม่สามารถเข้าถึง Google Sheet ได้' });
+        return;
+      }
       const btn = document.getElementById('btnRefreshInspectionSheet');
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังดึง...'; }
       Toast.fire({ icon: 'info', title: 'กำลังดึงจากชีท...' });
@@ -5389,7 +5414,10 @@
     }
 
     function pushInspectionBackToSource() {
-      if (!canEditInspection()) return;
+      if (!canAccessGoogleSheets() || !canEditInspection()) {
+        Swal.fire({ icon: 'warning', title: 'ไม่มีสิทธิ์', text: 'ผู้ใช้บริษัทไม่สามารถเข้าถึง Google Sheet ได้' });
+        return;
+      }
       Swal.fire({
         title: 'ซิงก์ข้อมูลกลับชีทต้นทาง?',
         html: 'จะเขียน <b>รอบส่งมอบงานจริง</b> / <b>กำหนดตรวจงาน</b> และข้อมูลที่แก้ในแอป กลับไป Google Sheet ให้ตรงกัน<br><small class="text-muted">ใช้เมื่อต้องการ sync ให้ครบ 100%</small>',
@@ -6162,7 +6190,7 @@
             if (updated && inspectionHasFileUrl_(updated.fileComment)) {
               Toast.fire({ icon: 'success', title: 'อัปโหลดไฟล์แล้ว — ทำเครื่องหมายไปแล้ว' });
             }
-          }).getInspectionPlans();
+          }).getInspectionPlans(sessionToken || null);
         }).catch(function(err) {
           Swal.close();
           inspectionUiStash_ = null;

@@ -195,17 +195,27 @@ function dispatchApi_(action, args, sessionToken) {
     case 'authenticate': return authenticate(args[0], args[1], args[2]);
     case 'validateClientSession': return validateClientSession(args[0] || tok);
     case 'revokeSession': return revokeSession(args[0] || tok);
-    case 'getOutages': return getOutages();
-    case 'refreshOutagesFromSource': return refreshOutagesFromSource(args[0]);
-    case 'debugOutageSourceSheets': return debugOutageSourceSheets_();
+    case 'getOutages': return getOutages(tok);
+    case 'refreshOutagesFromSource':
+      if (args[0]) assertEditorOrAdminFromSession_(tok);
+      return redactSheetAccessForSession_(refreshOutagesFromSource(args[0]), tok);
+    case 'debugOutageSourceSheets':
+      assertEditorOrAdminFromSession_(tok);
+      return debugOutageSourceSheets_();
     case 'saveOutageData': return saveOutageData(args[0], args[1] || tok);
     case 'updateOutageStatus': return updateOutageStatus(args[0], args[1], args[2], args[3] || tok);
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
-    case 'getInspectionPlans': return getInspectionPlans();
-    case 'refreshInspectionPlansFromSource': return refreshInspectionPlansFromSource(args[0]);
+    case 'getInspectionPlans': return getInspectionPlans(tok);
+    case 'refreshInspectionPlansFromSource':
+      if (args[0]) assertEditorOrAdminFromSession_(tok);
+      return redactSheetAccessForSession_(refreshInspectionPlansFromSource(args[0]), tok);
     case 'pushInspectionPlansToSource': return pushInspectionPlansToSource(args[0] || tok);
-    case 'debugInspectionSourceSheets': return debugInspectionSourceSheets_();
-    case 'debugInspectionSourceRow': return debugInspectionSourceRow_(args[0]);
+    case 'debugInspectionSourceSheets':
+      assertEditorOrAdminFromSession_(tok);
+      return debugInspectionSourceSheets_();
+    case 'debugInspectionSourceRow':
+      assertEditorOrAdminFromSession_(tok);
+      return debugInspectionSourceRow_(args[0]);
     case 'saveInspectionPlan': return saveInspectionPlan(args[0], args[1] || tok);
     case 'restoreInspectionHandoverRounds': return restoreInspectionHandoverRounds(args[0], args[1] || tok);
     case 'saveInspectionFileComment': return saveInspectionFileComment(args[0], args[1] || tok);
@@ -353,6 +363,48 @@ function validateClientSession(sessionToken) {
 
 function getRoleFromSession_(sessionToken) {
   return validateSession_(sessionToken).role;
+}
+
+function assertNotCompanyUserFromSession_(sessionToken) {
+  const role = getRoleFromSession_(sessionToken);
+  if (role === 'user') {
+    throw new Error('ผู้ใช้บริษัทไม่มีสิทธิ์เข้าถึง Google Sheet');
+  }
+  return role;
+}
+
+function isGoogleSheetUrlServer_(url) {
+  return /docs\.google\.com\/spreadsheets/i.test(String(url || ''));
+}
+
+function redactSheetFieldsInRow_(row) {
+  if (!row || typeof row !== 'object') return row;
+  const o = Object.assign({}, row);
+  if (o.sourceUrl) o.sourceUrl = '';
+  if (isGoogleSheetUrlServer_(o.fileUrl)) o.fileUrl = '';
+  if (o.sourceTitle) o.sourceTitle = '';
+  return o;
+}
+
+function redactSheetAccessPayload_(payload) {
+  if (payload == null) return payload;
+  if (Array.isArray(payload)) return payload.map(redactSheetFieldsInRow_);
+  if (typeof payload !== 'object') return payload;
+  const out = Object.assign({}, payload);
+  if (out.sourceUrl) out.sourceUrl = '';
+  if (Array.isArray(out.outages)) out.outages = out.outages.map(redactSheetFieldsInRow_);
+  if (Array.isArray(out.plans)) out.plans = out.plans.map(redactSheetFieldsInRow_);
+  return out;
+}
+
+function redactSheetAccessForSession_(payload, sessionToken) {
+  if (!sessionToken) return payload;
+  try {
+    if (getRoleFromSession_(sessionToken) === 'user') {
+      return redactSheetAccessPayload_(payload);
+    }
+  } catch (e) { /* invalid session — leave payload */ }
+  return payload;
 }
 
 function assertAdminFromSession_(sessionToken) {
@@ -1404,17 +1456,17 @@ function invalidateInspectionListCache_() {
 }
 
 /** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
-function getOutages() {
+function getOutages(sessionToken) {
   const cache = CacheService.getScriptCache();
   try {
     const hit = cache.get(OUTAGE_LIST_CACHE_KEY);
-    if (hit) return JSON.parse(hit);
+    if (hit) return redactSheetAccessForSession_(JSON.parse(hit), sessionToken);
   } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
   const result = readOutagesMapped_(sheet);
   try { cache.put(OUTAGE_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC); } catch (ignore) {}
-  return result;
+  return redactSheetAccessForSession_(result, sessionToken);
 }
 
 const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
@@ -2615,12 +2667,12 @@ function syncInspectionsFromSource_(destSheet, precollected) {
   return rows.length;
 }
 
-function getInspectionPlans() {
+function getInspectionPlans(sessionToken) {
   const cache = CacheService.getScriptCache();
   const gen = inspectionListCacheGen_();
   try {
     const hit = cache.get(INSPECTION_LIST_CACHE_KEY);
-    if (hit) return JSON.parse(hit);
+    if (hit) return redactSheetAccessForSession_(JSON.parse(hit), sessionToken);
   } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
@@ -2630,7 +2682,7 @@ function getInspectionPlans() {
       cache.put(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC);
     }
   } catch (ignore) {}
-  return result;
+  return redactSheetAccessForSession_(result, sessionToken);
 }
 
 const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v6';
