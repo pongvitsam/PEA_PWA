@@ -1463,7 +1463,8 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <!-- GitHub Pages: polyfill google.script.run → Apps Script API (อย่าลบเมื่อ sync จาก Index.html) -->
+  
+    <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
   <script src="js/pwa-gas-api.js?v=16"></script>
   
@@ -2241,6 +2242,7 @@
 
     function refreshLocationsData_(data) {
       allData = data || [];
+      enrichLocationsWithProvince_(allData);
       filteredData = allData.slice();
       rebuildLocationLookup_();
       setupFiltersAndSelect();
@@ -2497,6 +2499,7 @@
     // 🟢 แก้ไข: ย้าย initOutageSystem() มาต่อท้ายตรงนี้ เพื่อให้แน่ใจว่า allData โหลดเสร็จก่อน
     function initApp(data) {
       allData = data || [];
+      enrichLocationsWithProvince_(allData);
       filteredData = allData.slice();
       rebuildLocationLookup_();
       document.getElementById('loading').style.display = 'none';
@@ -3522,7 +3525,7 @@
         let provMatch = true;
 
         if (prov !== "") {
-          let concatText = (loc.name + " " + loc.peaRegion + " " + loc.pwaRegion).toLowerCase();
+          let concatText = [loc.province, loc.name, loc.peaRegion, loc.pwaRegion].join(' ').toLowerCase();
           let provLower = prov.toLowerCase();
           if (!concatText.includes(provLower)) provMatch = false;
         }
@@ -3588,17 +3591,17 @@
         marker._loc = loc;
         let realIndex = rowToIndex.get(loc.row);
         if (realIndex == null) return;
-        let hasName = !!(loc.name && String(loc.name).trim());
-        if(hasName) {
-          marker.bindTooltip(String(loc.name).trim(), {
+        let tipText = locationMapTooltipText_(loc);
+        if (tipText) {
+          marker.bindTooltip(tipText, {
             permanent: false, direction: 'top', offset: [0, -30], className: 'marker-label-tooltip'
           });
         }
         
         marker.on('click', function() {
           showDetailsPanel(realIndex);
-          if(!hasName) return;
-          if(marker.isTooltipOpen()) marker.closeTooltip();
+          if (!tipText) return;
+          if (marker.isTooltipOpen()) marker.closeTooltip();
           else marker.openTooltip();
         });
         
@@ -3732,8 +3735,13 @@
         '</div>')
         : '';
 
+      const provinceLine = loc.province
+        ? '<div class="small text-muted mb-2"><i class="fa-solid fa-map-location-dot me-1"></i>จ.' + escHtml(loc.province) + '</div>'
+        : '';
+
       return '' +
         '<h5 class="fw-bold" style="color:#2563eb;">' + escHtml(loc.name || 'ไม่มีชื่อ') + '</h5>' +
+        provinceLine +
         '<div class="badge bg-secondary mb-3">เฟส ' + escHtml(loc.phase || '-') + '</div>' +
         '<div class="badge bg-info text-dark mb-3 ms-1">ลำดับ ' + escHtml(loc.seq || '-') + '</div>' +
         '<div class="info-card">' +
@@ -4239,9 +4247,9 @@
         const lat = Number(loc.lat), lng = Number(loc.lng);
         if (!isFinite(lat) || !isFinite(lng)) return;
         const marker = L.marker([lat, lng], { icon: getIcon(loc.phase) });
-        const name = String(loc.name || '').trim();
-        if (name) {
-          marker.bindTooltip(name, {
+        const tipText = locationMapTooltipText_(loc);
+        if (tipText) {
+          marker.bindTooltip(tipText, {
             permanent: false, direction: 'top', offset: [0, -30], className: 'marker-label-tooltip'
           });
         }
@@ -5037,7 +5045,33 @@
       return '';
     }
 
+    function resolveLocationProvince_(loc) {
+      if (!loc) return '';
+      const existing = String(loc.province || '').trim();
+      if (existing) return existing;
+      return guessThaiProvinceFromText_([
+        loc.name, loc.peaRegion, loc.pwaRegion
+      ].filter(Boolean).join(' '));
+    }
+
+    function enrichLocationsWithProvince_(list) {
+      (list || []).forEach(function(loc) {
+        loc.province = resolveLocationProvince_(loc);
+      });
+    }
+
+    function locationMapTooltipText_(loc) {
+      const name = String((loc && loc.name) || '').trim();
+      if (!name) return '';
+      const prov = String((loc && loc.province) || '').trim();
+      return prov ? (name + ' · จ.' + prov) : name;
+    }
+
     function resolveInspectionProvince_(p, loc) {
+      if (loc && loc.province) {
+        const fromLoc = String(loc.province).trim();
+        if (fromLoc) return fromLoc;
+      }
       const blob = [
         p && p.peaOffice,
         p && p.place,
