@@ -1374,7 +1374,7 @@
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
           <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-users"></i> ผู้เกี่ยวข้อง</h6>
           <div class="row g-2">
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">รายชื่อคนเข้าตรวจงาน</label><input type="text" id="insp_inspectors" class="form-control form-control-sm" autocomplete="off"></div>
+            <div class="col-md-6" id="inspInspectorsFieldWrap"><label class="form-label small text-muted mb-0">รายชื่อคนเข้าตรวจงาน</label><input type="text" id="insp_inspectors" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">คณะกรรมการตรวจรับ (ไปตรวจ)</label><input type="text" id="insp_committee" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">ผู้ประสานงาน TC</label><input type="text" id="insp_tcCoordinator" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">เบอร์ติดต่อ TC</label><input type="text" id="insp_tcContact" class="form-control form-control-sm" autocomplete="off" inputmode="tel"></div>
@@ -1463,9 +1463,6 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <!-- GitHub Pages: polyfill google.script.run ผ่าน JSONP (ห้ามลบเมื่อ sync จาก Index.html) -->
-  <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=15"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2036,6 +2033,11 @@
       return !isCompanyUser();
     }
 
+    /** ผู้ใช้บริษัทไม่เห็นรายชื่อคนเข้าตรวจ */
+    function canViewInspectors() {
+      return !isCompanyUser();
+    }
+
     function canAccessRestrictedMenus() {
       return !isCompanyUser();
     }
@@ -2094,10 +2096,20 @@
         const keys = [INSPECTION_LS_KEY, 'pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v1'];
         for (let i = 0; i < keys.length; i++) {
           const c = JSON.parse(localStorage.getItem(keys[i]) || 'null');
-          if (c && Array.isArray(c.data) && c.data.length) return c.data;
+          if (c && Array.isArray(c.data) && c.data.length) return scrubCompanyHiddenInspectionFields_(c.data);
         }
       } catch (e) { /* ignore */ }
       return null;
+    }
+
+    function scrubCompanyHiddenInspectionFields_(plans) {
+      if (!plans || !plans.length || !isCompanyUser()) return plans;
+      return plans.map(function(p) {
+        if (!p || (p.inspectors == null || p.inspectors === '')) return p;
+        const o = Object.assign({}, p);
+        o.inspectors = '';
+        return o;
+      });
     }
 
     /** กู้รอบส่งมอบที่เคยกรอกจาก cache เก่า ถ้าซิงก์ล่าสุดล้างค่าไป */
@@ -2382,7 +2394,7 @@
       if (schedule) {
         html += '<div class="insp-map-tip-row"><i class="fa-solid fa-calendar-check"></i> กำหนดตรวจ: <b>' + escHtml(schedule) + '</b></div>';
       }
-      if (inspectors) {
+      if (inspectors && canViewInspectors()) {
         html += '<div class="insp-map-tip-row"><i class="fa-solid fa-users"></i> ผู้เข้าตรวจ: <b>' + escHtml(inspectors) + '</b></div>';
       }
       html += '</div>';
@@ -2686,6 +2698,8 @@
   document.querySelectorAll('.js-sheet-access').forEach(function(el) {
     el.style.display = sheetOk ? '' : 'none';
   });
+  const inspField = document.getElementById('inspInspectorsFieldWrap');
+  if (inspField) inspField.style.display = canViewInspectors() ? '' : 'none';
 
   let docBtnContainer = document.getElementById('docActionButtons');
   if(docBtnContainer) docBtnContainer.style.display = canEditAll() ? 'flex' : 'none';
@@ -5779,6 +5793,11 @@
       { key: 'visited', label: 'ไปแล้ว', type: 'visited' }
     ];
 
+    function getInspectionTableColumns_() {
+      if (canViewInspectors()) return INSPECTION_TABLE_COLUMNS_;
+      return INSPECTION_TABLE_COLUMNS_.filter(function(c) { return c.key !== 'inspectors'; });
+    }
+
     let inspectionHandoverRoundOptions_ = null;
 
     function applyInspectionPack(pack, opts) {
@@ -5791,7 +5810,7 @@
       }
       const shouldUpdate = !!(pack.synced || !(inspectionData && inspectionData.length));
       if (shouldUpdate && pack.plans) {
-        inspectionData = mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(pack.plans || []));
+        inspectionData = scrubCompanyHiddenInspectionFields_(mergeIncomingInspectionPlans_(mergePreservedHandoverRounds_(pack.plans || [])));
         indexInspectionData_(inspectionData);
         _inspMapLocCache_ = {};
         writeCachedInspections_(inspectionData);
@@ -6208,6 +6227,7 @@
     function renderInspectionDetailsHtml_(p) {
       let rows = '';
       INSPECTION_FIELD_LABELS_.forEach(function(pair) {
+        if (pair[0] === 'inspectors' && !canViewInspectors()) return;
         const val = p[pair[0]];
         if (val == null || val === '') return;
         rows += '<div class="inspection-card-meta"><span class="meta-label">' + escHtml(pair[1]) + ':</span> ' + escHtml(String(val)) + '</div>';
@@ -6636,8 +6656,8 @@
     }
 
     function matchesInspectionColumnFilters_(p) {
-      for (let i = 0; i < INSPECTION_TABLE_COLUMNS_.length; i++) {
-        const col = INSPECTION_TABLE_COLUMNS_[i];
+      for (let i = 0; i < getInspectionTableColumns_().length; i++) {
+        const col = getInspectionTableColumns_()[i];
         const f = (inspectionColumnFilters[col.key] || '').trim();
         if (!f) continue;
         const raw = inspectionCellFilterValue_(p, col);
@@ -7211,8 +7231,9 @@
       const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
       const regionFilter = getInspectionRegionFilter_();
       const sorted = [...filteredInspectionData].sort(compareInspectionPlans_);
+      const inspCols = getInspectionTableColumns_();
       let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
-      INSPECTION_TABLE_COLUMNS_.forEach(function(col) { html += renderInspectionHeaderCell_(col); });
+      inspCols.forEach(function(col) { html += renderInspectionHeaderCell_(col); });
       const hasColFilters = Object.keys(inspectionColumnFilters).length > 0;
       html += '<th class="text-center" style="min-width:48px;">' +
         (hasColFilters ? '<button type="button" class="btn btn-link btn-sm p-0" style="color:rgba(255,255,255,0.75);" onclick="clearInspectionColumnFilters()" title="ล้างตัวกรองคอลัมน์"><i class="fa-solid fa-filter-circle-xmark"></i></button>' : '') +
@@ -7222,14 +7243,14 @@
         const reg = (p.region || 'NC').toUpperCase();
         if (!regionFilter && reg !== lastRegion) {
           lastRegion = reg;
-          html += '<tr class="inspection-region-divider"><td colspan="' + (INSPECTION_TABLE_COLUMNS_.length + 1) + '"><i class="fa-solid fa-layer-group me-2"></i>' + escHtml(REGION_LABELS_[reg] || reg) + '</td></tr>';
+          html += '<tr class="inspection-region-divider"><td colspan="' + (inspCols.length + 1) + '"><i class="fa-solid fa-layer-group me-2"></i>' + escHtml(REGION_LABELS_[reg] || reg) + '</td></tr>';
         }
         const safeId = String(p.id).replace(/'/g, "\\'");
         const editBtn = canEditInspection()
           ? '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="editInspection(\'' + safeId + '\')" title="แก้ไขทั้งหมด"><i class="fa-solid fa-pen"></i></button>'
           : '';
         html += '<tr' + (p.visited ? ' style="opacity:0.85"' : '') + '>';
-        INSPECTION_TABLE_COLUMNS_.forEach(function(col) {
+        inspCols.forEach(function(col) {
           const tdCls = (col.cls ? col.cls + ' ' : '') + (col.editable ? 'insp-edit-cell ' : '') + (col.type === 'fileComment' ? 'insp-file-cell ' : '') + (col.type === 'visited' ? 'text-center ' : '');
           html += '<td class="' + tdCls.trim() + '">' + renderInspectionTableCell_(p, col) + '</td>';
         });
@@ -8043,12 +8064,15 @@
           '<i class="fa-brands fa-google"></i> นำทางจุดนี้</button>';
       }
       const canEdit = canEditInspection();
+      const showInspectors = canViewInspectors();
       const scheduleHtml = canEdit
         ? inspectionInlineDateInput_(latest, 'inspectSchedule', 'เช่น 15 มกราคม 2568')
         : ('<div class="small">' + escHtml(formatInspectionHandoverDate_(latest.inspectSchedule, false) || latest.inspectSchedule || '-') + '</div>');
-      const inspectorsHtml = canEdit
-        ? inspectionInlineInput_(latest, 'inspectors', 'ชื่อผู้เข้าตรวจ...', true)
-        : ('<div class="small">' + escHtml(latest.inspectors || '-') + '</div>');
+      const inspectorsHtml = showInspectors
+        ? (canEdit
+          ? inspectionInlineInput_(latest, 'inspectors', 'ชื่อผู้เข้าตรวจ...', true)
+          : ('<div class="small">' + escHtml(latest.inspectors || '-') + '</div>'))
+        : '';
       const noteOnly = parseInspectionFileCommentEntries_(latest.fileComment)
         .filter(function(e) { return !e.url; })
         .map(function(e) { return e.name; })
@@ -8069,7 +8093,7 @@
         (latest.region ? ' · ' + escHtml(latest.region) : '') + '</div>' +
         (function() {
           const sch = formatInspectionHandoverDate_(latest.inspectSchedule, false) || String(latest.inspectSchedule || '').trim();
-          const peo = String(latest.inspectors || '').replace(/\s+/g, ' ').trim();
+          const peo = showInspectors ? String(latest.inspectors || '').replace(/\s+/g, ' ').trim() : '';
           let bits = '';
           if (sch) bits += '<div class="small mb-1 text-primary"><i class="fa-solid fa-calendar-check me-1"></i><b>กำหนดตรวจ:</b> ' + escHtml(sch) + '</div>';
           if (peo) bits += '<div class="small mb-1 text-primary"><i class="fa-solid fa-users me-1"></i><b>ผู้เข้าตรวจ:</b> ' + escHtml(peo) + '</div>';
@@ -8083,10 +8107,12 @@
           '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-calendar-check me-1"></i>กำหนดตรวจงาน</div>' +
           scheduleHtml +
         '</div>' +
-        '<div class="border-top pt-2 mt-2">' +
-          '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-users me-1"></i>รายชื่อคนเข้าตรวจ</div>' +
-          inspectorsHtml +
-        '</div>' +
+        (showInspectors
+          ? ('<div class="border-top pt-2 mt-2">' +
+            '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-users me-1"></i>รายชื่อคนเข้าตรวจ</div>' +
+            inspectorsHtml +
+          '</div>')
+          : '') +
         '<div class="border-top pt-2 mt-2">' +
           '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-file-pdf me-1"></i>File comment</div>' +
           fileHtml + noteHtml +

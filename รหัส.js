@@ -383,6 +383,8 @@ function redactSheetFieldsInRow_(row) {
   if (o.sourceUrl) o.sourceUrl = '';
   if (isGoogleSheetUrlServer_(o.fileUrl)) o.fileUrl = '';
   if (o.sourceTitle) o.sourceTitle = '';
+  // ผู้ใช้บริษัทไม่เห็นรายชื่อคนเข้าตรวจ
+  if (o.inspectors != null) o.inspectors = '';
   return o;
 }
 
