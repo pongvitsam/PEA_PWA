@@ -1476,6 +1476,7 @@
     let routeMap, routePlacesLayer, routeMarkersLayer, routeLineLayer, routeMyLocMarker = null;
     let routeMapSelectedIndex_ = -1;
     let routeMapShouldFitPlaces_ = true;
+    let _routeRenderGen_ = 0;
     let inspectionMap = null, inspectionMarkersLayer = null;
     let inspectionMyLocationMarker = null;
     let inspectionTripSortable_ = null;
@@ -3847,9 +3848,58 @@
       }
     }
 
+    function formatRouteDriveTime_(secOrMin, isSeconds) {
+      const timeMin = Math.round(isSeconds ? (Number(secOrMin) / 60) : Number(secOrMin));
+      if (!isFinite(timeMin) || timeMin < 0) return '-';
+      const timeHr = Math.floor(timeMin / 60);
+      const minRemain = timeMin % 60;
+      if (timeHr > 0) return timeHr + ' ชม. ' + minRemain + ' นาที';
+      return timeMin + ' นาที';
+    }
+
+    function buildRouteLegLinesHtml_(legs, points) {
+      if (!legs || !legs.length || !points || points.length < 2) return '';
+      return '<div class="mt-2">' + legs.map(function(leg, i) {
+        const km = (leg.distance / 1000).toFixed(1);
+        const timeStr = formatRouteDriveTime_(leg.duration, true);
+        const from = points[i] ? (points[i].name || ('จุด ' + (i + 1))) : ('จุด ' + (i + 1));
+        const to = points[i + 1] ? (points[i + 1].name || ('จุด ' + (i + 2))) : ('จุด ' + (i + 2));
+        return '<div class="text-muted" style="font-size:0.78rem;line-height:1.4">' +
+          '<span class="badge rounded-pill text-bg-light border me-1">' + (i + 1) + '→' + (i + 2) + '</span>' +
+          escapeHtml(from) + ' → ' + escapeHtml(to) +
+          ': <b>' + km + ' กม.</b> · ~' + timeStr +
+          '</div>';
+      }).join('') + '</div>';
+    }
+
+    function applyRouteLegHintsToList_(legs, routablePoints) {
+      if (!legs || !legs.length) return;
+      const list = document.getElementById('routeList');
+      if (!list) return;
+      const items = list.querySelectorAll('.route-item');
+      // Map routable index → selectedRoute index
+      const routeIdxByRoutable = [];
+      selectedRoute.forEach(function(loc, idx) {
+        if (loc.lat != null && loc.lng != null && !isNaN(loc.lat) && !isNaN(loc.lng) && !loc.isCustomText) {
+          routeIdxByRoutable.push(idx);
+        }
+      });
+      legs.forEach(function(leg, i) {
+        const toRouteIdx = routeIdxByRoutable[i + 1];
+        if (toRouteIdx == null || !items[toRouteIdx]) return;
+        const km = (leg.distance / 1000).toFixed(1);
+        const timeStr = formatRouteDriveTime_(leg.duration, true);
+        const el = items[toRouteIdx].querySelector('.route-leg-stat');
+        if (el) {
+          el.innerHTML = '<i class="fa-solid fa-car"></i> ' + km + ' กม. · <i class="fa-regular fa-clock"></i> ~' + timeStr;
+        }
+      });
+    }
+
     async function renderRoute() {
       let list = document.getElementById('routeList');
       let detailsDiv = document.getElementById('routeDetails');
+      const gen = ++_routeRenderGen_;
       
       if (selectedRoute.length === 0) {
         list.innerHTML = '<p class="text-muted small mb-0">ยังไม่มีจุดในเส้นทาง — คลิกหมุดแล้วกด「เพิ่มในเส้นทาง」</p>';
@@ -3872,7 +3922,9 @@
         let bgClass = (loc.isMyLocation || loc.isCustomText) ? 'bg-info text-white border-info' : 'bg-light';
         let legHint = '';
         if (idx > 0) {
-          legHint = '<small class="d-block ' + ((loc.isMyLocation||loc.isCustomText)?'text-white-50':'text-primary') + '"><i class="fa-solid fa-arrow-right"></i> จาก: ' + escapeHtml(selectedRoute[idx - 1].name || '-') + '</small>';
+          const muted = (loc.isMyLocation || loc.isCustomText) ? 'text-white-50' : 'text-primary';
+          legHint = '<small class="d-block ' + muted + '"><i class="fa-solid fa-arrow-right"></i> จาก: ' + escapeHtml(selectedRoute[idx - 1].name || '-') + '</small>' +
+            '<small class="d-block route-leg-stat ' + muted + '" style="font-size:0.75rem"></small>';
         }
         list.innerHTML += 
           '<div class="route-item position-relative ' + bgClass + '" draggable="true" ' +
@@ -3895,40 +3947,45 @@
       let hasCustomText = selectedRoute.some(r => r.isCustomText);
 
       if (routablePoints.length > 1 && !hasCustomText) {
-        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณเส้นทาง...</small></div>';
+        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณระยะ/เวลาระหว่างจุด...</small></div>';
         let coords = routablePoints.map(l => l.lng + "," + l.lat).join(';');
         try {
           let res = await fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=full&geometries=geojson');
+          if (gen !== _routeRenderGen_) return;
           let data = await res.json();
+          if (gen !== _routeRenderGen_) return;
           if (data.code === 'Ok') {
-            routeGeometry = data.routes[0].geometry;
-            let distKm = (data.routes[0].distance / 1000).toFixed(1);
-            let timeMin = Math.round(data.routes[0].duration / 60);
-            let timeHr = Math.floor(timeMin / 60);
-            let minRemain = timeMin % 60;
-            let timeStr = timeHr > 0 ? timeHr + ' ชม. ' + minRemain + ' นาที' : timeMin + ' นาที';
+            const route = data.routes[0];
+            routeGeometry = route.geometry;
+            let distKm = (route.distance / 1000).toFixed(1);
+            let timeStr = formatRouteDriveTime_(route.duration, true);
+            const legsHtml = buildRouteLegLinesHtml_(route.legs, routablePoints);
             detailsDiv.innerHTML = 
               '<div class="route-summary">' +
-                '<div class="fw-bold mb-1"><i class="fa-solid fa-stopwatch text-primary"></i> ข้อมูลเส้นทางรวมทุกจุด (เรียงตามลำดับ)</div>' +
-                'ระยะทางขับรถ: <b>' + distKm + ' กม.</b> <br>' +
-                'เวลาเดินทางโดยประมาณ: <b>' + timeStr + '</b>' +
+                '<div class="fw-bold mb-1"><i class="fa-solid fa-stopwatch text-primary"></i> สรุปเส้นทาง (เรียงตามลำดับ)</div>' +
+                'รวมระยะทาง: <b>' + distKm + ' กม.</b><br>' +
+                'รวมเวลาโดยประมาณ: <b>' + timeStr + '</b>' +
+                legsHtml +
               '</div>';
+            applyRouteLegHintsToList_(route.legs, routablePoints);
           } else {
             detailsDiv.innerHTML = '<small class="text-danger">ไม่สามารถคำนวณเส้นทางได้ — แสดงเส้นตรงบนแผนที่</small>';
           }
         } catch (e) {
+          if (gen !== _routeRenderGen_) return;
           detailsDiv.innerHTML = '<small class="text-warning">คำนวณระยะทางขัดข้อง (ยังสามารถกดนำทางผ่าน Maps ได้ปกติ)</small>';
         }
       } else {
         if (hasCustomText && routablePoints.length > 0) {
           detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> จุดที่พิมพ์เองไม่มีพิกัด — แสดงเฉพาะจุดที่มีพิกัดบนแผนที่</small>';
         } else if (routablePoints.length === 1) {
-          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> เพิ่มจุดถัดไปเพื่อดูเส้นทาง</small>';
+          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> เพิ่มจุดถัดไปเพื่อดูระยะทางและเวลาระหว่างจุด</small>';
         } else {
           detailsDiv.innerHTML = '';
         }
       }
 
+      if (gen !== _routeRenderGen_) return;
       updateRouteMap(routeGeometry);
     }
 
