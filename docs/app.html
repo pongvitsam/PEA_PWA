@@ -237,36 +237,43 @@
     .insp-map-tip .insp-map-tip-row { margin-top: 0.2rem; }
     .insp-map-tip .insp-map-tip-row i { width: 14px; color: #2563eb; }
     .leaflet-div-icon.insp-map-marker-wrap {
-      background: transparent; border: none;
+      background: transparent !important;
+      border: none !important;
+      width: 30px !important;
+      height: 30px !important;
+      margin-left: -15px !important;
+      margin-top: -15px !important;
     }
     .insp-map-marker {
-      width: 28px; height: 28px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: 50%;
+      display: flex !important; align-items: center; justify-content: center;
       font-weight: 800; font-size: 14px; line-height: 1;
-      border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
-      color: #fff;
+      border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.4);
+      color: #fff !important;
+      box-sizing: border-box;
+    }
+    .insp-map-marker i {
+      color: #fff !important;
+      font-size: 13px;
+      line-height: 1;
+      width: auto;
+      display: block;
     }
     .insp-map-marker.is-done { background: #2563eb; }
-    .insp-map-marker.is-ready { background: #d97706; font-size: 15px; }
-    .insp-map-marker.is-pending {
-      background: #475569; color: transparent;
-      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35), inset 0 0 0 3px #fff;
-    }
-    .insp-map-marker.is-pending::after {
-      content: ''; width: 10px; height: 10px; border-radius: 50%;
-      border: 2.5px solid #fff; box-sizing: border-box;
-    }
+    .insp-map-marker.is-ready { background: #d97706; }
+    .insp-map-marker.is-ready i { font-size: 15px; font-weight: 900; }
+    .insp-map-marker.is-pending { background: #475569; }
+    .insp-map-marker.is-pending i { font-size: 12px; }
     #inspectionMapLegend .insp-lg-swatch {
       display: inline-flex; align-items: center; justify-content: center;
       width: 18px; height: 18px; border-radius: 50%; color: #fff;
-      font-size: 11px; font-weight: 800; vertical-align: -3px; margin-right: 0.25rem;
+      font-size: 10px; font-weight: 800; vertical-align: -3px; margin-right: 0.25rem;
       border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(15,23,42,.15);
     }
+    #inspectionMapLegend .insp-lg-swatch i { color: #fff; font-size: 9px; line-height: 1; }
     #inspectionMapLegend .insp-lg-swatch.is-done { background: #2563eb; }
     #inspectionMapLegend .insp-lg-swatch.is-ready { background: #d97706; }
-    #inspectionMapLegend .insp-lg-swatch.is-pending {
-      background: #475569; box-shadow: 0 0 0 1px rgba(15,23,42,.15), inset 0 0 0 2px #fff;
-    }
+    #inspectionMapLegend .insp-lg-swatch.is-pending { background: #475569; }
     .inspection-form-template-banner {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
       padding: 0.85rem 1rem; border-radius: 14px;
@@ -956,9 +963,9 @@
           </div>
           <div class="col-12">
             <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
-              <span><span class="insp-lg-swatch is-done" aria-hidden="true">✓</span> ตรวจแล้ว</span>
-              <span><span class="insp-lg-swatch is-ready" aria-hidden="true">!</span> พร้อมเข้าตรวจ</span>
-              <span><span class="insp-lg-swatch is-pending" aria-hidden="true"></span> ยังไม่พร้อม</span>
+              <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> ตรวจแล้ว</span>
+              <span><span class="insp-lg-swatch is-ready" aria-hidden="true"><i class="fa-solid fa-exclamation"></i></span> พร้อมเข้าตรวจ</span>
+              <span><span class="insp-lg-swatch is-pending" aria-hidden="true"><i class="fa-regular fa-circle"></i></span> ยังไม่พร้อม</span>
               <span><i class="fa-solid fa-circle" style="color:#0ea5e9"></i> ตำแหน่งของฉัน</span>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
@@ -2229,14 +2236,18 @@
 
     function getInspectionMapIcon_(p) {
       const key = getInspectionMapStatusKey_(p);
-      const symbol = key === 'done' ? '✓' : (key === 'ready' ? '!' : '');
+      const symbol = key === 'done'
+        ? '<i class="fa-solid fa-check" aria-hidden="true"></i>'
+        : (key === 'ready'
+          ? '<i class="fa-solid fa-exclamation" aria-hidden="true"></i>'
+          : '<i class="fa-regular fa-circle" aria-hidden="true"></i>');
       const label = key === 'done' ? 'ตรวจแล้ว' : (key === 'ready' ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม');
       return L.divIcon({
         className: 'insp-map-marker-wrap',
         html: '<div class="insp-map-marker is-' + key + '" title="' + label + '" aria-label="' + label + '">' + symbol + '</div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-        popupAnchor: [0, -14]
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -15]
       });
     }
 
