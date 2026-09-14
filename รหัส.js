@@ -931,10 +931,28 @@ function parseThaiDate_(raw) {
   }
   const s = cellStr_(raw);
   if (!s) return null;
+
+  // รูปแบบตัวเลขในชีท เช่น 16/9/2569, 05/08/2569, 6/7/69 — ตีความเป็น วัน/เดือน/ปี (ไม่ใช้ new Date ที่เป็น MM/DD)
+  const slash = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s|$|,)/);
+  if (slash) {
+    const day = parseInt(slash[1], 10);
+    const month = parseInt(slash[2], 10) - 1;
+    let year = parseInt(slash[3], 10);
+    if (year < 100) year += 2500;
+    if (year > 2400) year -= 543;
+    const dt = new Date(year, month, day);
+    if (!isNaN(dt.getTime()) && dt.getDate() === day && dt.getMonth() === month) return dt;
+    return null;
+  }
+
   const m = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
   if (!m) {
     const d = new Date(s);
-    if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (!isNaN(d.getTime())) {
+      let y = d.getFullYear();
+      if (y > 2400) y -= 543;
+      return new Date(y, d.getMonth(), d.getDate());
+    }
     return null;
   }
   const day = parseInt(m[1], 10);
@@ -1257,7 +1275,7 @@ function collectSourceOutageRows_() {
 function debugOutageSourceSheets_() {
   const srcSs = getOutageSourceSs_();
   const sheets = srcSs.getSheets();
-  const findNames = ['ชัยบาดาล', 'บ้านหมี่', 'ลพบุรี', 'กุดตาเพชร', 'เกาะขนุน', 'บ้านบอน'];
+  const findNames = ['ชัยบาดาล', 'บ้านหมี่', 'ลพบุรี', 'กุดตาเพชร', 'เกาะขนุน', 'บ้านบอน', 'มาบข่า', 'บ้านฉาง', 'ประแสร์'];
   const found = {};
   findNames.forEach(function(n) { found[n] = []; });
 
