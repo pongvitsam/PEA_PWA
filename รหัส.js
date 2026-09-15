@@ -545,16 +545,19 @@ const LOCATIONS_CACHE_TTL = 180; // 3 นาที — มือถือได�
 
 function cachePutChunks_(baseKey, json, ttl) {
   const cache = CacheService.getScriptCache();
+  // ใช้ชิ้นเล็กกว่า 100KB — putAll รวมทุกค่าได้ไม่เกิน 100KB จึงต้อง put ทีละคีย์
   const size = 90000;
   const n = Math.ceil(json.length / size);
   if (n < 1 || n > 25) return false;
-  const payload = {};
-  payload[baseKey + '_n'] = String(n);
-  for (let i = 0; i < n; i++) {
-    payload[baseKey + '_' + i] = json.substring(i * size, (i + 1) * size);
+  try {
+    cache.put(baseKey + '_n', String(n), ttl);
+    for (let i = 0; i < n; i++) {
+      cache.put(baseKey + '_' + i, json.substring(i * size, (i + 1) * size), ttl);
+    }
+    return true;
+  } catch (e) {
+    return false;
   }
-  cache.putAll(payload, ttl);
-  return true;
 }
 
 function cacheGetChunks_(baseKey) {
@@ -2245,31 +2248,38 @@ function readInspectionsMapped_(sheet, opts) {
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const fileCommentCol = 13; // FileComment (1-based)
   const recoverDrive = !!(opts && opts.recoverDrive);
+  const fastList = !(opts && opts.fullFileComments);
   let richComments = null;
   let formulas = null;
-  try {
-    richComments = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getRichTextValues();
-  } catch (ignore) {}
-  try {
-    formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
-  } catch (ignore) {}
+  if (!fastList) {
+    try {
+      richComments = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getRichTextValues();
+    } catch (ignore) {}
+    try {
+      formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
+    } catch (ignore) {}
+  }
   const out = [];
   const enrichOpts = recoverDrive ? { recoverDrive: true } : { recoverDrive: false };
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     if (!row[3]) continue;
     const mapped = mapInspectionRow_(row);
-    const sheetRow = i + 2;
     let comment = mapped.fileComment;
-    try {
-      if (formulas && formulas[i] && formulas[i][0]) {
-        comment = inspectionFileCommentFromFormula_(formulas[i][0], comment);
+    if (!fastList) {
+      const sheetRow = i + 2;
+      try {
+        if (formulas && formulas[i] && formulas[i][0]) {
+          comment = inspectionFileCommentFromFormula_(formulas[i][0], comment);
+        }
+        if (richComments && richComments[i] && richComments[i][0]) {
+          comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
+        }
+        comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol, enrichOpts);
+      } catch (ignore) {
+        comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
       }
-      if (richComments && richComments[i] && richComments[i][0]) {
-        comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
-      }
-      comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol, enrichOpts);
-    } catch (ignore) {
+    } else {
       comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
     }
     mapped.fileComment = comment;
