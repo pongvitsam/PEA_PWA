@@ -3900,10 +3900,12 @@
       const provinceLine = loc.province
         ? '<div class="small text-muted mb-2"><i class="fa-solid fa-map-location-dot me-1"></i>จ.' + escHtml(loc.province) + '</div>'
         : '';
+      const inspectorsLine = inspectorsDetailHtml_(collectInspectorsForLocation_(loc), { className: 'small mb-2' });
 
       return '' +
         '<h5 class="fw-bold" style="color:#2563eb;">' + escHtml(loc.name || 'ไม่มีชื่อ') + '</h5>' +
         provinceLine +
+        inspectorsLine +
         '<div class="badge bg-secondary mb-3">เฟส ' + escHtml(loc.phase || '-') + '</div>' +
         '<div class="badge bg-info text-dark mb-3 ms-1">ลำดับ ' + escHtml(loc.seq || '-') + '</div>' +
         '<div class="info-card">' +
@@ -4280,6 +4282,7 @@
       let html = '<div class="fw-bold mb-1">' + escHtml(loc.name || '-') + '</div>';
       html += '<div class="small text-muted mb-2">เฟส ' + escHtml(String(loc.phase || '-')) +
         (loc.province ? ' · จ.' + escHtml(loc.province) : '') + '</div>';
+      html += inspectorsDetailHtml_(collectInspectorsForLocation_(loc), { hideIfEmpty: true, className: 'small mb-2' });
       if (loc.peaRegion) html += '<div class="small mb-1"><b>กฟภ.</b> ' + escHtml(loc.peaRegion) + '</div>';
       if (loc.pwaRegion) html += '<div class="small mb-1"><b>กปภ.</b> ' + escHtml(loc.pwaRegion) + '</div>';
       if (hasCoords) {
@@ -5352,11 +5355,16 @@
     }
 
     function findInspectionPlansForLocation_(loc) {
-      if (!loc || !inspectionData || !inspectionData.length) return [];
+      if (!loc) return [];
+      let plans = inspectionData;
+      if (!plans || !plans.length) {
+        try { plans = readCachedInspections_() || []; } catch (e) { plans = []; }
+      }
+      if (!plans || !plans.length) return [];
       const qName = normalizeNameForMatch(loc.name);
       const qLabel = normalizeNameForMatch(getLocLabel(loc));
       if (!qName && !qLabel) return [];
-      return inspectionData.filter(function(p) {
+      return plans.filter(function(p) {
         const place = normalizeNameForMatch(p.place);
         if (!place) return false;
         if (place === qName || place === qLabel) return true;
@@ -5364,6 +5372,33 @@
         if (qLabel && (place.includes(qLabel) || qLabel.includes(place))) return true;
         return false;
       });
+    }
+
+    /** รวมชื่อคนตรวจจากแผนตรวจรับที่ผูกกับสถานที่ (ซ่อนผู้ใช้บริษัท) */
+    function collectInspectorsForLocation_(loc, preferredPlan) {
+      if (!canViewInspectors()) return '';
+      const names = [];
+      const seen = {};
+      function pushName_(raw) {
+        const s = String(raw || '').replace(/\s+/g, ' ').trim();
+        if (!s || seen[s]) return;
+        seen[s] = true;
+        names.push(s);
+      }
+      if (preferredPlan) pushName_(preferredPlan.inspectors);
+      findInspectionPlansForLocation_(loc).forEach(function(p) { pushName_(p.inspectors); });
+      return names.join(' · ');
+    }
+
+    function inspectorsDetailHtml_(inspectorsText, opts) {
+      if (!canViewInspectors()) return '';
+      opts = opts || {};
+      const text = String(inspectorsText || '').replace(/\s+/g, ' ').trim();
+      if (!text && opts.hideIfEmpty) return '';
+      const label = opts.label || 'คนตรวจ';
+      const cls = opts.className || 'small mb-1';
+      return '<div class="' + cls + '"><i class="fa-solid fa-user-check me-1 text-primary"></i><b>' +
+        escHtml(label) + ':</b> ' + escHtml(text || '-') + '</div>';
     }
 
     function getMapInspectionFileEntries_(loc) {
@@ -7794,7 +7829,9 @@
         : '';
       Swal.fire({
         title: info.name,
-        html: renderOutageLocReadonly(loc) + distBlock + navBtn + mapBtn,
+        html: renderOutageLocReadonly(loc) +
+          inspectorsDetailHtml_(collectInspectorsForLocation_(loc, p), { className: 'small text-start mt-2 mb-0' }) +
+          distBlock + navBtn + mapBtn,
         width: 620,
         confirmButtonColor: '#2563eb',
         confirmButtonText: 'ปิด',
@@ -8415,10 +8452,11 @@
         (latest.region ? ' · ' + escHtml(latest.region) : '') + '</div>' +
         (function() {
           const sch = formatInspectionHandoverDate_(latest.inspectSchedule, false) || String(latest.inspectSchedule || '').trim();
-          const peo = showInspectors ? String(latest.inspectors || '').replace(/\s+/g, ' ').trim() : '';
           let bits = '';
           if (sch) bits += '<div class="small mb-1 text-primary"><i class="fa-solid fa-calendar-check me-1"></i><b>กำหนดตรวจ:</b> ' + escHtml(sch) + '</div>';
-          if (peo) bits += '<div class="small mb-1 text-primary"><i class="fa-solid fa-users me-1"></i><b>ผู้เข้าตรวจ:</b> ' + escHtml(peo) + '</div>';
+          if (showInspectors) {
+            bits += inspectorsDetailHtml_(latest.inspectors, { className: 'small mb-1' });
+          }
           return bits;
         })() +
         '<div class="small mb-1"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
@@ -8431,7 +8469,7 @@
         '</div>' +
         (showInspectors
           ? ('<div class="border-top pt-2 mt-2">' +
-            '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-users me-1"></i>รายชื่อคนเข้าตรวจ</div>' +
+            '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-user-check me-1"></i>คนตรวจ</div>' +
             inspectorsHtml +
           '</div>')
           : '') +
