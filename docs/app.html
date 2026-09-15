@@ -437,10 +437,30 @@
       background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(12px);
       box-shadow: 0 1px 0 rgba(37, 99, 235, 0.08), 0 8px 24px rgba(37, 99, 235, 0.06);
       border-bottom: 1px solid var(--pwa-border);
-      padding-top: max(0.35rem, env(safe-area-inset-top));
+      /* อย่าใช้ py-* ของ Bootstrap — !important จะทับ safe-area แล้วเมนูซ้อนใต้ status bar iOS */
+      padding-top: calc(0.5rem + constant(safe-area-inset-top)) !important;
+      padding-top: calc(0.5rem + env(safe-area-inset-top, 0px)) !important;
+      padding-bottom: 0.5rem !important;
     }
     html.pea-standalone body { overscroll-behavior-y: none; }
-    html.pea-standalone .navbar-custom { padding-top: max(0.5rem, env(safe-area-inset-top)); }
+    .navbar-custom .navbar-toggler {
+      min-width: 44px; min-height: 44px;
+      padding: 0.4rem 0.6rem;
+      border-color: rgba(37, 99, 235, 0.35);
+      align-self: center;
+      z-index: 2;
+    }
+    .navbar-custom .container-fluid {
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .navbar-custom .navbar-brand {
+      min-width: 0;
+      flex: 1 1 auto;
+      padding-top: 0.15rem;
+      padding-bottom: 0.15rem;
+    }
     .pea-ios-install {
       display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1040;
       margin: 0; width: 100%;
@@ -581,13 +601,13 @@
 </head>
 <body>
 
-  <nav class="navbar navbar-expand-lg navbar-custom sticky-top py-2 mb-3">
-    <div class="container-fluid px-4">
+  <nav class="navbar navbar-expand-lg navbar-custom sticky-top mb-3">
+    <div class="container-fluid px-3 px-lg-4">
       <a class="navbar-brand lh-1" style="color: #2563eb;">
         <span class="fw-bold fs-4"><i class="fa-solid fa-bolt"></i> PWA Project</span><br>
         <small class="text-muted fw-normal" style="font-size: 0.75rem;">Organized by Sammy สุดหล่อ</small>
       </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="เปิดเมนู">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
@@ -1509,7 +1529,7 @@
   
     <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=22"></script>
+  <script src="js/pwa-gas-api.js?v=23"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
