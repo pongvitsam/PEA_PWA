@@ -1517,7 +1517,7 @@
     let routeMapSelectedIndex_ = -1;
     let routeMapShouldFitPlaces_ = true;
     let _routeRenderGen_ = 0;
-    let inspectionMap = null, inspectionMarkersLayer = null;
+    let inspectionMap = null, inspectionMarkersLayer = null, inspectionTripLineLayer = null;
     let inspectionMyLocationMarker = null;
     let inspectionTripSortable_ = null;
     let _inspTripRouteGen_ = 0;
@@ -3794,16 +3794,8 @@
         if (user.fromCache) {
           resultBox.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span> กำลังคำนวณเส้นทางถนน...';
         }
-        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        var t = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, 18000) : null;
-        var fetchOpts = ctrl ? { signal: ctrl.signal } : {};
-        return fetch(
-          'https://router.project-osrm.org/route/v1/driving/' + user.lng + ',' + user.lat + ';' + destLng + ',' + destLat + '?overview=false',
-          fetchOpts
-        ).then(function(res) {
-          if (t) clearTimeout(t);
-          return res.json();
-        }).then(function(data) {
+        return fetchOsrmDriving_(user.lng + ',' + user.lat + ';' + destLng + ',' + destLat, 'overview=false')
+        .then(function(data) {
           if (data.code === 'Ok' && data.routes && data.routes[0]) {
             var distKm = (data.routes[0].distance / 1000).toFixed(1);
             var timeMin = Math.round(data.routes[0].duration / 60);
@@ -3819,7 +3811,6 @@
               '<i class="fa-solid fa-ruler"></i> ระยะเส้นตรงประมาณ: <b>' + straight + ' กม.</b></div>';
           }
         }).catch(function() {
-          if (t) clearTimeout(t);
           try {
             var straight = haversineKm_(user.lat, user.lng, destLat, destLng).toFixed(1);
             resultBox.innerHTML = '<div class="alert alert-warning py-2 mb-0"><span class="text-muted">เซิร์ฟเวอร์เส้นทางตอบช้าหรือไม่พร้อม</span><br>' +
@@ -4057,6 +4048,38 @@
       return timeMin + ' นาที';
     }
 
+    function isRoutablePoint_(l) {
+      if (!l || l.isCustomText) return false;
+      const lat = Number(l.lat);
+      const lng = Number(l.lng);
+      return isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    }
+
+    /** OSRM สาธารณะอาจล่ม — ลองหลายโฮสต์ */
+    const OSRM_ROUTE_BASES_ = [
+      'https://router.project-osrm.org/route/v1/driving/',
+      'https://routing.openstreetmap.de/routed-car/route/v1/driving/'
+    ];
+
+    function fetchOsrmDriving_(coordsQuery, querySuffix) {
+      const suffix = querySuffix || 'overview=full&geometries=geojson';
+      let i = 0;
+      function tryNext() {
+        if (i >= OSRM_ROUTE_BASES_.length) {
+          return Promise.reject(new Error('OSRM unavailable'));
+        }
+        const url = OSRM_ROUTE_BASES_[i++] + coordsQuery + '?' + suffix;
+        return fetch(url).then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        }).then(function(data) {
+          if (!data || data.code !== 'Ok' || !data.routes || !data.routes[0]) throw new Error('no route');
+          return data;
+        }).catch(function() { return tryNext(); });
+      }
+      return tryNext();
+    }
+
     function buildRouteLegLinesHtml_(legs, points) {
       if (!legs || !legs.length || !points || points.length < 2) return '';
       return '<div class="mt-2">' + legs.map(function(leg, i) {
@@ -4080,9 +4103,7 @@
       // Map routable index → selectedRoute index
       const routeIdxByRoutable = [];
       selectedRoute.forEach(function(loc, idx) {
-        if (loc.lat != null && loc.lng != null && !isNaN(loc.lat) && !isNaN(loc.lng) && !loc.isCustomText) {
-          routeIdxByRoutable.push(idx);
-        }
+        if (isRoutablePoint_(loc)) routeIdxByRoutable.push(idx);
       });
       legs.forEach(function(leg, i) {
         const toRouteIdx = routeIdxByRoutable[i + 1];
@@ -4140,46 +4161,44 @@
           '</div>';
       });
 
-      const routablePoints = selectedRoute.filter(function (l) {
-        return l.lat != null && l.lng != null && !isNaN(l.lat) && !isNaN(l.lng) && !l.isCustomText;
-      });
+      const routablePoints = selectedRoute.filter(isRoutablePoint_);
       let routeGeometry = null;
       let hasCustomText = selectedRoute.some(r => r.isCustomText);
 
+      // วาดเส้นตรงชั่วคราวทันที แล้วค่อยแทนด้วยเส้นถนน
+      if (routablePoints.length > 1) {
+        updateRouteMap(null, { previewStraight: true });
+      }
+
       if (routablePoints.length > 1 && !hasCustomText) {
-        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณระยะ/เวลาระหว่างจุด...</small></div>';
-        let coords = routablePoints.map(l => l.lng + "," + l.lat).join(';');
+        detailsDiv.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div> <small>กำลังคำนวณเส้นทางถนนระหว่างจุด...</small></div>';
+        let coords = routablePoints.map(l => Number(l.lng) + "," + Number(l.lat)).join(';');
         try {
-          let res = await fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=full&geometries=geojson');
+          let data = await fetchOsrmDriving_(coords, 'overview=full&geometries=geojson');
           if (gen !== _routeRenderGen_) return;
-          let data = await res.json();
-          if (gen !== _routeRenderGen_) return;
-          if (data.code === 'Ok') {
-            const route = data.routes[0];
-            routeGeometry = route.geometry;
-            let distKm = (route.distance / 1000).toFixed(1);
-            let timeStr = formatRouteDriveTime_(route.duration, true);
-            const legsHtml = buildRouteLegLinesHtml_(route.legs, routablePoints);
-            detailsDiv.innerHTML = 
-              '<div class="route-summary">' +
-                '<div class="fw-bold mb-1"><i class="fa-solid fa-stopwatch text-primary"></i> สรุปเส้นทาง (เรียงตามลำดับ)</div>' +
-                'รวมระยะทาง: <b>' + distKm + ' กม.</b><br>' +
-                'รวมเวลาโดยประมาณ: <b>' + timeStr + '</b>' +
-                legsHtml +
-              '</div>';
-            applyRouteLegHintsToList_(route.legs, routablePoints);
-          } else {
-            detailsDiv.innerHTML = '<small class="text-danger">ไม่สามารถคำนวณเส้นทางได้ — แสดงเส้นตรงบนแผนที่</small>';
-          }
+          const route = data.routes[0];
+          routeGeometry = route.geometry;
+          let distKm = (route.distance / 1000).toFixed(1);
+          let timeStr = formatRouteDriveTime_(route.duration, true);
+          const legsHtml = buildRouteLegLinesHtml_(route.legs, routablePoints);
+          detailsDiv.innerHTML =
+            '<div class="route-summary">' +
+              '<div class="fw-bold mb-1"><i class="fa-solid fa-stopwatch text-primary"></i> สรุปเส้นทาง (เรียงตามลำดับ)</div>' +
+              'รวมระยะทาง: <b>' + distKm + ' กม.</b><br>' +
+              'รวมเวลาโดยประมาณ: <b>' + timeStr + '</b>' +
+              legsHtml +
+            '</div>';
+          applyRouteLegHintsToList_(route.legs, routablePoints);
         } catch (e) {
           if (gen !== _routeRenderGen_) return;
-          detailsDiv.innerHTML = '<small class="text-warning">คำนวณระยะทางขัดข้อง (ยังสามารถกดนำทางผ่าน Maps ได้ปกติ)</small>';
+          detailsDiv.innerHTML = '<small class="text-warning">คำนวณเส้นถนนไม่สำเร็จ — แสดงเส้นตรงระหว่างจุด (ยังกดนำทาง Maps ได้)</small>';
+          routeGeometry = null;
         }
       } else {
         if (hasCustomText && routablePoints.length > 0) {
           detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> จุดที่พิมพ์เองไม่มีพิกัด — แสดงเฉพาะจุดที่มีพิกัดบนแผนที่</small>';
         } else if (routablePoints.length === 1) {
-          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> เพิ่มจุดถัดไปเพื่อดูระยะทางและเวลาระหว่างจุด</small>';
+          detailsDiv.innerHTML = '<small class="text-muted"><i class="fa-solid fa-circle-info"></i> เพิ่มจุดถัดไปเพื่อดูเส้นทางและเวลาระหว่างจุด</small>';
         } else {
           detailsDiv.innerHTML = '';
         }
@@ -4339,9 +4358,19 @@
         keyboard: true
       });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(routeMap);
+      // เส้นทางต้องอยู่เหนือหมุดสถานที่ (marker pane z=600)
+      if (!routeMap.getPane('routeLinePane')) {
+        routeMap.createPane('routeLinePane');
+        routeMap.getPane('routeLinePane').style.zIndex = 650;
+        routeMap.getPane('routeLinePane').style.pointerEvents = 'none';
+      }
+      if (!routeMap.getPane('routeStopPane')) {
+        routeMap.createPane('routeStopPane');
+        routeMap.getPane('routeStopPane').style.zIndex = 660;
+      }
       routePlacesLayer = L.layerGroup().addTo(routeMap);
-      routeMarkersLayer = L.layerGroup().addTo(routeMap);
       routeLineLayer = L.layerGroup().addTo(routeMap);
+      routeMarkersLayer = L.layerGroup().addTo(routeMap);
       if (lastUserGps.lat != null && lastUserGps.lng != null) {
         placeRouteMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
       }
@@ -4424,44 +4453,87 @@
       }
     }
 
-    function updateRouteMap(routeGeometry) {
+    function updateRouteMap(routeGeometry, opts) {
+      opts = opts || {};
       initRouteMapIfNeeded();
-      if (!routeMarkersLayer || !routeLineLayer) return;
+      if (!routeMap || !routeMarkersLayer || !routeLineLayer) return;
+      if (!routeMap.getPane('routeLinePane')) {
+        routeMap.createPane('routeLinePane');
+        routeMap.getPane('routeLinePane').style.zIndex = 650;
+        routeMap.getPane('routeLinePane').style.pointerEvents = 'none';
+      }
+      if (!routeMap.getPane('routeStopPane')) {
+        routeMap.createPane('routeStopPane');
+        routeMap.getPane('routeStopPane').style.zIndex = 660;
+      }
       routeMarkersLayer.clearLayers();
       routeLineLayer.clearLayers();
+
+      const tripActive = selectedRoute.filter(isRoutablePoint_).length >= 2;
+      const keepFitFlag = routeMapShouldFitPlaces_;
+      if (tripActive) routeMapShouldFitPlaces_ = false;
       renderRoutePlacesMap_();
+      routeMapShouldFitPlaces_ = keepFitFlag;
+      if (tripActive && routePlacesLayer) {
+        routePlacesLayer.eachLayer(function(m) {
+          try { if (m.setOpacity) m.setOpacity(0.2); } catch (e) {}
+        });
+      }
 
       var bounds = [];
       selectedRoute.forEach(function (loc, idx) {
-        if (loc.lat == null || loc.lng == null || isNaN(loc.lat) || isNaN(loc.lng) || loc.isCustomText) return;
+        if (!isRoutablePoint_(loc)) return;
+        var lat = Number(loc.lat), lng = Number(loc.lng);
         var isStart = idx === 0;
         var isEnd = idx === selectedRoute.length - 1;
-        var marker = L.marker([loc.lat, loc.lng], { icon: createRouteNumberIcon(idx + 1, isStart, isEnd), zIndexOffset: 600 });
+        var marker = L.marker([lat, lng], {
+          icon: createRouteNumberIcon(idx + 1, isStart, isEnd),
+          zIndexOffset: 800,
+          pane: 'routeStopPane'
+        });
         var popupHtml = '<div class="small">';
         if (isStart) popupHtml += '<b>จุดเริ่มต้น</b><br>';
         else popupHtml += '<b>จุดที่ ' + (idx + 1) + '</b><br>จาก: ' + escapeHtml(selectedRoute[idx - 1].name || '-') + '<br>ถึง: ';
         popupHtml += escapeHtml(loc.name || '-') + '</div>';
         marker.bindPopup(popupHtml);
         routeMarkersLayer.addLayer(marker);
-        bounds.push([loc.lat, loc.lng]);
+        bounds.push([lat, lng]);
       });
 
+      var drewRoad = false;
       if (routeGeometry && routeGeometry.coordinates && routeGeometry.coordinates.length) {
         var latlngs = routeGeometry.coordinates.map(function (c) { return [c[1], c[0]]; });
-        L.polyline(latlngs, { color: '#1c7ed6', weight: 6, opacity: 0.85 }).addTo(routeLineLayer);
-      } else {
-        var linePts = selectedRoute.filter(function (l) {
-          return l.lat != null && l.lng != null && !isNaN(l.lat) && !isNaN(l.lng) && !l.isCustomText;
-        }).map(function (l) { return [l.lat, l.lng]; });
+        L.polyline(latlngs, {
+          color: '#1d4ed8',
+          weight: 6,
+          opacity: 0.95,
+          pane: 'routeLinePane',
+          lineJoin: 'round',
+          lineCap: 'round'
+        }).addTo(routeLineLayer);
+        drewRoad = true;
+      }
+      if (!drewRoad) {
+        var linePts = selectedRoute.filter(isRoutablePoint_).map(function (l) {
+          return [Number(l.lat), Number(l.lng)];
+        });
         if (linePts.length > 1) {
-          L.polyline(linePts, { color: '#868e96', weight: 4, opacity: 0.75, dashArray: '10,8' }).addTo(routeLineLayer);
+          L.polyline(linePts, {
+            color: '#2563eb',
+            weight: 5,
+            opacity: 0.9,
+            dashArray: '10,8',
+            pane: 'routeLinePane'
+          }).addTo(routeLineLayer);
         }
       }
 
-      if (selectedRoute.length && bounds.length > 1) {
-        try { routeMap.fitBounds(bounds, { padding: [48, 48], maxZoom: 13 }); } catch (e) {}
-      } else if (selectedRoute.length && bounds.length === 1) {
-        routeMap.setView(bounds[0], 13);
+      if (!opts.previewStraight) {
+        if (bounds.length > 1) {
+          try { routeMap.fitBounds(bounds, { padding: [48, 48], maxZoom: 13 }); } catch (e) {}
+        } else if (bounds.length === 1) {
+          routeMap.setView(bounds[0], 13);
+        }
       }
       setTimeout(function () { try { routeMap.invalidateSize(); } catch (e) {} }, 100);
     }
@@ -8023,33 +8095,60 @@
         return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
       });
 
+      function drawTripLine_(geometry) {
+        initInspectionMapIfNeeded_();
+        if (!inspectionMap) return;
+        if (!inspectionTripLineLayer) {
+          if (!inspectionMap.getPane('inspTripLinePane')) {
+            inspectionMap.createPane('inspTripLinePane');
+            inspectionMap.getPane('inspTripLinePane').style.zIndex = 650;
+            inspectionMap.getPane('inspTripLinePane').style.pointerEvents = 'none';
+          }
+          inspectionTripLineLayer = L.layerGroup().addTo(inspectionMap);
+        }
+        inspectionTripLineLayer.clearLayers();
+        if (pts.length < 2) return;
+        if (geometry && geometry.coordinates && geometry.coordinates.length) {
+          const latlngs = geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+          L.polyline(latlngs, {
+            color: '#1d4ed8', weight: 5, opacity: 0.95,
+            pane: 'inspTripLinePane', lineJoin: 'round', lineCap: 'round'
+          }).addTo(inspectionTripLineLayer);
+        } else {
+          const straight = pts.map(function(s) { return [Number(s.lat), Number(s.lng)]; });
+          L.polyline(straight, {
+            color: '#2563eb', weight: 4, opacity: 0.85, dashArray: '10,8',
+            pane: 'inspTripLinePane'
+          }).addTo(inspectionTripLineLayer);
+        }
+        try {
+          inspectionMap.fitBounds(pts.map(function(s) { return [Number(s.lat), Number(s.lng)]; }), { padding: [40, 40], maxZoom: 12 });
+        } catch (e) {}
+      }
+
       if (!pts.length) {
         if (summaryEl) summaryEl.innerHTML = '';
+        if (inspectionTripLineLayer) inspectionTripLineLayer.clearLayers();
         return;
       }
       if (pts.length < 2) {
         if (summaryEl) {
           summaryEl.innerHTML = '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเวลาระหว่างจุด</span>';
         }
+        if (inspectionTripLineLayer) inspectionTripLineLayer.clearLayers();
         return;
       }
       if (summaryEl) {
-        summaryEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณเวลาเดินทาง...</span>';
+        summaryEl.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin"></i> กำลังคำนวณเส้นทางถนน...</span>';
       }
+      drawTripLine_(null);
 
       const coords = pts.map(function(s) { return Number(s.lng) + ',' + Number(s.lat); }).join(';');
-      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const t = ctrl ? setTimeout(function() { try { ctrl.abort(); } catch (e) {} }, 18000) : null;
-      const fetchOpts = ctrl ? { signal: ctrl.signal } : {};
-      fetch('https://router.project-osrm.org/route/v1/driving/' + coords + '?overview=false', fetchOpts)
-        .then(function(res) { if (t) clearTimeout(t); return res.json(); })
+      fetchOsrmDriving_(coords, 'overview=full&geometries=geojson')
         .then(function(data) {
           if (gen !== _inspTripRouteGen_) return;
-          if (!(data.code === 'Ok' && data.routes && data.routes[0])) {
-            if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">คำนวณเส้นทางไม่สำเร็จ — ยังกดนำทางได้</span>';
-            return;
-          }
           const route = data.routes[0];
+          drawTripLine_(route.geometry);
           const distKm = (route.distance / 1000).toFixed(1);
           const timeMin = Math.round(route.duration / 60);
           const hour = Math.floor(timeMin / 60);
@@ -8073,9 +8172,9 @@
           }
         })
         .catch(function() {
-          if (t) clearTimeout(t);
           if (gen !== _inspTripRouteGen_) return;
-          if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">เซิร์ฟเวอร์เส้นทางไม่พร้อม — ยังกดนำทางได้</span>';
+          drawTripLine_(null);
+          if (summaryEl) summaryEl.innerHTML = '<span class="text-warning">เซิร์ฟเวอร์เส้นทางไม่พร้อม — แสดงเส้นตรงระหว่างจุด (ยังกดนำทางได้)</span>';
         });
     }
 
@@ -8346,6 +8445,12 @@
       });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap' }).addTo(inspectionMap);
       inspectionMarkersLayer = L.layerGroup().addTo(inspectionMap);
+      if (!inspectionMap.getPane('inspTripLinePane')) {
+        inspectionMap.createPane('inspTripLinePane');
+        inspectionMap.getPane('inspTripLinePane').style.zIndex = 650;
+        inspectionMap.getPane('inspTripLinePane').style.pointerEvents = 'none';
+      }
+      inspectionTripLineLayer = L.layerGroup().addTo(inspectionMap);
       // ไม่ใช้ makeMapPageScrollFriendly_ — บล็อกทัชแพดเลื่อน/ซูมแผนที่
       if (lastUserGps.lat != null && lastUserGps.lng != null) {
         placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
