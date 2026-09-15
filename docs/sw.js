@@ -1,5 +1,5 @@
 /* PEA PWA — cache shell assets for iOS Home Screen / offline reopen */
-const CACHE = 'pea-pwa-shell-v1';
+const CACHE = 'pea-pwa-shell-v2';
 const PRECACHE = [
   './',
   './index.html',

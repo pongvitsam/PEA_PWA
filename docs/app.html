@@ -442,11 +442,12 @@
     html.pea-standalone body { overscroll-behavior-y: none; }
     html.pea-standalone .navbar-custom { padding-top: max(0.5rem, env(safe-area-inset-top)); }
     .pea-ios-install {
-      display: none; position: sticky; bottom: 0; z-index: 1040;
-      margin: 0 calc(-1 * env(safe-area-inset-right, 0px)) 0 calc(-1 * env(safe-area-inset-left, 0px));
-      padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+      display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1040;
+      margin: 0; width: 100%;
+      padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
       background: linear-gradient(135deg, #1e40af, #2563eb); color: #fff;
       box-shadow: 0 -8px 24px rgba(37,99,235,0.25); font-size: 0.9rem;
+      box-sizing: border-box;
     }
     .pea-ios-install.show { display: block; }
     .pea-ios-install .btn-close-install {
@@ -1162,6 +1163,8 @@
   </div>
 </div>
 
+  </div><!-- /container-fluid -->
+
 <div class="modal fade" id="docModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content" style="border-radius: 16px; border: none;">
@@ -1506,7 +1509,7 @@
   
     <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=21"></script>
+  <script src="js/pwa-gas-api.js?v=22"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;

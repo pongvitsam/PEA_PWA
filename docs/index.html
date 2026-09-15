@@ -18,16 +18,19 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
   <link href="https://fonts.bunny.net/css?family=prompt:400,600,700&display=swap" rel="stylesheet">
   <style>
+    html, body { height: 100%; }
     body {
       min-height: 100vh; min-height: 100dvh; margin: 0;
       background: linear-gradient(135deg, #0f766e 0%, #14b8a6 45%, #5eead4 100%);
-      display: flex; align-items: center; justify-content: center;
+      display: grid; place-items: center;
       font-family: 'Prompt', sans-serif;
-      padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
-        max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+      padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px))
+        max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+      box-sizing: border-box;
     }
     .login-card {
       width: min(420px, 92vw);
+      margin: 0 auto;
       background: #fff; border-radius: 20px;
       box-shadow: 0 20px 60px rgba(15, 118, 110, 0.25);
       overflow: hidden;
@@ -80,7 +83,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=19"></script>
+  <script src="js/pwa-gas-api.js?v=22"></script>
   <script>
     const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
