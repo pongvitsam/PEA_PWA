@@ -274,6 +274,10 @@
     .insp-map-marker.is-ready i { font-size: 15px; font-weight: 900; }
     .insp-map-marker.is-pending { background: #475569; }
     .insp-map-marker.is-pending i { font-size: 12px; }
+    .leaflet-div-icon.insp-trip-num-marker {
+      background: transparent !important;
+      border: none !important;
+    }
     #inspectionMapLegend .insp-lg-swatch {
       display: inline-flex; align-items: center; justify-content: center;
       width: 18px; height: 18px; border-radius: 50%; color: #fff;
@@ -1550,7 +1554,7 @@
     let routeMapSelectedIndex_ = -1;
     let routeMapShouldFitPlaces_ = true;
     let _routeRenderGen_ = 0;
-    let inspectionMap = null, inspectionMarkersLayer = null, inspectionTripLineLayer = null;
+    let inspectionMap = null, inspectionMarkersLayer = null, inspectionTripLineLayer = null, inspectionTripMarkersLayer = null;
     let inspectionMyLocationMarker = null;
     let inspectionTripSortable_ = null;
     let _inspTripRouteGen_ = 0;
@@ -1560,6 +1564,7 @@
     const INSPECTION_TRIP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
     const INSPECTION_TRIP_SAVED_MAX_ = 20;
     let inspectionTripLoadedId_ = '';
+    let _inspSavedSelectSilent_ = false;
     let mapGpsWatchId = null;
     let myLocationMarker = null;
     let radiusCircle = null;
@@ -7864,19 +7869,10 @@
     }
 
     function loadInspectionTripPlan_() {
-      try {
-        const raw = localStorage.getItem(INSPECTION_TRIP_LS_KEY);
-        if (!raw) {
-          inspectionTripStops = [];
-        } else {
-          const parsed = JSON.parse(raw);
-          inspectionTripStops = Array.isArray(parsed) ? parsed.filter(function(s) {
-            return s && isFinite(Number(s.lat)) && isFinite(Number(s.lng));
-          }) : [];
-        }
-      } catch (e) {
-        inspectionTripStops = [];
-      }
+      // ไม่ดึงพิกัดค้างจากรอบก่อน — ดูของเก่าได้เฉพาะจากรายการที่บันทึก (7 วัน)
+      inspectionTripStops = [];
+      inspectionTripLoadedId_ = '';
+      try { localStorage.removeItem(INSPECTION_TRIP_LS_KEY); } catch (e) {}
       pruneInspectionSavedTrips_();
     }
 
@@ -7968,14 +7964,19 @@
       if (!sel) return;
       const saved = readInspectionSavedTrips_();
       const cur = inspectionTripLoadedId_ || '';
-      sel.innerHTML = '<option value="">เปิดเส้นทางที่บันทึก (เก็บ 7 วัน)</option>' +
-        saved.map(function(item) {
-          const days = inspectionTripDaysLeft_(item.savedAt);
-          const n = (item.stops && item.stops.length) ? item.stops.length : 0;
-          const label = (item.name || 'เส้นทาง') + ' · ' + n + ' จุด · เหลือ ' + days + ' วัน';
-          return '<option value="' + escHtml(item.id) + '">' + escHtml(label) + '</option>';
-        }).join('');
-      if (cur && saved.some(function(item) { return item.id === cur; })) sel.value = cur;
+      _inspSavedSelectSilent_ = true;
+      try {
+        sel.innerHTML = '<option value="">เปิดเส้นทางที่บันทึก (เก็บ 7 วัน)</option>' +
+          saved.map(function(item) {
+            const days = inspectionTripDaysLeft_(item.savedAt);
+            const n = (item.stops && item.stops.length) ? item.stops.length : 0;
+            const label = (item.name || 'เส้นทาง') + ' · ' + n + ' จุด · เหลือ ' + days + ' วัน';
+            return '<option value="' + escHtml(item.id) + '">' + escHtml(label) + '</option>';
+          }).join('');
+        sel.value = (cur && saved.some(function(item) { return item.id === cur; })) ? cur : '';
+      } finally {
+        _inspSavedSelectSilent_ = false;
+      }
       if (delBtn) delBtn.disabled = !sel.value;
     }
 
@@ -8018,11 +8019,18 @@
     };
 
     window.loadInspectionSavedTrip_ = function() {
+      if (_inspSavedSelectSilent_) return;
       const sel = document.getElementById('inspectionTripSavedSelect');
       const delBtn = document.getElementById('inspectionTripSavedDeleteBtn');
       const id = sel ? sel.value : '';
       if (delBtn) delBtn.disabled = !id;
-      if (!id) return;
+      if (!id) {
+        inspectionTripStops = [];
+        inspectionTripLoadedId_ = '';
+        saveInspectionTripPlan_();
+        renderInspectionTripPanel_();
+        return;
+      }
       const saved = readInspectionSavedTrips_();
       const item = saved.find(function(x) { return x.id === id; });
       if (!item) {
@@ -8036,7 +8044,17 @@
       saveInspectionTripPlan_();
       renderInspectionTripPanel_();
       const days = inspectionTripDaysLeft_(item.savedAt);
-      Toast.fire({ icon: 'success', title: 'เปิดเส้นทางแล้ว · เหลือ ' + days + ' วัน' });
+      Toast.fire({ icon: 'success', title: 'เปิดเส้นทางแล้ว · พร้อมนำทาง · เหลือ ' + days + ' วัน' });
+      const gpsIdx = inspectionTripStops.findIndex(function(s) { return s.isMyLocation || s.key === 'gps'; });
+      if (gpsIdx < 0) return;
+      fetchGpsPosition_(false).then(function(user) {
+        if (inspectionTripLoadedId_ !== item.id) return;
+        inspectionTripStops[gpsIdx].lat = user.lat;
+        inspectionTripStops[gpsIdx].lng = user.lng;
+        saveInspectionTripPlan_();
+        renderInspectionTripPanel_();
+        startMapGpsWatchOnly_();
+      }).catch(function() {});
     };
 
     window.deleteInspectionSavedTrip_ = function() {
@@ -8048,8 +8066,14 @@
       }
       const kept = readInspectionSavedTrips_().filter(function(x) { return x.id !== id; });
       writeInspectionSavedTrips_(kept);
-      if (inspectionTripLoadedId_ === id) inspectionTripLoadedId_ = '';
-      fillInspectionSavedTripSelect_();
+      if (inspectionTripLoadedId_ === id) {
+        inspectionTripLoadedId_ = '';
+        inspectionTripStops = [];
+        saveInspectionTripPlan_();
+        renderInspectionTripPanel_();
+      } else {
+        fillInspectionSavedTripSelect_();
+      }
       Toast.fire({ icon: 'success', title: 'ลบเส้นทางที่บันทึกแล้ว' });
     };
 
@@ -8158,6 +8182,17 @@
       }).catch(function() {});
     }
 
+    function createInspectionTripNumberIcon_(num, isStart, isEnd) {
+      const color = isStart ? '#2563eb' : (isEnd ? '#ef4444' : '#0ea5e9');
+      return L.divIcon({
+        className: 'insp-trip-num-marker',
+        html: '<div style="background:' + color + ';color:#fff;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:13px;">' + num + '</div>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -15]
+      });
+    }
+
     function updateInspectionTripRouteVisual_() {
       const summaryEl = document.getElementById('inspectionTripSummary');
       const gen = ++_inspTripRouteGen_;
@@ -8168,15 +8203,39 @@
       function drawTripLine_(geometry) {
         initInspectionMapIfNeeded_();
         if (!inspectionMap) return;
-        if (!inspectionTripLineLayer) {
-          if (!inspectionMap.getPane('inspTripLinePane')) {
-            inspectionMap.createPane('inspTripLinePane');
-            inspectionMap.getPane('inspTripLinePane').style.zIndex = 650;
-            inspectionMap.getPane('inspTripLinePane').style.pointerEvents = 'none';
-          }
-          inspectionTripLineLayer = L.layerGroup().addTo(inspectionMap);
+        if (!inspectionMap.getPane('inspTripLinePane')) {
+          inspectionMap.createPane('inspTripLinePane');
+          inspectionMap.getPane('inspTripLinePane').style.zIndex = 650;
+          inspectionMap.getPane('inspTripLinePane').style.pointerEvents = 'none';
         }
+        if (!inspectionMap.getPane('inspTripStopPane')) {
+          inspectionMap.createPane('inspTripStopPane');
+          inspectionMap.getPane('inspTripStopPane').style.zIndex = 660;
+        }
+        if (!inspectionTripLineLayer) inspectionTripLineLayer = L.layerGroup().addTo(inspectionMap);
+        if (!inspectionTripMarkersLayer) inspectionTripMarkersLayer = L.layerGroup().addTo(inspectionMap);
         inspectionTripLineLayer.clearLayers();
+        inspectionTripMarkersLayer.clearLayers();
+        if (inspectionMarkersLayer) {
+          inspectionMarkersLayer.eachLayer(function(m) {
+            try { if (m.setOpacity) m.setOpacity(pts.length ? 0.28 : 1); } catch (e) {}
+          });
+        }
+        pts.forEach(function(s, idx) {
+          const lat = Number(s.lat), lng = Number(s.lng);
+          if (!isFinite(lat) || !isFinite(lng)) return;
+          const marker = L.marker([lat, lng], {
+            icon: createInspectionTripNumberIcon_(idx + 1, idx === 0, pts.length > 1 && idx === pts.length - 1),
+            zIndexOffset: 800,
+            pane: 'inspTripStopPane'
+          });
+          marker.bindPopup('<div class="small"><b>จุดที่ ' + (idx + 1) + '</b><br>' + escHtml(s.name || '-') + '</div>');
+          inspectionTripMarkersLayer.addLayer(marker);
+        });
+        if (pts.length === 1) {
+          try { inspectionMap.setView([Number(pts[0].lat), Number(pts[0].lng)], 12); } catch (e) {}
+          return;
+        }
         if (pts.length < 2) return;
         if (geometry && geometry.coordinates && geometry.coordinates.length) {
           const latlngs = geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
@@ -8199,13 +8258,19 @@
       if (!pts.length) {
         if (summaryEl) summaryEl.innerHTML = '';
         if (inspectionTripLineLayer) inspectionTripLineLayer.clearLayers();
+        if (inspectionTripMarkersLayer) inspectionTripMarkersLayer.clearLayers();
+        if (inspectionMarkersLayer) {
+          inspectionMarkersLayer.eachLayer(function(m) {
+            try { if (m.setOpacity) m.setOpacity(1); } catch (e) {}
+          });
+        }
         return;
       }
       if (pts.length < 2) {
         if (summaryEl) {
           summaryEl.innerHTML = '<span class="text-muted">มี 1 จุด — เพิ่มสถานที่อื่นเพื่อดูเวลาระหว่างจุด</span>';
         }
-        if (inspectionTripLineLayer) inspectionTripLineLayer.clearLayers();
+        drawTripLine_(null);
         return;
       }
       if (summaryEl) {
@@ -8521,7 +8586,12 @@
         inspectionMap.getPane('inspTripLinePane').style.zIndex = 650;
         inspectionMap.getPane('inspTripLinePane').style.pointerEvents = 'none';
       }
+      if (!inspectionMap.getPane('inspTripStopPane')) {
+        inspectionMap.createPane('inspTripStopPane');
+        inspectionMap.getPane('inspTripStopPane').style.zIndex = 660;
+      }
       inspectionTripLineLayer = L.layerGroup().addTo(inspectionMap);
+      inspectionTripMarkersLayer = L.layerGroup().addTo(inspectionMap);
       // ไม่ใช้ makeMapPageScrollFriendly_ — บล็อกทัชแพดเลื่อน/ซูมแผนที่
       if (lastUserGps.lat != null && lastUserGps.lng != null) {
         placeInspectionMyLocationMarker_(lastUserGps.lat, lastUserGps.lng);
