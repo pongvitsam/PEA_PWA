@@ -451,7 +451,8 @@
       z-index: 2;
     }
     .navbar-custom .container-fluid {
-      flex-wrap: nowrap;
+      /* ต้อง wrap ได้ — ถ้า nowrap เมนูแฮมเบอร์เกอร์จะซ้อนข้างโลโก้แทนที่จะลงบรรทัดใหม่ */
+      flex-wrap: wrap;
       align-items: center;
       gap: 0.5rem;
     }
@@ -460,6 +461,15 @@
       flex: 1 1 auto;
       padding-top: 0.15rem;
       padding-bottom: 0.15rem;
+    }
+    @media (max-width: 991.98px) {
+      .navbar-custom .navbar-collapse {
+        flex-basis: 100%;
+        width: 100%;
+      }
+      .navbar-custom .navbar-nav.ms-3 {
+        margin-left: 0 !important;
+      }
     }
     .pea-ios-install {
       display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1040;
