@@ -17,11 +17,12 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "HEAD redeploy skipped (read-only or unavailable). Push already applied to @HEAD." -ForegroundColor Yellow
 }
 
+# Pages (docs/js/config.js) ใช้ legacy — ต้อง deploy ให้ได้โค้ดใหม่
 $LegacyDeploymentId = "AKfycbwEIi5cZDzvdGqcfqcsJcPjW1pBnTALtZFlGYZDkCYl9MTvOL0wuv4mBOEny4UUzyk9"
-Write-Host "==> clasp deploy legacy id (optional)" -ForegroundColor DarkGray
+Write-Host "==> clasp deploy legacy id (Pages API)" -ForegroundColor Cyan
 clasp deploy -i $LegacyDeploymentId -d $Description
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "Legacy deploy skipped (likely 200-version limit). Pages uses @HEAD." -ForegroundColor Yellow
+  Write-Host "Legacy deploy failed (often 200-version limit). Pages may serve old server code." -ForegroundColor Yellow
   exit 0
 }
 

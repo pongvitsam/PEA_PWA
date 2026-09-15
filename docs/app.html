@@ -1466,7 +1466,7 @@
   
     <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=16"></script>
+  <script src="js/pwa-gas-api.js?v=17"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2260,6 +2260,14 @@
       const cached = readCachedLocations_();
       const usedCache = !!(cached && cached.length);
       if (usedCache) initApp(cached);
+      else {
+        const loadEl = document.getElementById('loading');
+        if (loadEl) {
+          loadEl.style.display = '';
+          const hint = loadEl.querySelector('h5');
+          if (hint) hint.textContent = 'กำลังโหลดระบบและข้อมูล...';
+        }
+      }
 
       google.script.run.withSuccessHandler(function(res) {
         writeCachedLocations_(res);
@@ -2271,7 +2279,18 @@
           return;
         }
         document.getElementById('loading').style.display = 'none';
-        Swal.fire({ icon: 'error', title: 'โหลดข้อมูลไม่สำเร็จ', text: (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่' });
+        appStarted = false;
+        const msg = (err && err.message) ? err.message : 'ลอง refresh หน้าใหม่';
+        Swal.fire({
+          icon: 'error',
+          title: 'โหลดข้อมูลไม่สำเร็จ',
+          text: msg,
+          confirmButtonText: 'ลองอีกครั้ง',
+          showCancelButton: true,
+          cancelButtonText: 'ปิด'
+        }).then(function(r) {
+          if (r.isConfirmed) startAppAfterAuth();
+        });
       }).getLocations();
       prefetchInspectionFormTemplate_();
     }

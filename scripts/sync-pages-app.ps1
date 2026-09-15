@@ -1,7 +1,7 @@
 # Sync Index.html → docs/app.html for GitHub Pages.
 # Preserves/injects config.js + pwa-gas-api.js (google.script.run polyfill).
 param(
-  [string]$Version = "16"
+  [string]$Version = "17"
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot

@@ -4,7 +4,10 @@
 
   /** GET ยาวเกินนี้มักได้ 403 จาก script.google.com / macros/echo */
   var JSONP_URL_SOFT_LIMIT = 1600;
-  var DEFAULT_TIMEOUT_MS = 180000;
+  var DEFAULT_TIMEOUT_MS = 120000;
+  var MOBILE_TIMEOUT_MS = 45000;
+  var IOS_TIMEOUT_MS = 35000;
+  var IOS_JSONP_FIRST_MS = 10000;
   var UPLOAD_TIMEOUT_MS = 600000;
   var UPLOAD_ACTIONS_ = {
     beginPdfDirectUpload: 1,
@@ -19,8 +22,24 @@
     saveProjectDoc: 1
   };
 
+  function isIOS_() {
+    var ua = navigator.userAgent || '';
+    if (/iPad|iPhone|iPod/i.test(ua)) return true;
+    try {
+      if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  function isMobile_() {
+    return isIOS_() || /Android|Mobile/i.test(navigator.userAgent || '');
+  }
+
   function timeoutForAction_(action) {
-    return UPLOAD_ACTIONS_[action] ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+    if (UPLOAD_ACTIONS_[action]) return UPLOAD_TIMEOUT_MS;
+    if (isIOS_()) return IOS_TIMEOUT_MS;
+    if (isMobile_()) return MOBILE_TIMEOUT_MS;
+    return DEFAULT_TIMEOUT_MS;
   }
 
   function getStoredSessionToken() {
@@ -62,38 +81,57 @@
       const cbName = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');
       let script = null;
       const waitMs = timeoutMs || DEFAULT_TIMEOUT_MS;
+      let settled = false;
 
       const timeout = setTimeout(function () {
-        cleanup();
-        reject(new Error('API timeout'));
+        finishErr(new Error('API timeout'));
       }, waitMs);
 
       function cleanup() {
         clearTimeout(timeout);
-        delete window[cbName];
+        try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
         if (script && script.parentNode) script.parentNode.removeChild(script);
+        script = null;
+      }
+
+      function finishOk(result) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      }
+
+      function finishErr(err) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err instanceof Error ? err : new Error(String(err || 'API error')));
       }
 
       window[cbName] = function (data) {
         if (!data || (data.requestId && data.requestId !== requestId)) return;
-        cleanup();
-        if (data.ok) resolve(data.result);
-        else reject(new Error(data.error || 'API error'));
+        if (data.ok) finishOk(data.result);
+        else finishErr(new Error(data.error || 'API error'));
       };
 
-      script = document.createElement('script');
-      script.src = buildJsonpUrl_(action, argsJson, requestId, cbName);
-      script.onerror = function () {
-        cleanup();
-        reject(new Error('API script load failed (403?) — ลองรีเฟรชหน้า'));
-      };
-      document.head.appendChild(script);
+      try {
+        script = document.createElement('script');
+        script.async = true;
+        script.src = buildJsonpUrl_(action, argsJson, requestId, cbName);
+        script.onerror = function () {
+          finishErr(new Error('API script load failed (403?) — ลองรีเฟรชหน้า'));
+        };
+        (document.head || document.documentElement).appendChild(script);
+      } catch (e) {
+        finishErr(e);
+      }
     });
   }
 
   /**
    * POST ผ่าน iframe ซ่อน — ใช้เมื่อ JSONP URL ยาวหรือโหลดสคริปต์ 403
-   * doPost(client:'pages') ตอบกลับด้วย postMessage ไปยัง parent (ไม่เด้งหน้าต่าง)
+   * doPost(client:'pages') ตอบกลับด้วย postMessage ไปยัง parent/top
+   * iOS Safari: อย่าใช้ iframe ขนาด 0 (มักไม่รัน JS ในเฟรม)
    */
   function gasCallPopupPost_(action, args, requestId, timeoutMs) {
     return new Promise(function (resolve, reject) {
@@ -161,7 +199,9 @@
         iframe = document.createElement('iframe');
         iframe.name = frameName;
         iframe.setAttribute('aria-hidden', 'true');
-        iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;left:-9999px;opacity:0;pointer-events:none;';
+        iframe.setAttribute('title', 'gas-api');
+        // iOS: เฟรม 0x0 / display:none มักไม่ execute สคริปต์ postMessage
+        iframe.style.cssText = 'position:fixed;width:1px;height:1px;left:0;top:0;opacity:0.01;border:0;pointer-events:none;';
         document.body.appendChild(iframe);
 
         form = document.createElement('form');
@@ -169,7 +209,7 @@
         form.action = String(window.GAS_API_URL);
         form.target = frameName;
         form.acceptCharset = 'UTF-8';
-        form.style.display = 'none';
+        form.style.cssText = 'position:fixed;width:1px;height:1px;left:0;top:0;opacity:0;border:0;';
         const input = document.createElement('input');
         input.type = 'hidden';
         input.name = 'payload';
@@ -180,6 +220,43 @@
       } catch (e) {
         finishErr(new Error('เปิดช่องทาง API ไม่สำเร็จ'));
       }
+    });
+  }
+
+  function withTimeout_(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var t = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error(label || 'API timeout'));
+      }, ms);
+      promise.then(function (v) {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(v);
+      }, function (e) {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+  }
+
+  /**
+   * iOS: ลอง JSONP สั้นๆ ก่อน แล้วค่อย iframe — กันค้างนิ่งเมื่อ Safari ไม่ยิง onerror
+   */
+  function gasCallIos_(action, compact, argsJson, requestId, waitMs) {
+    var jsonpWait = Math.min(IOS_JSONP_FIRST_MS, waitMs);
+    return withTimeout_(
+      gasCallJsonp_(action, argsJson, requestId, jsonpWait),
+      jsonpWait + 500,
+      'API timeout'
+    ).catch(function () {
+      var left = Math.max(8000, waitMs - jsonpWait);
+      return gasCallPopupPost_(action, compact, requestId + 'p', left);
     });
   }
 
@@ -203,9 +280,13 @@
       return gasCallPopupPost_(action, compact, requestId, waitMs);
     }
 
+    if (isIOS_()) {
+      return gasCallIos_(action, compact, argsJson, requestId, waitMs);
+    }
+
     return gasCallJsonp_(action, argsJson, requestId, waitMs).catch(function (err) {
       const msg = (err && err.message) ? err.message : String(err || '');
-      if (/script load failed|403/i.test(msg)) {
+      if (/script load failed|403|API timeout/i.test(msg)) {
         return gasCallPopupPost_(action, compact, requestId, waitMs);
       }
       throw err;
