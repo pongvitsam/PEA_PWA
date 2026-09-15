@@ -4,6 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Permissions-Policy" content="geolocation=(self)">
   <title>PWA Project Dashboard</title>
   
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -591,8 +592,8 @@
     <div id="menu-map" style="display: none;">
       <div class="filter-bar row g-3 align-items-center">
         <div class="col-12">
-          <button type="button" id="btnMapGpsNow" class="btn btn-info text-white fw-semibold" onclick="showMyLocationOnMap()" title="ซูมไปตำแหน่ง GPS ของคุณ — หมุดโครงการทั้งหมดยังแสดงเต็มสี">
-            <i class="fa-solid fa-location-crosshairs"></i> พิกัดตอนนี้ — ดูโครงการใกล้เคียง
+          <button type="button" id="btnMapGpsNow" class="btn btn-info text-white fw-semibold w-100 py-2" onclick="showMyLocationOnMap()" title="ซูมไปตำแหน่ง GPS ของคุณ — หมุดโครงการทั้งหมดยังแสดงเต็มสี">
+            <i class="fa-solid fa-location-crosshairs"></i> พิกัดตอนนี้ — เปิด GPS / ดูใกล้เคียง
           </button>
         </div>
         <div class="col-md-3">
@@ -644,7 +645,7 @@
           <button class="btn btn-light border w-100" onclick="resetFilters()"><i class="fa-solid fa-rotate-right"></i> ล้างตัวกรองทั้งหมด</button>
         </div>
         <div class="col-12 mt-1">
-          <div id="mapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showMyLocationOnMap()" onkeydown="if(event.key==='Enter'||event.key===' ')showMyLocationOnMap()" title="กดเพื่อซูมไปตำแหน่งปัจจุบัน — หมุดทั้งหมดยังเต็มสี"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ยังไม่ได้เปิด GPS</div>
+          <div id="mapGpsStatus" class="small text-muted" role="button" tabindex="0" style="cursor:pointer;" onclick="showMyLocationOnMap()" onkeydown="if(event.key==='Enter'||event.key===' ')showMyLocationOnMap()" title="กดเพื่อซูมไปตำแหน่งปัจจุบัน — หมุดทั้งหมดยังเต็มสี"><i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: กดปุ่ม「พิกัดตอนนี้」เพื่อเปิด GPS</div>
         </div>
         <div class="col-12 mt-2">
           <div class="border rounded-3 p-3 bg-white shadow-sm">
@@ -1499,6 +1500,72 @@
     let lastUserGps = { lat: null, lng: null, at: 0 };
     const LAST_GPS_MAX_AGE_MS = 90000;
 
+    function isIOSDevice_() {
+      const ua = navigator.userAgent || '';
+      if (/iPad|iPhone|iPod/i.test(ua)) return true;
+      try {
+        if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
+    function geoErrorMessage_(err) {
+      const code = err && err.code;
+      if (code === 1) {
+        return isIOSDevice_()
+          ? 'ไม่ได้อนุญาต Location — ตั้งค่า iPhone: Settings → Safari → Location → Allow หรือ Settings → Privacy → Location Services'
+          : 'ไม่ได้อนุญาต Location ในเบราว์เซอร์';
+      }
+      if (code === 2) return 'หาพิกัดไม่ได้ — เปิด Location Services แล้วลองกลางแจ้ง';
+      if (code === 3) return 'หมดเวลาดึง GPS — กดปุ่มอีกครั้ง หรือรอสัญญาณดีขึ้น';
+      if (code === 0) return 'เบราว์เซอร์ไม่รองรับ GPS';
+      return isIOSDevice_()
+        ? 'ดึง GPS ไม่ได้ — กดปุ่มพิกัดแล้วกด Allow เมื่อ Safari ถาม'
+        : 'ดึง GPS ไม่ได้ — อนุญาต Location ในเบราว์เซอร์';
+    }
+
+    /** iOS: ห้ามใช้ timeout ไม่จำกัด (ค่า default) — จะค้างนานมาก */
+    function getGeoOptionsOnce_() {
+      return {
+        enableHighAccuracy: false,
+        maximumAge: 60000,
+        timeout: isIOSDevice_() ? 25000 : 15000
+      };
+    }
+
+    function getGeoOptionsWatch_() {
+      return {
+        enableHighAccuracy: false,
+        maximumAge: 20000,
+        timeout: isIOSDevice_() ? 30000 : 15000
+      };
+    }
+
+    function fetchGpsPosition_(force) {
+      return new Promise(function(resolve, reject) {
+        if (!navigator.geolocation) {
+          const e = new Error('no geo');
+          e.code = 0;
+          reject(e);
+          return;
+        }
+        if (!force && lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
+          resolve({ lat: lastUserGps.lat, lng: lastUserGps.lng, fromCache: true });
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          function(pos) {
+            const la = pos.coords.latitude;
+            const ln = pos.coords.longitude;
+            placeMyLocationMarker_(la, ln);
+            resolve({ lat: la, lng: ln, fromCache: false });
+          },
+          function(err) { reject(err || new Error('geo fail')); },
+          getGeoOptionsOnce_()
+        );
+      });
+    }
+
     function haversineKm_(lat1, lng1, lat2, lng2) {
       const R = 6371;
       const toRad = (d) => d * Math.PI / 180;
@@ -1827,25 +1894,14 @@
         inspectionMap.flyTo([la, ln], 13, { animate: true });
         Toast.fire({ icon: 'success', title: 'ไปพิกัดของคุณแล้ว' });
       }
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        finish_(lastUserGps.lat, lastUserGps.lng);
-        return;
-      }
-      if (!navigator.geolocation) {
-        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
-        return;
-      }
       updateInspectionMapGpsStatus_('กำลังดึงพิกัด...', 'text-warning');
-      navigator.geolocation.getCurrentPosition(
-        function(pos) {
-          finish_(pos.coords.latitude, pos.coords.longitude);
-        },
-        function() {
-          updateInspectionMapGpsStatus_('ดึง GPS ไม่ได้ (อนุญาต Location)', 'text-danger');
-          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
-        },
-        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
-      );
+      fetchGpsPosition_(false).then(function(u) {
+        startMapGpsWatchOnly_();
+        finish_(u.lat, u.lng);
+      }).catch(function(err) {
+        updateInspectionMapGpsStatus_('ดึง GPS ไม่ได้', 'text-danger');
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: geoErrorMessage_(err) });
+      });
     };
 
     /** ปุ่มฟ้าใหญ่: ไปพิกัดตัวเอง — หมุดโครงการทั้งหมดเข้มปกติ (ไม่เปิดโหมดรัศมี) */
@@ -1869,26 +1925,16 @@
         setMapGpsButtonsBusy_(false);
         Toast.fire({ icon: 'success', title: 'ไปพิกัดของคุณแล้ว', text: 'หมุดทั้งหมดยังแสดงเต็มสี — ใช้กล่อง「ค้นหาในรัศมี」ถ้าต้องการจางนอกวง' });
       }
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        finish_(lastUserGps.lat, lastUserGps.lng);
-        return;
-      }
-      if (!navigator.geolocation) {
-        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
-        return;
-      }
       setMapGpsButtonsBusy_(true);
       updateMapGpsStatus('กำลังดึงพิกัด...', 'text-warning');
-      navigator.geolocation.getCurrentPosition(
-        function(pos) {
-          finish_(pos.coords.latitude, pos.coords.longitude);
-        },
-        function() {
-          setMapGpsButtonsBusy_(false);
-          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
-        },
-        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
-      );
+      fetchGpsPosition_(false).then(function(u) {
+        startMapGpsWatchOnly_();
+        finish_(u.lat, u.lng);
+      }).catch(function(err) {
+        setMapGpsButtonsBusy_(false);
+        updateMapGpsStatus('ดึง GPS ไม่ได้ — กดปุ่มอีกครั้ง', 'text-danger');
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: geoErrorMessage_(err) });
+      });
     };
 
     /** ในกล่องค้นหารัศมี: ใช้ GPS เป็นจุดกลาง + จางหมุดนอกวง */
@@ -1902,26 +1948,16 @@
         window.applyRadiusFilter(la, ln);
         setMapGpsButtonsBusy_(false);
       }
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        finish_(lastUserGps.lat, lastUserGps.lng);
-        return;
-      }
-      if (!navigator.geolocation) {
-        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
-        return;
-      }
       setMapGpsButtonsBusy_(true);
       updateMapGpsStatus('กำลังดึงพิกัด...', 'text-warning');
-      navigator.geolocation.getCurrentPosition(
-        function(pos) {
-          finish_(pos.coords.latitude, pos.coords.longitude);
-        },
-        function() {
-          setMapGpsButtonsBusy_(false);
-          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
-        },
-        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
-      );
+      fetchGpsPosition_(false).then(function(u) {
+        startMapGpsWatchOnly_();
+        finish_(u.lat, u.lng);
+      }).catch(function(err) {
+        setMapGpsButtonsBusy_(false);
+        updateMapGpsStatus('ดึง GPS ไม่ได้ — กดปุ่มอีกครั้ง', 'text-danger');
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: geoErrorMessage_(err) });
+      });
     };
 
     window.enableRadiusPickOnMap = function() {
@@ -2434,26 +2470,57 @@
       statusEl.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> พิกัดของฉัน: ' + message;
     }
 
+    /** ติดตาม GPS ต่อเนื่อง — เรียกหลังผู้ใช้กดอนุญาตแล้ว (สำคัญบน iOS) */
+    function startMapGpsWatchOnly_() {
+      if (!navigator.geolocation) return;
+      if (mapGpsWatchId !== null) return;
+      mapGpsWatchId = navigator.geolocation.watchPosition(
+        function(pos) {
+          placeMyLocationMarker_(pos.coords.latitude, pos.coords.longitude);
+        },
+        function(err) {
+          try {
+            if (mapGpsWatchId !== null) navigator.geolocation.clearWatch(mapGpsWatchId);
+          } catch (e) { /* ignore */ }
+          mapGpsWatchId = null;
+          const tip = (err && err.code === 1)
+            ? 'กดปุ่มพิกัดตอนนี้ แล้ว Allow Location'
+            : 'กดปุ่มพิกัดตอนนี้เพื่อลองใหม่';
+          updateMapGpsStatus(tip, 'text-danger');
+          updateInspectionMapGpsStatus_(tip, 'text-danger');
+          updateRouteMapGpsStatus_(tip, 'text-danger');
+        },
+        getGeoOptionsWatch_()
+      );
+    }
+
+    /**
+     * เปิดติดตาม GPS — บน iOS ห้ามขอสิทธิ์อัตโนมัติตอนโหลดหน้า
+     * (Safari ต้องมี user gesture มิฉะนั้นจะ Denied แล้วใช้ GPS ไม่ได้)
+     */
     function startMapGpsTracking() {
-      if(!navigator.geolocation) {
+      if (!navigator.geolocation) {
         updateMapGpsStatus('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
         updateInspectionMapGpsStatus_('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
         updateRouteMapGpsStatus_('อุปกรณ์/เบราว์เซอร์ไม่รองรับ GPS', 'text-danger');
         return;
       }
-      if(mapGpsWatchId !== null) return;
+      if (mapGpsWatchId !== null) return;
+      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= LAST_GPS_MAX_AGE_MS) {
+        startMapGpsWatchOnly_();
+        return;
+      }
+      if (isIOSDevice_()) {
+        const tip = 'กดปุ่ม「พิกัดตอนนี้」เพื่อเปิด GPS (จำเป็นบน iPhone)';
+        updateMapGpsStatus(tip, 'text-warning');
+        updateInspectionMapGpsStatus_(tip, 'text-warning');
+        updateRouteMapGpsStatus_(tip, 'text-warning');
+        return;
+      }
       updateMapGpsStatus('กำลังรออนุญาต GPS...', 'text-warning');
       updateInspectionMapGpsStatus_('กำลังรออนุญาต GPS...', 'text-warning');
       updateRouteMapGpsStatus_('กำลังรออนุญาต GPS...', 'text-warning');
-      mapGpsWatchId = navigator.geolocation.watchPosition(function(pos) {
-        let lat = pos.coords.latitude;
-        let lng = pos.coords.longitude;
-        placeMyLocationMarker_(lat, lng);
-      }, function() {
-        updateMapGpsStatus('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
-        updateInspectionMapGpsStatus_('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
-        updateRouteMapGpsStatus_('ไม่สามารถดึงพิกัดได้ (โปรดอนุญาต Location)', 'text-danger');
-      }, { enableHighAccuracy: false, maximumAge: 15000, timeout: 15000 });
+      startMapGpsWatchOnly_();
     }
 
     function blurOutageModalFocus_() {
@@ -3633,21 +3700,9 @@
     }
 
     function getUserLatLngForRoute_() {
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= LAST_GPS_MAX_AGE_MS) {
-        return Promise.resolve({ lat: lastUserGps.lat, lng: lastUserGps.lng, fromCache: true });
-      }
-      return new Promise(function(resolve, reject) {
-        if (!navigator.geolocation) { reject(new Error('no geo')); return; }
-        navigator.geolocation.getCurrentPosition(
-          function(pos) {
-            var la = pos.coords.latitude;
-            var ln = pos.coords.longitude;
-            lastUserGps = { lat: la, lng: ln, at: Date.now() };
-            resolve({ lat: la, lng: ln, fromCache: false });
-          },
-          function(err) { reject(err); },
-          { enableHighAccuracy: false, maximumAge: 120000, timeout: 12000 }
-        );
+      return fetchGpsPosition_(false).then(function(u) {
+        if (!u.fromCache) startMapGpsWatchOnly_();
+        return { lat: u.lat, lng: u.lng, fromCache: !!u.fromCache };
       });
     }
 
@@ -3695,8 +3750,8 @@
             resultBox.innerHTML = '<span class="text-warning">คำนวณระยะไม่สำเร็จ</span>';
           }
         });
-      }).catch(function() {
-        resultBox.innerHTML = '<span class="text-danger">❌ ไม่ได้พิกัดของคุณภายในเวลาที่กำหนด — เปิดสิทธิ์ Location และลองใหม่ (หรือรอให้แผนที่แสดงพิกัดของฉันก่อน)</span>';
+      }).catch(function(err) {
+        resultBox.innerHTML = '<span class="text-danger">❌ ' + geoErrorMessage_(err) + '</span>';
       });
     };
 
@@ -3862,19 +3917,20 @@
       btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังดึงพิกัด GPS...';
       btn.disabled = true;
 
-      navigator.geolocation.getCurrentPosition(pos => {
+      fetchGpsPosition_(true).then(function(u) {
+        startMapGpsWatchOnly_();
         let myLoc = {
           isMyLocation: true, name: "📍 จุดเริ่มต้น (GPS ของคุณ)",
-          lat: pos.coords.latitude, lng: pos.coords.longitude,
+          lat: u.lat, lng: u.lng,
           phase: "-", peaRegion: "ตำแหน่งปัจจุบัน"
         };
-        selectedRoute.unshift(myLoc); 
+        selectedRoute.unshift(myLoc);
         renderRoute();
         btn.innerHTML = origHtml;
         btn.disabled = false;
         Toast.fire({ icon: 'success', title: 'เพิ่มตำแหน่งปัจจุบันแล้ว' });
-      }, err => {
-        Toast.fire({ icon: 'error', title: 'ดึงพิกัดไม่ได้ กรุณาอนุญาตการเข้าถึง GPS' });
+      }).catch(function(err) {
+        Toast.fire({ icon: 'error', title: 'ดึงพิกัดไม่ได้', text: geoErrorMessage_(err) });
         btn.innerHTML = origHtml;
         btn.disabled = false;
       });
@@ -4179,23 +4235,14 @@
         routeMap.flyTo([la, ln], 13, { animate: true });
         Toast.fire({ icon: 'success', title: 'ไปพิกัดของคุณแล้ว' });
       }
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        finish_(lastUserGps.lat, lastUserGps.lng);
-        return;
-      }
-      if (!navigator.geolocation) {
-        Toast.fire({ icon: 'error', title: 'เบราว์เซอร์ไม่รองรับ GPS' });
-        return;
-      }
       updateRouteMapGpsStatus_('กำลังดึงพิกัด...', 'text-warning');
-      navigator.geolocation.getCurrentPosition(
-        function(pos) { finish_(pos.coords.latitude, pos.coords.longitude); },
-        function() {
-          updateRouteMapGpsStatus_('ดึง GPS ไม่ได้ (อนุญาต Location)', 'text-danger');
-          Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
-        },
-        { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 }
-      );
+      fetchGpsPosition_(false).then(function(u) {
+        startMapGpsWatchOnly_();
+        finish_(u.lat, u.lng);
+      }).catch(function(err) {
+        updateRouteMapGpsStatus_('ดึง GPS ไม่ได้', 'text-danger');
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: geoErrorMessage_(err) });
+      });
     }
     window.showMyLocationOnRouteMap_ = showMyLocationOnRouteMap_;
 
@@ -8025,14 +8072,11 @@
         renderInspectionTripPanel_();
         Toast.fire({ icon: 'success', title: 'ตั้งต้นทางเป็น GPS แล้ว' });
       }
-      if (lastUserGps.lat != null && lastUserGps.lng != null && (Date.now() - lastUserGps.at) <= 120000) {
-        pushGps_(lastUserGps.lat, lastUserGps.lng);
-        return;
-      }
-      getUserLatLngForRoute_().then(function(user) {
+      fetchGpsPosition_(false).then(function(user) {
+        startMapGpsWatchOnly_();
         pushGps_(user.lat, user.lng);
-      }).catch(function() {
-        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: 'อนุญาต Location ในเบราว์เซอร์' });
+      }).catch(function(err) {
+        Toast.fire({ icon: 'error', title: 'ดึง GPS ไม่ได้', text: geoErrorMessage_(err) });
       });
     };
 
