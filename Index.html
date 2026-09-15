@@ -6122,16 +6122,14 @@
       if (window._inspectionSyncTimer_) return;
       window._inspectionSyncTimer_ = setTimeout(function() {
         window._inspectionSyncTimer_ = null;
-        // force ครั้งแรกหลังอัปเดต logic รอบส่งมอบ — ล้างค่าเก่าที่ปนจากแผนส่งมอบ
-        const forceOnce = !sessionStorage.getItem('insp_round_preserve_v1');
+        // ไม่ force ทุกครั้ง — force sync จากชีทภายนอกช้ามาก; ใช้ปุ่มรีเฟรชเมื่อต้องการข้อมูลล่าสุด
         google.script.run.withSuccessHandler(function(pack) {
-          try { sessionStorage.setItem('insp_round_preserve_v1', '1'); } catch (e) {}
           applyInspectionPack(pack, { showError: false, preserveUi: true });
         }).withFailureHandler(function(err) {
           const msg = (err && err.message) ? err.message : String(err || '');
           if (/timeout|API timeout/i.test(msg)) return;
-        }).refreshInspectionPlansFromSource(forceOnce);
-      }, 2500);
+        }).refreshInspectionPlansFromSource(false);
+      }, 8000);
     }
 
     function patchInspectionLocal_(formData) {
@@ -7490,7 +7488,12 @@
 
       renderInspectionList(preserveUi);
       updateInspectionStats();
-      renderInspectionMap_();
+      // แผนที่ทีหลัง — ให้ตารางโชว์ก่อน (มือถือรู้สึกเร็วขึ้น)
+      if (window._inspMapRenderTimer_) clearTimeout(window._inspMapRenderTimer_);
+      window._inspMapRenderTimer_ = setTimeout(function() {
+        window._inspMapRenderTimer_ = null;
+        try { renderInspectionMap_(); } catch (e) {}
+      }, 50);
     }
 
     const filterInspectionsDebounced_ = debounce_(filterInspections, 120);

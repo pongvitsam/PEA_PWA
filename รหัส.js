@@ -1463,8 +1463,8 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v4';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v9';
-const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v9';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v10';
+const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v10';
 const LIST_CACHE_TTL_SEC = 180;
 
 function invalidateOutageListCache_() {
@@ -1480,9 +1480,17 @@ function inspectionListCacheGen_() {
 }
 
 function invalidateInspectionListCache_() {
-  const cache = CacheService.getScriptCache();
-  try { cache.remove(INSPECTION_LIST_CACHE_KEY); } catch (ignore) {}
-  try { cache.put(INSPECTION_LIST_CACHE_GEN_KEY, String(new Date().getTime()), 21600); } catch (ignore) {}
+  try {
+    const cache = CacheService.getScriptCache();
+    const nStr = cache.get(INSPECTION_LIST_CACHE_KEY + '_n');
+    const keys = [INSPECTION_LIST_CACHE_KEY + '_n', INSPECTION_LIST_CACHE_KEY];
+    const n = parseInt(nStr, 10) || 0;
+    for (let i = 0; i < n; i++) keys.push(INSPECTION_LIST_CACHE_KEY + '_' + i);
+    cache.removeAll(keys);
+  } catch (ignore) {}
+  try {
+    CacheService.getScriptCache().put(INSPECTION_LIST_CACHE_GEN_KEY, String(new Date().getTime()), 21600);
+  } catch (ignore) {}
 }
 
 /** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
@@ -1933,14 +1941,16 @@ function recoverInspectionFileCommentUrls_(raw) {
   return changed || entries.some(function(e) { return !!e.url; }) ? out.join('\n') : cellStr_(raw);
 }
 
-function enrichInspectionFileComment_(raw, sheet, row1, col1) {
+function enrichInspectionFileComment_(raw, sheet, row1, col1, opts) {
   let text = raw;
   if (sheet && row1 && col1) {
     try { text = readInspectionFileCommentCell_(sheet, row1, col1, raw); } catch (ignore) {}
   } else {
     text = cellStr_(raw);
   }
-  if (text && text.indexOf('|http') < 0 && /\.pdf/i.test(text)) {
+  // โหลดรายการ: ห้ามสแกน Drive ทั้งโฟลเดอร์ — ช้ามากบนมือถือ
+  const skipDrive = !(opts && opts.recoverDrive);
+  if (!skipDrive && text && text.indexOf('|http') < 0 && /\.pdf/i.test(text)) {
     try { text = recoverInspectionFileCommentUrls_(text); } catch (ignore) {}
   }
   return text;
@@ -2228,12 +2238,13 @@ function mapInspectionRow_(row) {
   };
 }
 
-function readInspectionsMapped_(sheet) {
+function readInspectionsMapped_(sheet, opts) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
   const numCols = Math.max(sheet.getLastColumn(), INSPECTION_HEADERS.length);
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const fileCommentCol = 13; // FileComment (1-based)
+  const recoverDrive = !!(opts && opts.recoverDrive);
   let richComments = null;
   let formulas = null;
   try {
@@ -2243,6 +2254,7 @@ function readInspectionsMapped_(sheet) {
     formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
   } catch (ignore) {}
   const out = [];
+  const enrichOpts = recoverDrive ? { recoverDrive: true } : { recoverDrive: false };
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     if (!row[3]) continue;
@@ -2256,9 +2268,9 @@ function readInspectionsMapped_(sheet) {
       if (richComments && richComments[i] && richComments[i][0]) {
         comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
       }
-      comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol);
+      comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol, enrichOpts);
     } catch (ignore) {
-      comment = enrichInspectionFileComment_(comment, null, 0, 0);
+      comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
     }
     mapped.fileComment = comment;
     out.push(mapped);
@@ -2698,18 +2710,18 @@ function syncInspectionsFromSource_(destSheet, precollected) {
 }
 
 function getInspectionPlans(sessionToken) {
-  const cache = CacheService.getScriptCache();
   const gen = inspectionListCacheGen_();
   try {
-    const hit = cache.get(INSPECTION_LIST_CACHE_KEY);
+    const hit = cacheGetChunks_(INSPECTION_LIST_CACHE_KEY);
     if (hit) return redactSheetAccessForSession_(JSON.parse(hit), sessionToken);
   } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
-  const result = readInspectionsMapped_(sheet);
+  // ห้าม recoverDrive ตอนโหลดรายการ — สแกนโฟลเดอร์ Drive ทำให้ช้ามาก
+  const result = readInspectionsMapped_(sheet, { recoverDrive: false });
   try {
     if (inspectionListCacheGen_() === gen) {
-      cache.put(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC);
+      cachePutChunks_(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC);
     }
   } catch (ignore) {}
   return redactSheetAccessForSession_(result, sessionToken);
@@ -2801,13 +2813,17 @@ function refreshInspectionPlansFromSource(force) {
         const roundOptions = collectInspectionHandoverRoundOptions_(rows, sheet);
         cache.put(INSPECTION_SYNC_CACHE_KEY, String(Date.now()), INSPECTION_SYNC_TTL_SEC);
         invalidateInspectionListCache_();
+        const plans = readInspectionsMapped_(sheet, { recoverDrive: false });
+        try {
+          cachePutChunks_(INSPECTION_LIST_CACHE_KEY, JSON.stringify(plans), LIST_CACHE_TTL_SEC);
+        } catch (ignore) {}
         try {
           cache.put('insp_round_opts_v1', JSON.stringify(roundOptions), 600);
         } catch (ignore) {}
         return {
           synced: true,
           count: n,
-          plans: readInspectionsMapped_(sheet),
+          plans: plans,
           roundOptions: roundOptions,
           sourceTitle: INSPECTION_SOURCE_TITLE,
           sourceUrl: INSPECTION_SOURCE_URL
