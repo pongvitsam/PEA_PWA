@@ -200,6 +200,17 @@
       background: #f8fafc; border-radius: 16px; padding: 1rem;
       border: 1px solid var(--pwa-border);
     }
+    .inspection-map-details .insp-file-stack {
+      display: flex; flex-direction: column; gap: 0.35rem;
+    }
+    .inspection-map-details .insp-file-link {
+      display: flex; align-items: center; gap: 0.4rem;
+      padding: 0.5rem 0.65rem; border-radius: 8px;
+      background: #fef2f2; border: 1px solid #fecaca;
+      color: #991b1b; text-decoration: none; font-weight: 600; font-size: 0.82rem;
+      word-break: break-word;
+    }
+    .inspection-map-details .insp-file-link:hover { background: #fee2e2; color: #7f1d1d; }
     .inspection-trip-panel {
       flex: 1; min-height: 0; overflow: hidden;
       background: #eff6ff; border-radius: 16px; padding: 0.85rem 1rem;
@@ -213,7 +224,9 @@
       display: flex; align-items: flex-start; gap: 0.5rem;
       background: #fff; border-radius: 10px; padding: 0.5rem 0.65rem;
       border: 1px solid var(--pwa-border); margin-bottom: 0.4rem;
+      cursor: pointer;
     }
+    .inspection-trip-panel .insp-trip-stop:hover { border-color: #93c5fd; background: #f8fbff; }
     .inspection-trip-panel .insp-trip-drag {
       cursor: grab; color: #94a3b8; padding: 0.1rem 0.15rem 0; flex-shrink: 0; line-height: 1.2;
     }
@@ -7065,6 +7078,43 @@
       return '<div class="insp-file-stack">' + inner + '</div>';
     }
 
+    function collectInspectionMapPdfEntries_(p, loc) {
+      const seen = {};
+      const items = [];
+      function add(name, url) {
+        const u = String(url || '').trim();
+        if (!u || seen[u]) return;
+        seen[u] = true;
+        items.push({ name: name || 'ไฟล์ PDF', url: u });
+      }
+      parseInspectionFileCommentEntries_(p && p.fileComment).forEach(function(e) {
+        if (e.url) add(e.name, e.url);
+      });
+      if (loc) {
+        if (loc.link) add('SLD Asbuilt', loc.link);
+        if (loc.linkPEA) add('SLD PEA Approved', loc.linkPEA);
+        getMapInspectionFileEntries_(loc).forEach(function(e) {
+          if (e.url) add(e.name, e.url);
+        });
+      }
+      return items;
+    }
+
+    function renderInspectionMapPdfBlock_(p, loc) {
+      const pdfs = collectInspectionMapPdfEntries_(p, loc);
+      const canEdit = canEditInspection();
+      const safeId = String((p && p.id) || '').replace(/'/g, "\\'");
+      let inner = '';
+      pdfs.forEach(function(e) {
+        inner += '<a href="' + escHtml(e.url) + '" target="_blank" rel="noopener" class="insp-file-link"><i class="fa-solid fa-file-pdf text-danger"></i><span>' + escHtml(e.name) + '</span></a>';
+      });
+      if (!pdfs.length && canEdit && p && p.id) {
+        inner += '<button type="button" class="btn btn-sm btn-outline-success py-1 px-2" onclick="openInspectionFileUploadById(\'' + safeId + '\')"><i class="fa-solid fa-upload"></i> อัปโหลด PDF</button>';
+      }
+      if (!inner) return '<span class="text-muted small">ยังไม่มีไฟล์ PDF</span>';
+      return '<div class="insp-file-stack">' + inner + '</div>';
+    }
+
     function applyInspectionUploadSuccess_(planId, res) {
       const ui = consumeInspectionUiStash_();
       const idx = inspectionData.findIndex(function(x) { return String(x.id) === String(planId); });
@@ -8141,14 +8191,14 @@
         const sub = stop.isMyLocation
           ? 'ตำแหน่ง GPS ของคุณ'
           : [(stop.region || ''), (formatInspectionHandoverDate_(stop.handoverRound, false) || stop.handoverRound || '')].filter(Boolean).join(' · ');
-        return '<div class="insp-trip-stop" data-idx="' + idx + '">' +
+        return '<div class="insp-trip-stop" data-idx="' + idx + '" onclick="focusInspectionTripStopDetails_(' + idx + ')" title="ดูรายละเอียด">' +
           '<div class="insp-trip-drag" title="ลากเพื่อเปลี่ยนลำดับ"><i class="fa-solid fa-grip-vertical"></i></div>' +
           '<div class="insp-trip-num">' + (idx + 1) + '</div>' +
           '<div class="flex-grow-1 small">' +
             '<div class="fw-semibold">' + escHtml(stop.name || '-') + '</div>' +
             (sub ? '<div class="text-muted" style="font-size:0.75rem">' + escHtml(sub) + '</div>' : '') +
           '</div>' +
-          '<button type="button" class="btn btn-sm btn-outline-danger border-0 py-0 px-1" onclick="removeInspectionTripStop_(' + idx + ')" title="ลบ"><i class="fa-solid fa-xmark"></i></button>' +
+          '<button type="button" class="btn btn-sm btn-outline-danger border-0 py-0 px-1" onclick="event.stopPropagation();removeInspectionTripStop_(' + idx + ')" title="ลบ"><i class="fa-solid fa-xmark"></i></button>' +
           '</div>';
       }).join('');
       bindInspectionTripSortable_();
@@ -8181,6 +8231,55 @@
         });
       }).catch(function() {});
     }
+
+    function inspectionPlanFromTripStop_(stop) {
+      if (!stop || stop.isMyLocation) return null;
+      const data = inspectionData || [];
+      if (stop.inspectionId) {
+        const byId = data.find(function(x) { return String(x.id) === String(stop.inspectionId); });
+        if (byId) return byId;
+      }
+      if (stop.key && String(stop.key).indexOf('insp:') === 0) {
+        const id = String(stop.key).slice(5);
+        const byKey = data.find(function(x) { return String(x.id) === id; });
+        if (byKey) return byKey;
+      }
+      if (stop.place) {
+        const byPlace = data.find(function(x) { return String(x.place || '') === String(stop.place || ''); });
+        if (byPlace) return byPlace;
+      }
+      return null;
+    }
+
+    function scrollInspectionMapDetailsIntoView_() {
+      if (!window.matchMedia('(max-width: 991.98px)').matches) return;
+      const d = document.getElementById('inspectionMapDetails');
+      if (d) try { d.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    }
+
+    function showInspectionTripGpsDetails_(stop) {
+      const panel = document.getElementById('inspectionMapDetails');
+      if (!panel || !stop) return;
+      panel.dataset.inspSelected = '';
+      const lat = Number(stop.lat), lng = Number(stop.lng);
+      const hasCoords = isFinite(lat) && isFinite(lng);
+      panel.innerHTML =
+        '<div class="mb-2"><span class="badge bg-info text-dark">จุดเริ่มต้น GPS</span></div>' +
+        '<h6 class="fw-bold mb-2">' + escHtml(stop.name || 'ตำแหน่งของฉัน (GPS)') + '</h6>' +
+        (hasCoords ? '<div class="small text-muted mb-2">พิกัด ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '</div>' : '') +
+        (hasCoords
+          ? '<button type="button" class="btn btn-outline-primary btn-sm" onclick="window.open(BASE_NAV_URL+\'&destination=' + lat + ',' + lng + '\',\'_blank\')"><i class="fa-brands fa-google"></i> นำทางจุดนี้</button>'
+          : '');
+    }
+
+    window.focusInspectionTripStopDetails_ = function(idx) {
+      const stop = inspectionTripStops[idx];
+      if (!stop) return;
+      const p = inspectionPlanFromTripStop_(stop);
+      if (p) showInspectionMapDetails_(p);
+      else showInspectionTripGpsDetails_(stop);
+      scrollInspectionMapDetailsIntoView_();
+    };
 
     function createInspectionTripNumberIcon_(num, isStart, isEnd) {
       const color = isStart ? '#2563eb' : (isEnd ? '#ef4444' : '#0ea5e9');
@@ -8229,7 +8328,9 @@
             zIndexOffset: 800,
             pane: 'inspTripStopPane'
           });
-          marker.bindPopup('<div class="small"><b>จุดที่ ' + (idx + 1) + '</b><br>' + escHtml(s.name || '-') + '</div>');
+          marker.on('click', function() {
+            focusInspectionTripStopDetails_(idx);
+          });
           inspectionTripMarkersLayer.addLayer(marker);
         });
         if (pts.length === 1) {
@@ -8511,7 +8612,7 @@
         .filter(function(e) { return !e.url; })
         .map(function(e) { return e.name; })
         .join('\n');
-      const fileHtml = renderInspectionFileCommentHtml_(latest);
+      const fileHtml = renderInspectionMapPdfBlock_(latest, loc);
       const noteHtml = canEdit
         ? ('<textarea class="form-control form-control-sm mt-1" rows="2" data-id="' + escHtml(String(latest.id)) +
           '" placeholder="หมายเหตุ File comment..." autocomplete="off" onchange="saveInspectionMapFileNotes_(this)">' +
@@ -8549,7 +8650,7 @@
           '</div>')
           : '') +
         '<div class="border-top pt-2 mt-2">' +
-          '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-file-pdf me-1"></i>File comment</div>' +
+          '<div class="fw-bold small text-primary mb-1"><i class="fa-solid fa-file-pdf me-1"></i>ไฟล์ PDF / File comment</div>' +
           fileHtml + noteHtml +
         '</div>' +
         distBlock +
