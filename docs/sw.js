@@ -1,5 +1,5 @@
-/* PEA PWA — cache shell assets for iOS Home Screen / offline reopen */
-const CACHE = 'pea-pwa-shell-v3';
+/* PEA PWA — HTML/JS ดึงจากเน็ตก่อน (ให้มือถือตรงกับเว็บ) แคชไว้ตอนออฟไลน์ */
+const CACHE = 'pea-pwa-shell-v4';
 const PRECACHE = [
   './',
   './index.html',
@@ -32,6 +32,12 @@ self.addEventListener('activate', function (event) {
   );
 });
 
+function isShellAsset_(url) {
+  const p = url.pathname || '';
+  return p.endsWith('.html') || p.endsWith('.js') || p.endsWith('.webmanifest') ||
+    p.endsWith('/') || p.indexOf('/icons/') >= 0;
+}
+
 self.addEventListener('fetch', function (event) {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -43,18 +49,34 @@ self.addEventListener('fetch', function (event) {
   // same-origin shell only
   if (url.origin !== self.location.origin) return;
 
+  const isHtmlJs = url.pathname.endsWith('.html') || url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.webmanifest') || url.pathname.endsWith('/');
+
   event.respondWith(
-    caches.match(req).then(function (cached) {
-      const network = fetch(req).then(function (res) {
-        if (res && res.ok && (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('.webmanifest') || url.pathname.indexOf('/icons/') >= 0)) {
-          const copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(req, copy); });
-        }
-        return res;
-      }).catch(function () {
-        return cached || caches.match('./index.html');
-      });
-      return cached || network;
-    })
+    (isHtmlJs
+      ? fetch(req).then(function (res) {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then(function (c) { c.put(req, copy); });
+          }
+          return res;
+        }).catch(function () {
+          return caches.match(req).then(function (cached) {
+            return cached || caches.match('./app.html') || caches.match('./index.html');
+          });
+        })
+      : caches.match(req).then(function (cached) {
+          const network = fetch(req).then(function (res) {
+            if (res && res.ok && isShellAsset_(url)) {
+              const copy = res.clone();
+              caches.open(CACHE).then(function (c) { c.put(req, copy); });
+            }
+            return res;
+          }).catch(function () {
+            return cached || caches.match('./index.html');
+          });
+          return cached || network;
+        })
+    )
   );
 });

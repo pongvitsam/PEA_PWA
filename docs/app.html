@@ -1556,7 +1556,7 @@
   
     <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=26"></script>
+  <script src="js/pwa-gas-api.js?v=27"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2694,10 +2694,20 @@
       const standalone = isIosWebAppStandalone_();
       if (standalone) document.documentElement.classList.add('pea-standalone');
 
-      // Service Worker: ใช้บน GitHub Pages / HTTPS — ช่วยเปิด Web App บน iOS เร็วขึ้น
+      // Service Worker: ใช้บน GitHub Pages / HTTPS — HTML ดึงจากเน็ตก่อนให้มือถือตรงกับเว็บ
       if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-        const swUrl = 'sw.js';
-        navigator.serviceWorker.register(swUrl).catch(function () { /* GAS / path ไม่มี sw ก็ข้าม */ });
+        const swUrl = 'sw.js?v=4';
+        navigator.serviceWorker.register(swUrl).then(function (reg) {
+          try { reg.update(); } catch (e) {}
+        }).catch(function () { /* GAS / path ไม่มี sw ก็ข้าม */ });
+        if (!window._peaSwReloadBound_) {
+          window._peaSwReloadBound_ = true;
+          navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (window._peaSwRefreshing_) return;
+            window._peaSwRefreshing_ = true;
+            window.location.reload();
+          });
+        }
       }
 
       const ua = navigator.userAgent || '';
