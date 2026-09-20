@@ -1157,11 +1157,9 @@
           <div class="col-md-2">
             <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
               <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
-              <option value="">ทุกเฟส</option>
+              <option value="">เฟส 3 และ 4 (รวมไม่ระบุเฟส)</option>
               <option value="3">เฟส 3</option>
               <option value="4">เฟส 4</option>
-              <option value="1">เฟส 1</option>
-              <option value="2">เฟส 2</option>
             </select>
           </div>
           <div class="col-md-2">
@@ -2137,6 +2135,33 @@
         .replace(/\s*\(เฟส\s*[^)]+\)\s*$/i, '').trim();
     }
 
+    /** เฟส 1–4 จากแผนที่โครงการ / คอลัมน์ Phase — รองรับตัวเลข, "3.0", "เฟส 3" */
+    function projectPhaseDigit_(phase) {
+      if (phase == null || phase === '') return '';
+      if (typeof phase === 'number' && isFinite(phase)) {
+        const n = Math.round(phase);
+        return (n >= 1 && n <= 4) ? String(n) : '';
+      }
+      const s = String(phase).trim();
+      if (s === '1' || s === '2' || s === '3' || s === '4') return s;
+      const asNum = Number(s);
+      if (isFinite(asNum) && asNum >= 1 && asNum <= 4 && Math.abs(asNum - Math.round(asNum)) < 1e-9) {
+        return String(Math.round(asNum));
+      }
+      const m = s.match(/[1-4]/);
+      return m ? m[0] : '';
+    }
+
+    function isProjectMapPhase34_(loc) {
+      const d = projectPhaseDigit_(loc && loc.phase);
+      return d === '3' || d === '4';
+    }
+
+    function isProjectMapPhase12_(loc) {
+      const d = projectPhaseDigit_(loc && loc.phase);
+      return d === '1' || d === '2';
+    }
+
     function clearAuthState() {
       userRole = '';
       sessionToken = null;
@@ -2191,6 +2216,8 @@
     let _locationLookupCache_ = null;
     let _outageRegionCache_ = {};
     let _inspMapLocCache_ = {};
+    let _inspLocExact34_ = null;
+    let _inspLocExact12_ = null;
     let _inspRenderRaf_ = 0;
 
     function debounce_(fn, ms) {
@@ -2297,13 +2324,31 @@
 
     function rebuildLocationLookup_() {
       _locationLookupCache_ = { exact: new Map(), list: [] };
+      const exact34 = new Map();
+      const exact12 = new Map();
+      function addExactPhase_(map, key, d) {
+        if (!key) return;
+        let arr = map.get(key);
+        if (!arr) { arr = []; map.set(key, arr); }
+        arr.push(d);
+      }
       (allData || []).forEach(function(d) {
         const nameOnly = normalizeNameForMatch(d.name);
         const label = normalizeNameForMatch(getLocLabel(d));
+        const digit = projectPhaseDigit_(d.phase);
         if (nameOnly) _locationLookupCache_.exact.set(nameOnly, d);
         if (label && label !== nameOnly) _locationLookupCache_.exact.set(label, d);
-        _locationLookupCache_.list.push({ d: d, nameOnly: nameOnly });
+        _locationLookupCache_.list.push({ d: d, nameOnly: nameOnly, digit: digit });
+        if (digit === '3' || digit === '4') {
+          addExactPhase_(exact34, nameOnly, d);
+          if (label && label !== nameOnly) addExactPhase_(exact34, label, d);
+        } else if (digit === '1' || digit === '2') {
+          addExactPhase_(exact12, nameOnly, d);
+          if (label && label !== nameOnly) addExactPhase_(exact12, label, d);
+        }
       });
+      _inspLocExact34_ = exact34;
+      _inspLocExact12_ = exact12;
       _outageRegionCache_ = {};
       _inspMapLocCache_ = {};
     }
@@ -2372,6 +2417,9 @@
       try { renderTable(); } catch (e) {}
       if (dashboardEverOpened) {
         try { generateDashboard(); } catch (e) {}
+      }
+      if (inspectionInitialized) {
+        try { filterInspections(captureInspectionUiState_()); } catch (e) {}
       }
     }
 
@@ -5291,6 +5339,53 @@
       return null;
     }
 
+    function pickBestNamedLocationForDigits_(projectName, digits) {
+      if (!projectName || !allData) return null;
+      if (!_locationLookupCache_) rebuildLocationLookup_();
+      const q = normalizeNameForMatch(projectName);
+      if (!q) return null;
+      const exactMap = (digits === '34') ? _inspLocExact34_ : _inspLocExact12_;
+      const exact = exactMap && exactMap.get(q);
+      if (exact && exact.length) return exact[0];
+      let best = null;
+      let bestScore = 0;
+      const list = _locationLookupCache_.list || [];
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const digit = item.digit || projectPhaseDigit_(item.d && item.d.phase);
+        if (digits === '34') {
+          if (digit !== '3' && digit !== '4') continue;
+        } else if (digit !== '1' && digit !== '2') continue;
+        const nameOnly = item.nameOnly;
+        if (!nameOnly || nameOnly === q) continue;
+        const shorter = nameOnly.length <= q.length ? nameOnly : q;
+        const longer = nameOnly.length <= q.length ? q : nameOnly;
+        if (shorter.length < 8) continue;
+        if (longer.indexOf(shorter) < 0) continue;
+        const score = shorter.length * 10 + (nameOnly.length === q.length ? 5 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = item.d;
+        }
+      }
+      return best;
+    }
+
+    function findLocationForInspection_(projectName) {
+      return pickBestNamedLocationForDigits_(projectName, '34');
+    }
+
+    /** สถานที่เฟส 1–2 ของแผนที่โครงการห้ามโชว์ในหน้าแผนตรวจรับเฟส 3–4 */
+    function inspectionBlockedAsProjectPhase12_(p) {
+      const sheetPh = projectPhaseDigit_(p && p.phase);
+      if (sheetPh === '1' || sheetPh === '2') return true;
+      const q = normalizeNameForMatch(p && p.place);
+      if (!q) return false;
+      if (_inspLocExact34_ && _inspLocExact34_.has(q)) return false;
+      if (_inspLocExact12_ && _inspLocExact12_.has(q)) return true;
+      return false;
+    }
+
     function getOutageRegionCached_(projectName) {
       if (!projectName) return '';
       if (_outageRegionCache_[projectName] !== undefined) return _outageRegionCache_[projectName];
@@ -5364,7 +5459,8 @@
     function getInspectionMapLocation_(p) {
       const cacheKey = String((p && p.id) || (p && p.place) || '');
       if (cacheKey && _inspMapLocCache_[cacheKey]) return _inspMapLocCache_[cacheKey];
-      const loc = findLocationForOutage(p && p.place);
+      const found = findLocationForInspection_(p && p.place);
+      const loc = (found && isProjectMapPhase34_(found)) ? found : null;
       let result;
       if (loc) {
         const index = allData.findIndex(function(d) { return d.row === loc.row; });
@@ -6250,7 +6346,10 @@
         inspectionActiveRegion = ui.region;
       }
       const phaseEl = document.getElementById('inspectionPhaseSelect');
-      if (phaseEl && ui.phase != null) phaseEl.value = ui.phase;
+      if (phaseEl && ui.phase != null) {
+        const allowed = { '34': 1, '': 1, '3': 1, '4': 1 };
+        phaseEl.value = allowed[ui.phase] ? ui.phase : '34';
+      }
       const visitedEl = document.getElementById('inspectionVisitedSelect');
       if (visitedEl && ui.visited != null) visitedEl.value = ui.visited;
       const searchEl = document.getElementById('inspectionSearchInput');
@@ -6418,7 +6517,9 @@
       const sel = document.getElementById('inspectionPwaSelect');
       if (!sel) return;
       const cur = (ui && ui.pwa) ? ui.pwa : sel.value;
-      const districts = [...new Set((inspectionData || []).map(p => (p.pwaDistrict || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+      const districts = [...new Set((inspectionData || []).filter(function(p) {
+        return !inspectionBlockedAsProjectPhase12_(p);
+      }).map(p => (p.pwaDistrict || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
       sel.innerHTML = '<option value="">ทุกเขต กปภ.</option>' + districts.map(d => '<option value="' + escHtml(d) + '">' + escHtml(d) + '</option>').join('');
       if (cur && districts.includes(cur)) sel.value = cur;
       setupInspectionHandoverFilters_(ui);
@@ -6584,8 +6685,9 @@
     window.onInspectionMapSearchInput_ = onInspectionMapSearchInput_;
 
     function inspectionMatchesPhaseFilter_(p, phaseVal) {
-      const ph = String(p.phase || '').trim();
-      if (!phaseVal) return true;
+      if (inspectionBlockedAsProjectPhase12_(p)) return false;
+      const ph = projectPhaseDigit_(p.phase);
+      if (!phaseVal) return ph !== '1' && ph !== '2';
       if (phaseVal === '34') return ph === '3' || ph === '4';
       return ph === phaseVal;
     }
@@ -6932,6 +7034,7 @@
     function getInspectionUniqueValues_(key, col) {
       const set = new Set();
       (inspectionData || []).forEach(function(p) {
+        if (inspectionBlockedAsProjectPhase12_(p)) return;
         if (key === 'mapLocation') {
           const info = getInspectionMapLocation_(p);
           const v = String(info.name || '').trim();
@@ -8138,9 +8241,10 @@
     };
 
     function inspectionTripStopFromPlan_(p) {
+      if (inspectionBlockedAsProjectPhase12_(p)) return null;
       const info = getInspectionMapLocation_(p);
       const loc = info.loc;
-      if (!loc || !isFinite(Number(loc.lat)) || !isFinite(Number(loc.lng))) return null;
+      if (!loc || !isProjectMapPhase34_(loc) || !isFinite(Number(loc.lat)) || !isFinite(Number(loc.lng))) return null;
       return {
         key: 'insp:' + String(p.id),
         inspectionId: p.id,
@@ -8162,6 +8266,7 @@
       const opts = [];
       const seen = {};
       (inspectionData || []).forEach(function(p) {
+        if (inspectionBlockedAsProjectPhase12_(p)) return;
         const stop = inspectionTripStopFromPlan_(p);
         if (!stop) return;
         const label = stop.name + (stop.region ? ' (' + stop.region + ')' : '');
@@ -8459,6 +8564,7 @@
       }
       let matched = null;
       (inspectionData || []).some(function(p) {
+        if (inspectionBlockedAsProjectPhase12_(p)) return false;
         const stop = inspectionTripStopFromPlan_(p);
         if (!stop) return false;
         const label = (stop.name + (stop.region ? ' (' + stop.region + ')' : '')).toLowerCase();
