@@ -1105,8 +1105,8 @@
         <div class="row g-2 mb-3 align-items-end" id="inspectionMapFilterBar">
           <div class="col-12">
             <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
-              <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> ตรวจแล้ว+มีไฟล์</span>
-              <span><span class="insp-lg-swatch is-nofile" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span> ไปแล้ว ยังไม่อัปไฟล์</span>
+              <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> มี File comment</span>
+              <span><span class="insp-lg-swatch is-nofile" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span> ไปแล้ว ยังไม่อัป File comment</span>
               <span><span class="insp-lg-swatch is-ready" aria-hidden="true"><i class="fa-solid fa-exclamation"></i></span> พร้อมเข้าตรวจ</span>
               <span><span class="insp-lg-swatch is-pending" aria-hidden="true"><i class="fa-regular fa-circle"></i></span> ยังไม่พร้อม</span>
               <span><i class="fa-solid fa-circle" style="color:#0ea5e9"></i> ตำแหน่งของฉัน</span>
@@ -1449,7 +1449,6 @@
         <div class="border rounded-3 p-3 mb-3" style="background:#f8fbff;">
           <h6 class="fw-bold small text-primary mb-2"><i class="fa-solid fa-calendar-check"></i> กำหนดการ</h6>
           <div class="row g-2">
-            <div class="col-md-6"><label class="form-label small text-muted mb-0">แผนส่งมอบงาน</label><input type="text" id="insp_handoverPlan" class="form-control form-control-sm" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">รอบส่งมอบงานจริง</label><input type="text" id="insp_handoverRound" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
             <div class="col-md-6"><label class="form-label small text-muted mb-0">กำหนดตรวจงาน</label><input type="text" id="insp_inspectSchedule" class="form-control form-control-sm insp-modal-date" placeholder="เช่น 15 มกราคม 2568" autocomplete="off"></div>
           </div>
@@ -2571,11 +2570,17 @@
       return icons.blue;
     }
 
+    /** มีไฟล์อัปในคอลัมน์ File comment เท่านั้น (ไม่นับ SLD / ไฟล์จากฐานสถานที่) */
+    function inspectionHasUploadedFileComment_(p) {
+      return inspectionHasFileUrl_(p && p.fileComment);
+    }
+
     /** หมุดแผนที่ตรวจรับ: สี + สัญลักษณ์ (รองรับตาบอดสี) — ไม่ใช้สีเฟส */
     function getInspectionMapStatusKey_(p) {
-      if (p && p.visited) {
-        return inspectionHasFileUrl_(p.fileComment) ? 'done' : 'nofile';
-      }
+      // ติ๊กถูก = มี URL ใน File comment เท่านั้น
+      if (inspectionHasUploadedFileComment_(p)) return 'done';
+      // กากบาท = กดไปแล้ว แต่ยังไม่มี File comment
+      if (p && p.visited) return 'nofile';
       if (inspectionHasHandoverRound_(p)) return 'ready';
       return 'pending';
     }
@@ -2588,10 +2593,10 @@
       let label;
       if (key === 'done') {
         symbol = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
-        label = 'ตรวจแล้ว (มีไฟล์)';
+        label = 'มี File comment';
       } else if (key === 'nofile') {
         symbol = '<i class="fa-solid fa-xmark" aria-hidden="true"></i>';
-        label = 'ไปแล้ว ยังไม่อัปไฟล์';
+        label = 'ไปแล้ว ยังไม่อัป File comment';
       } else if (key === 'ready') {
         symbol = '<i class="fa-solid fa-exclamation" aria-hidden="true"></i>';
         label = 'พร้อมเข้าตรวจ';
@@ -2632,9 +2637,9 @@
         html += '<div class="insp-map-tip-meta">จ.' + escHtml(info.province) + '</div>';
       }
       const visitLine = statusKey === 'done'
-        ? 'ตรวจแล้ว · มีไฟล์'
+        ? 'มี File comment'
         : (statusKey === 'nofile'
-          ? 'ไปแล้ว · ยังไม่อัปไฟล์'
+          ? 'ไปแล้ว · ยังไม่อัป File comment'
           : ((p && p.visited ? 'ตรวจแล้ว' : 'ยังไม่เข้าตรวจ') + ' · ' + (hasRound ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม')));
       html += '<div class="insp-map-tip-meta">' + statusSymbol + visitLine + '</div>';
       if (schedule) {
@@ -6364,19 +6369,18 @@
 
     const INSPECTION_FIELD_LABELS_ = [
       ['pwaBranch', 'กปภ. สาขา'], ['pwaDistrict', 'กปภ. เขต'], ['peaZone', 'เขต กฟภ.'], ['peaOffice', 'กฟจ./สำนักงาน กฟภ.'],
-      ['handoverPlan', 'แผนส่งมอบงาน'], ['handoverRound', 'รอบส่งมอบงานจริง'], ['inspectSchedule', 'กำหนดตรวจงาน'],
+      ['handoverRound', 'รอบส่งมอบงานจริง'], ['inspectSchedule', 'กำหนดตรวจงาน'],
       ['inspectors', 'รายชื่อคนเข้าตรวจ'], ['fileComment', 'File comment'], ['committee', 'คณะกรรมการตรวจรับ'],
       ['passLetterStatusWork', 'ใบนำตัว (ตรวจงาน)'], ['passLetterStatus', 'ใบนำตัว (ตรวจรับ)'], ['tcCoordinator', 'ผู้ประสานงาน TC'], ['tcContact', 'เบอร์ TC']
     ];
 
-    const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'mapLocation', 'peaZone', 'handoverPlan', 'handoverRound'];
+    const INSPECTION_FILTERABLE_KEYS_ = ['region', 'phase', 'mapLocation', 'peaZone', 'handoverRound'];
 
     const INSPECTION_TABLE_COLUMNS_ = [
       { key: 'region', label: 'ภาค', readOnly: true, cls: 'col-region', type: 'region' },
       { key: 'phase', label: 'Phase', readOnly: true, type: 'phase' },
       { key: 'mapLocation', label: 'สถานที่', readOnly: true, cls: 'col-place', type: 'mapLocation' },
       { key: 'peaZone', label: 'เขต กฟภ.', readOnly: true },
-      { key: 'handoverPlan', label: 'แผนส่งมอบงาน', readOnly: true, type: 'thaiDate' },
       { key: 'handoverRound', label: 'รอบส่งมอบงานจริง', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 มกราคม 2568' },
       { key: 'inspectSchedule', label: 'กำหนดตรวจงาน', editable: true, type: 'thaiDate', placeholder: 'เช่น 15 มกราคม 2568' },
       { key: 'inspectors', label: 'รายชื่อคนเข้าตรวจ', editable: true, placeholder: 'ชื่อผู้เข้าตรวจ...' },
@@ -6726,30 +6730,9 @@
       });
     }
 
-    /** ครั้งที่ 1 = วันส่งมอบจริงที่เร็วที่สุด (ทุกภาค) */
+    /** ครั้งที่ 1 = วันแรกของคอลัมน์รอบส่งมอบงานจริง ในรายการที่กำลังแสดง */
     function getInspectionRoundOrdinalLookup_() {
-      const seen = {};
-      const labels = [];
-      function add_(raw) {
-        const clean = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(raw, false) || String(raw || '').trim());
-        if (!clean) return;
-        const key = inspectionHandoverDateKey_(clean) || clean;
-        if (seen[key]) return;
-        seen[key] = true;
-        labels.push(clean);
-      }
-      (inspectionHandoverRoundOptions_ || []).forEach(add_);
-      (inspectionData || []).forEach(function(p) {
-        if (!p || !p.handoverRound) return;
-        const planRaw = String(p.handoverPlan || '').trim();
-        const roundRaw = String(p.handoverRound || '').trim();
-        if (planRaw) {
-          const rk = inspectionHandoverDateKey_(roundRaw);
-          const pk = inspectionHandoverDateKey_(planRaw);
-          if (rk && pk && rk === pk) return;
-        }
-        add_(roundRaw);
-      });
+      const labels = collectInspectionRoundLabels_(getInspectionContextFilteredPlans_());
       const ordered = sortInspectionRoundLabels_(labels);
       const byKey = {};
       ordered.forEach(function(label, idx) {
@@ -6776,6 +6759,7 @@
       return n ? (label + ' (ครั้งที่ ' + n + ')') : label;
     }
 
+    /** วันที่รอบ = คอลัมน์รอบส่งมอบงานจริงเท่านั้น ไม่ใช้แผนส่งมอบงานหรือกำหนดตรวจ */
     function collectInspectionRoundLabels_(plans) {
       const rounds = [];
       const seenLabel = {};
@@ -6783,13 +6767,8 @@
       (plans || []).forEach(function(p) {
         const roundRaw = String((p && p.handoverRound) || '').trim();
         if (!roundRaw) return;
-        const planRaw = String((p && p.handoverPlan) || '').trim();
-        if (planRaw) {
-          const rk = inspectionHandoverDateKey_(roundRaw);
-          const pk = inspectionHandoverDateKey_(planRaw);
-          if (rk && pk && rk === pk) return; // ข้ามค่าที่คัดลอกจากแผนส่งมอบ
-        }
         const roundLabel = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(roundRaw, false) || roundRaw);
+        if (!roundLabel) return;
         const key = inspectionHandoverDateKey_(roundRaw) || roundLabel;
         if (seenKey[key] || seenLabel[roundLabel]) return;
         seenKey[key] = true;
@@ -6826,12 +6805,9 @@
           }).filter(Boolean);
         } catch (e) {}
       }
-      // รายการรอบจากสถานที่ที่ตรงตัวกรองบริบท (ภาค/เฟส/ค้นหา/คอลัมน์) — ให้ตรงกับแผนที่+ตาราง
-      let topRounds = collectInspectionRoundLabels_(sourcePlans || []);
-      if (!topRounds.length) {
-        topRounds = collectInspectionRoundLabelsFromOptions_(inspectionHandoverRoundOptions_);
-      }
-      if (!topRounds.length) topRounds = collectInspectionRoundLabels_(inspectionData || []);
+      // รายการรอบ = วันที่ในคอลัมน์รอบส่งมอบงานจริงของแถวที่ตรงตัวกรองเท่านั้น
+      const plans = (sourcePlans && sourcePlans.length) ? sourcePlans : getInspectionContextFilteredPlans_();
+      const topRounds = collectInspectionRoundLabels_(plans);
       const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
         topRounds.map(function(r) {
@@ -8035,7 +8011,6 @@
       document.getElementById('insp_pwaDistrict').value = p.pwaDistrict || '';
       document.getElementById('insp_peaZone').value = p.peaZone || '';
       document.getElementById('insp_peaOffice').value = p.peaOffice || '';
-      document.getElementById('insp_handoverPlan').value = p.handoverPlan || '';
       document.getElementById('insp_handoverRound').value = formatInspectionHandoverDate_(p.handoverRound, false);
       document.getElementById('insp_inspectSchedule').value = formatInspectionHandoverDate_(p.inspectSchedule, false);
       document.getElementById('insp_inspectors').value = p.inspectors || '';
@@ -8065,7 +8040,7 @@
         pwaDistrict: document.getElementById('insp_pwaDistrict').value.trim(),
         peaZone: document.getElementById('insp_peaZone').value.trim(),
         peaOffice: document.getElementById('insp_peaOffice').value.trim(),
-        handoverPlan: document.getElementById('insp_handoverPlan').value.trim(),
+        handoverPlan: existing ? (existing.handoverPlan || '') : '',
         handoverRound: normalizeInspectionDateField_(document.getElementById('insp_handoverRound').value.trim()),
         inspectSchedule: normalizeInspectionDateField_(document.getElementById('insp_inspectSchedule').value.trim()),
         inspectors: document.getElementById('insp_inspectors').value.trim(),
@@ -8906,7 +8881,6 @@
       const loc = info.loc;
       const safeId = String(latest.id).replace(/'/g, "\\'");
       const roundTxt = formatInspectionRoundWithOrdinal_(latest.handoverRound, false) || (latest.handoverRound || '-');
-      const planTxt = formatInspectionHandoverDate_(latest.handoverPlan, false) || (latest.handoverPlan || '-');
       const statusBadge = latest.visited
         ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
         : '<span class="badge bg-warning text-dark">ยังไม่เข้าตรวจ</span>';
@@ -8962,8 +8936,7 @@
           }
           return bits;
         })() +
-        '<div class="small mb-1"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
-        '<div class="small mb-2"><b>แผนส่งมอบงาน:</b> ' + escHtml(planTxt) + '</div>' +
+        '<div class="small mb-2"><b>รอบส่งมอบงานจริง:</b> ' + escHtml(roundTxt) + '</div>' +
         (latest.pwaDistrict ? '<div class="small mb-1"><b>กปภ. เขต:</b> ' + escHtml(latest.pwaDistrict) + '</div>' : '') +
         (latest.peaZone ? '<div class="small mb-2"><b>เขต กฟภ.:</b> ' + escHtml(latest.peaZone) + '</div>' : '') +
         '<div class="border-top pt-2 mt-2">' +
