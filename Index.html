@@ -1023,41 +1023,67 @@
         </div>
         <div class="small mt-2 opacity-90" id="inspectionStatsSummaryText"></div>
       </div>
+      <div class="inspection-shared-filters card border-0 shadow-sm mb-3" id="inspectionSharedFilterBar">
+        <div class="card-body py-3 px-3">
+          <div class="small text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>ตัวกรองร่วม — ใช้กับทั้งแผนที่และรายการตรวจรับ</div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspectionsDebounced_()" autocomplete="off">
+            </div>
+            <div class="col-md-2">
+              <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="inspectionOnRegionFilterChange()">
+                <option value="" selected>ทุกภาค NC+NE+S</option>
+                <option value="NC">NC ภาคกลาง-เหนือ</option>
+                <option value="NE">NE ภาคอีสาน</option>
+                <option value="S">S ภาคใต้</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
+                <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
+                <option value="">เฟส 3 และ 4 (รวมไม่ระบุเฟส)</option>
+                <option value="3">เฟส 3</option>
+                <option value="4">เฟส 4</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
+                <option value="">ทุกสถานะตรวจ</option>
+                <option value="done">ตรวจแล้ว</option>
+                <option value="pending">ยังไม่เข้าตรวจ</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <select id="inspectionPwaSelect" class="form-select form-select-sm" onchange="filterInspections()">
+                <option value="">ทุกเขต กปภ.</option>
+              </select>
+            </div>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <select id="inspectionReadySelect" class="form-select form-select-sm" onchange="filterInspections()" title="มีวันที่รอบส่งมอบ = พร้อมเข้าตรวจ">
+                <option value="">ทุกสถานะความพร้อม</option>
+                <option value="ready">พร้อมเข้าตรวจ (มีวันที่รอบส่งมอบ)</option>
+                <option value="not_ready">ยังไม่พร้อม (ไม่มีวันที่รอบส่งมอบ)</option>
+              </select>
+            </div>
+            <div class="col-md-8">
+              <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="กรองเฉพาะคอลัมน์รอบส่งมอบงานจริง">
+                <option value="">ทุกรอบส่งมอบงานจริง</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="inspection-map-panel">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
-            <small class="text-muted">มีวันที่รอบส่งมอบ = พร้อมเข้าตรวจ · ไม่มีวันที่ = ยังไม่พร้อม — รายการวันที่มาจากสถานที่ที่ตรงตัวกรองตอนนี้เท่านั้น</small>
+            <small class="text-muted">แสดงเฉพาะสถานที่ที่ตรงตัวกรองด้านบน — สอดคล้องกับรายการด้านล่าง</small>
           </div>
           <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
         </div>
         <div class="row g-2 mb-3 align-items-end" id="inspectionMapFilterBar">
-          <div class="col-12 col-md-6 col-lg-4">
-            <label class="form-label small text-muted mb-0" for="inspectionMapSearchInput">ค้นหาชื่อสถานที่</label>
-            <input type="text" id="inspectionMapSearchInput" class="form-control form-control-sm" placeholder="🔍 พิมพ์ชื่อสถานที่ตรวจรับ..." oninput="onInspectionMapSearchInput_()" autocomplete="off">
-          </div>
-          <div class="col-md-4 col-lg-2">
-            <label class="form-label small text-muted mb-0" for="inspectionMapReadySelect">ความพร้อม (รอบส่งมอบงานจริง)</label>
-            <select id="inspectionMapReadySelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="มีวันที่รอบส่งมอบ = พร้อมเข้าตรวจ">
-              <option value="">ทุกสถานะความพร้อม</option>
-              <option value="ready">พร้อมเข้าตรวจ (มีวันที่)</option>
-              <option value="not_ready">ยังไม่พร้อม (ไม่มีวันที่)</option>
-            </select>
-          </div>
-          <div class="col-md-4 col-lg-3">
-            <label class="form-label small text-muted mb-0" for="inspectionMapRoundSelect">รอบส่งมอบงานจริง</label>
-            <select id="inspectionMapRoundSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="เฉพาะวันที่ที่มีในคอลัมน์รอบส่งมอบงานจริงของสถานที่ที่ตรงตัวกรองตอนนี้">
-              <option value="">ทุกรอบที่มีวันที่</option>
-            </select>
-          </div>
-          <div class="col-md-4 col-lg-3">
-            <label class="form-label small text-muted mb-0" for="inspectionMapVisitedSelect">สถานะเข้าตรวจ</label>
-            <select id="inspectionMapVisitedSelect" class="form-select form-select-sm" onchange="onInspectionMapFilterChange_()" title="กรองสถานที่ตรวจแล้ว / ยังไม่เข้าตรวจ">
-              <option value="">ทุกสถานะเข้าตรวจ</option>
-              <option value="pending">ยังไม่เข้าตรวจ</option>
-              <option value="done">ตรวจแล้ว</option>
-            </select>
-          </div>
           <div class="col-12">
             <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
               <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> ตรวจแล้ว</span>
@@ -1141,46 +1167,6 @@
             <div class="insp-form-meta" id="inspFormTemplateMeta">กำลังโหลด...</div>
           </div>
           <div class="d-flex flex-wrap gap-2 align-items-center" id="inspFormTemplateActions"></div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-4">
-            <input type="text" id="inspectionSearchInput" class="form-control form-control-sm" placeholder="🔍 ค้นหาสถานที่ / กปภ. / ผู้ประสาน..." onkeyup="filterInspectionsDebounced_()">
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionRegionSelect" class="form-select form-select-sm" onchange="inspectionOnRegionFilterChange()">
-              <option value="" selected>ทุกภาค NC+NE+S</option>
-              <option value="NC">NC ภาคกลาง-เหนือ</option>
-              <option value="NE">NE ภาคอีสาน</option>
-              <option value="S">S ภาคใต้</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionPhaseSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="34" selected>เฟส 3-4 (ค่าเริ่มต้น)</option>
-              <option value="">เฟส 3 และ 4 (รวมไม่ระบุเฟส)</option>
-              <option value="3">เฟส 3</option>
-              <option value="4">เฟส 4</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionVisitedSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ทุกสถานะตรวจ</option>
-              <option value="done">ตรวจแล้ว</option>
-              <option value="pending">ยังไม่เข้าตรวจ</option>
-            </select>
-          </div>
-          <div class="col-md-2">
-            <select id="inspectionPwaSelect" class="form-select form-select-sm" onchange="filterInspections()">
-              <option value="">ทุกเขต กปภ.</option>
-            </select>
-          </div>
-        </div>
-        <div class="row g-2 mb-3">
-          <div class="col-md-12">
-            <select id="inspectionHandoverRoundSelect" class="form-select form-select-sm" onchange="filterInspections()" title="กรองเฉพาะคอลัมน์รอบส่งมอบงานจริง">
-              <option value="">ทุกรอบส่งมอบงานจริง</option>
-            </select>
-          </div>
         </div>
         <div id="inspectionListContainer"></div>
         <input type="file" id="inspectionFileInput" accept="application/pdf,.pdf" style="display:none">
@@ -6401,9 +6387,8 @@
         phase: document.getElementById('inspectionPhaseSelect')?.value ?? '34',
         visited: document.getElementById('inspectionVisitedSelect')?.value || '',
         pwa: document.getElementById('inspectionPwaSelect')?.value || '',
+        ready: document.getElementById('inspectionReadySelect')?.value || '',
         handoverRound: document.getElementById('inspectionHandoverRoundSelect')?.value || '',
-        mapRound: document.getElementById('inspectionMapRoundSelect')?.value || '',
-        mapSearch: document.getElementById('inspectionMapSearchInput')?.value || '',
         search: document.getElementById('inspectionSearchInput')?.value || '',
         scrollTop: wrap ? wrap.scrollTop : 0,
         windowScrollY: window.scrollY || document.documentElement.scrollTop || 0
@@ -6447,12 +6432,17 @@
       if (searchEl && ui.search != null) searchEl.value = ui.search;
       const pwaEl = document.getElementById('inspectionPwaSelect');
       if (pwaEl && ui.pwa != null && [...pwaEl.options].some(o => o.value === ui.pwa)) pwaEl.value = ui.pwa;
+      const readyEl = document.getElementById('inspectionReadySelect');
+      if (readyEl && ui.ready != null) readyEl.value = ui.ready;
+      // migrate old map-only filters into shared bar
+      if (readyEl && !ui.ready && ui.mapReady) readyEl.value = ui.mapReady;
       const roundEl = document.getElementById('inspectionHandoverRoundSelect');
-      if (roundEl && ui.handoverRound != null && [...roundEl.options].some(o => o.value === ui.handoverRound)) roundEl.value = ui.handoverRound;
-      const mapRoundEl = document.getElementById('inspectionMapRoundSelect');
-      if (mapRoundEl && ui.mapRound != null && [...mapRoundEl.options].some(o => o.value === ui.mapRound)) mapRoundEl.value = ui.mapRound;
-      const mapSearchEl = document.getElementById('inspectionMapSearchInput');
-      if (mapSearchEl && ui.mapSearch != null) mapSearchEl.value = ui.mapSearch;
+      const desiredRound = (ui.handoverRound != null && ui.handoverRound !== '')
+        ? ui.handoverRound
+        : (ui.mapRound || '');
+      if (roundEl && desiredRound && [...roundEl.options].some(o => o.value === desiredRound)) roundEl.value = desiredRound;
+      if (searchEl && !ui.search && ui.mapSearch) searchEl.value = ui.mapSearch;
+      if (visitedEl && !ui.visited && ui.mapVisited) visitedEl.value = ui.mapVisited;
     }
 
     function inspectionOnRegionFilterChange() {
@@ -6728,8 +6718,7 @@
 
     function setupInspectionHandoverFilters_(ui, sourcePlans) {
       const roundSel = document.getElementById('inspectionHandoverRoundSelect');
-      const mapRoundSel = document.getElementById('inspectionMapRoundSelect');
-      if (!roundSel && !mapRoundSel) return;
+      if (!roundSel) return;
       if (!inspectionHandoverRoundOptions_) {
         try {
           const cached = JSON.parse(localStorage.getItem('pwa_insp_round_opts_v2') || localStorage.getItem('pwa_insp_round_opts_v1') || 'null');
@@ -6738,49 +6727,21 @@
           }).filter(Boolean);
         } catch (e) {}
       }
-      // dropdown บนตาราง: ใช้รายการจากชีทต้นทางเป็นหลัก (กันวันที่เพี้ยน/ลอย)
-      let topRounds = collectInspectionRoundLabelsFromOptions_(inspectionHandoverRoundOptions_);
-      if (!topRounds.length) topRounds = collectInspectionRoundLabels_(inspectionData || []);
-      else {
-        const seen = {};
-        topRounds.forEach(function(r) { seen[r] = true; });
-        collectInspectionRoundLabels_(inspectionData || []).forEach(function(r) {
-          if (seen[r]) return;
-          seen[r] = true;
-          topRounds.push(r);
-        });
-        topRounds.sort(function(a, b) {
-          const ka = inspectionHandoverDateKey_(a);
-          const kb = inspectionHandoverDateKey_(b);
-          if (ka && kb) return ka.localeCompare(kb);
-          if (ka) return -1;
-          if (kb) return 1;
-          return a.localeCompare(b, 'th');
-        });
+      // รายการรอบจากสถานที่ที่ตรงตัวกรองบริบท (ภาค/เฟส/ค้นหา/คอลัมน์) — ให้ตรงกับแผนที่+ตาราง
+      let topRounds = collectInspectionRoundLabels_(sourcePlans || []);
+      if (!topRounds.length) {
+        topRounds = collectInspectionRoundLabelsFromOptions_(inspectionHandoverRoundOptions_);
       }
-      // dropdown แผนที่: เฉพาะวันที่ของสถานที่ที่ตรงตัวกรองตอนนี้
-      const mapRounds = collectInspectionRoundLabels_(sourcePlans || inspectionData || []);
+      if (!topRounds.length) topRounds = collectInspectionRoundLabels_(inspectionData || []);
       const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
         topRounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
-      const mapRoundOptionsHtml = '<option value="">ทุกรอบที่มีวันที่ (คอลัมน์รอบส่งมอบงานจริง)</option>' +
-        mapRounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
       const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
         ? ui.handoverRound
-        : ((roundSel && roundSel.value) || '');
-      if (roundSel) {
-        roundSel.innerHTML = topRoundOptionsHtml;
-        const picked = pickInspectionRoundOption_(topRounds, curRound);
-        if (picked) roundSel.value = picked;
-      }
-      if (mapRoundSel) {
-        const curMapRound = (ui && ui.mapRound != null && ui.mapRound !== '')
-          ? ui.mapRound
-          : (mapRoundSel.value || '');
-        mapRoundSel.innerHTML = mapRoundOptionsHtml;
-        const pickedMap = pickInspectionRoundOption_(mapRounds, curMapRound);
-        if (pickedMap) mapRoundSel.value = pickedMap;
-      }
+        : (roundSel.value || '');
+      roundSel.innerHTML = topRoundOptionsHtml;
+      const picked = pickInspectionRoundOption_(topRounds, curRound);
+      if (picked) roundSel.value = picked;
     }
 
     function inspectionHasHandoverRound_(p) {
@@ -6792,47 +6753,18 @@
       return inspectionRoundValuesMatch_(p && p.handoverRound, roundVal);
     }
 
+    /** แผนที่ = รายการเดียวกันกับตารางที่กรองแล้ว */
     function getInspectionMapFilteredPlans_() {
-      const readyVal = document.getElementById('inspectionMapReadySelect')?.value || '';
-      const roundVal = document.getElementById('inspectionMapRoundSelect')?.value || '';
-      const visitedVal = document.getElementById('inspectionMapVisitedSelect')?.value || '';
-      const searchVal = (document.getElementById('inspectionMapSearchInput')?.value || '').toLowerCase().trim();
-      return getInspectionContextFilteredPlans_().filter(function(p) {
-        const hasRound = inspectionHasHandoverRound_(p);
-        if (readyVal === 'ready' && !hasRound) return false;
-        if (readyVal === 'not_ready' && hasRound) return false;
-        if (roundVal && !inspectionRoundMatchesValue_(p, roundVal)) return false;
-        if (visitedVal === 'done' && !p.visited) return false;
-        if (visitedVal === 'pending' && p.visited) return false;
-        if (searchVal) {
-          const info = getInspectionMapLocation_(p);
-          const blob = [
-            p.place,
-            info && info.name,
-            info && info.pwaText,
-            info && info.peaOffice,
-            p.peaZone,
-            p.pwaBranch,
-            p.pwaDistrict
-          ].join(' ').toLowerCase();
-          if (blob.indexOf(searchVal) < 0) return false;
-        }
-        return true;
-      });
+      return filteredInspectionData || [];
     }
 
     function onInspectionMapFilterChange_() {
-      const readyEl = document.getElementById('inspectionMapReadySelect');
-      const roundEl = document.getElementById('inspectionMapRoundSelect');
-      if (readyEl && readyEl.value === 'not_ready' && roundEl && roundEl.value) {
-        roundEl.value = '';
-      }
-      renderInspectionMap_();
+      filterInspections();
     }
     window.onInspectionMapFilterChange_ = onInspectionMapFilterChange_;
 
     const onInspectionMapSearchInput_ = debounce_(function() {
-      renderInspectionMap_();
+      filterInspections();
     }, 120);
     window.onInspectionMapSearchInput_ = onInspectionMapSearchInput_;
 
@@ -7941,15 +7873,23 @@
 
     function filterInspections(preserveUi) {
       const visitedVal = document.getElementById('inspectionVisitedSelect')?.value || '';
+      const readyVal = document.getElementById('inspectionReadySelect')?.value || '';
+      const roundEl = document.getElementById('inspectionHandoverRoundSelect');
+      if (readyVal === 'not_ready' && roundEl && roundEl.value && roundEl.value !== '__empty__') {
+        roundEl.value = '';
+      }
       const base = getInspectionContextFilteredPlans_();
       setupInspectionHandoverFilters_(preserveUi, base);
-      const roundVal = document.getElementById('inspectionHandoverRoundSelect')?.value || '';
+      const roundVal = roundEl?.value || '';
 
       filteredInspectionData = base.filter(function(p) {
+        const hasRound = inspectionHasHandoverRound_(p);
+        if (readyVal === 'ready' && !hasRound) return false;
+        if (readyVal === 'not_ready' && hasRound) return false;
         const matchVisited = !visitedVal || (visitedVal === 'done' ? p.visited : !p.visited);
         let matchRound = true;
         if (roundVal === '__empty__') {
-          matchRound = !inspectionHasHandoverRound_(p);
+          matchRound = !hasRound;
         } else if (roundVal) {
           matchRound = inspectionRoundMatchesValue_(p, roundVal);
         }
