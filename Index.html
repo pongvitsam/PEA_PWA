@@ -5355,6 +5355,47 @@
       return null;
     }
 
+    function inspectionLocationCoreName_(name) {
+      return normalizeNameForMatch(String(name || '').replace(/\s*\([^)]*\)\s*/g, ' '));
+    }
+
+    /** คะแนนจับคู่แผนตรวจรับ ↔ สถานที่แผนที่ — ใช้ กปภ./กฟภ./จังหวัด กันชื่อซ้ำ (เช่น ศูนย์ราชการ) */
+    function scoreLocationForInspectionPlan_(loc, p) {
+      if (!loc || !p) return 0;
+      const placeQ = normalizeNameForMatch(p.place);
+      if (!placeQ) return 0;
+      const locName = normalizeNameForMatch(loc.name);
+      const locCore = inspectionLocationCoreName_(loc.name);
+      let score = 0;
+      if (locName === placeQ || locCore === placeQ) score += 80;
+      else if (locName.indexOf(placeQ) >= 0 || placeQ.indexOf(locCore) >= 0 || locCore.indexOf(placeQ) >= 0) {
+        if (Math.min(placeQ.length, locCore.length) < 8) return 0;
+        score += 45;
+      } else return 0;
+
+      const planBlob = normalizeNameForMatch([
+        p.place, p.pwaBranch, p.pwaDistrict, p.peaOffice, p.peaZone
+      ].filter(Boolean).join(' '));
+      const locBlob = normalizeNameForMatch([
+        loc.name, loc.peaRegion, loc.pwaRegion, loc.province
+      ].filter(Boolean).join(' '));
+      const planProv = guessThaiProvinceFromText_(planBlob);
+      const locProv = resolveLocationProvince_(loc) || guessThaiProvinceFromText_(locBlob);
+      if (planProv && locProv) {
+        if (planProv === locProv) score += 50;
+        else score -= 80;
+      } else if (planProv && locName.indexOf(normalizeNameForMatch(planProv)) >= 0) {
+        score += 40;
+      }
+      if (loc.pwaRegion && planBlob.indexOf(normalizeNameForMatch(loc.pwaRegion)) >= 0) score += 25;
+      if (loc.peaRegion && planBlob.indexOf(normalizeNameForMatch(loc.peaRegion)) >= 0) score += 25;
+      const pwaHint = normalizeNameForMatch(p.pwaBranch || p.pwaDistrict || '');
+      if (pwaHint && locName.indexOf(pwaHint.replace(/^กปภ\.?\s*/i, '').trim()) >= 0) score += 35;
+      const officeHint = normalizeNameForMatch(p.peaOffice || '');
+      if (officeHint && (locBlob.indexOf(officeHint) >= 0 || locName.indexOf(officeHint.replace(/^กฟจ\.?\s*/i, '').trim()) >= 0)) score += 30;
+      return score;
+    }
+
     function pickBestNamedLocationForDigits_(projectName, digits) {
       if (!projectName || !allData) return null;
       if (!_locationLookupCache_) rebuildLocationLookup_();
@@ -5362,7 +5403,7 @@
       if (!q) return null;
       const exactMap = (digits === '34') ? _inspLocExact34_ : _inspLocExact12_;
       const exact = exactMap && exactMap.get(q);
-      if (exact && exact.length) return exact[0];
+      if (exact && exact.length === 1) return exact[0];
       let best = null;
       let bestScore = 0;
       const list = _locationLookupCache_.list || [];
@@ -5373,12 +5414,17 @@
           if (digit !== '3' && digit !== '4') continue;
         } else if (digit !== '1' && digit !== '2') continue;
         const nameOnly = item.nameOnly;
-        if (!nameOnly || nameOnly === q) continue;
-        const shorter = nameOnly.length <= q.length ? nameOnly : q;
-        const longer = nameOnly.length <= q.length ? q : nameOnly;
-        if (shorter.length < 8) continue;
-        if (longer.indexOf(shorter) < 0) continue;
-        const score = shorter.length * 10 + (nameOnly.length === q.length ? 5 : 0);
+        if (!nameOnly) continue;
+        const core = inspectionLocationCoreName_(item.d && item.d.name);
+        let score = 0;
+        if (nameOnly === q || core === q) score = 50;
+        else {
+          const shorter = nameOnly.length <= q.length ? nameOnly : q;
+          const longer = nameOnly.length <= q.length ? q : nameOnly;
+          if (shorter.length < 8) continue;
+          if (longer.indexOf(shorter) < 0 && !(core && (core.indexOf(q) >= 0 || q.indexOf(core) >= 0))) continue;
+          score = shorter.length;
+        }
         if (score > bestScore) {
           bestScore = score;
           best = item.d;
@@ -5389,6 +5435,26 @@
 
     function findLocationForInspection_(projectName) {
       return pickBestNamedLocationForDigits_(projectName, '34');
+    }
+
+    function findLocationForInspectionPlan_(p) {
+      if (!p || !allData) return null;
+      if (!_locationLookupCache_) rebuildLocationLookup_();
+      let best = null;
+      let bestScore = 0;
+      const list = _locationLookupCache_.list || [];
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const digit = item.digit || projectPhaseDigit_(item.d && item.d.phase);
+        if (digit !== '3' && digit !== '4') continue;
+        const score = scoreLocationForInspectionPlan_(item.d, p);
+        if (score > bestScore) {
+          bestScore = score;
+          best = item.d;
+        }
+      }
+      if (bestScore < 40) return null;
+      return best;
     }
 
     /** สถานที่เฟส 1–2 ของแผนที่โครงการห้ามโชว์ในหน้าแผนตรวจรับเฟส 3–4 */
@@ -5475,15 +5541,20 @@
     function getInspectionMapLocation_(p) {
       const cacheKey = String((p && p.id) || (p && p.place) || '');
       if (cacheKey && _inspMapLocCache_[cacheKey]) return _inspMapLocCache_[cacheKey];
-      const found = findLocationForInspection_(p && p.place);
+      const found = findLocationForInspectionPlan_(p);
       const loc = (found && isProjectMapPhase34_(found)) ? found : null;
+      const placeLabel = (p && p.place ? p.place : '-').toString().trim();
+      const branchLabel = (p && (p.pwaBranch || p.pwaDistrict) ? (p.pwaBranch || p.pwaDistrict) : '').toString().trim();
+      const sheetName = (placeLabel && branchLabel && placeLabel.indexOf(branchLabel) < 0)
+        ? (placeLabel + ' (' + branchLabel + ')')
+        : placeLabel;
       let result;
       if (loc) {
         const index = allData.findIndex(function(d) { return d.row === loc.row; });
         result = {
           loc: loc,
           index: index,
-          name: (loc.name || p.place || '-').toString().trim(),
+          name: (loc.name || sheetName || '-').toString().trim(),
           pwaText: (p.pwaDistrict || loc.pwaRegion || p.pwaBranch || '').toString().trim(),
           peaZone: (p.peaZone || '').toString().trim(),
           peaOffice: (p.peaOffice || '').toString().trim(),
@@ -5493,7 +5564,7 @@
         result = {
           loc: null,
           index: -1,
-          name: (p && p.place ? p.place : '-').toString().trim(),
+          name: sheetName || '-',
           pwaText: (p && (p.pwaDistrict || p.pwaBranch) ? (p.pwaDistrict || p.pwaBranch) : '').toString().trim(),
           peaZone: (p && p.peaZone ? p.peaZone : '').toString().trim(),
           peaOffice: (p && p.peaOffice ? p.peaOffice : '').toString().trim(),
@@ -5512,15 +5583,19 @@
       }
       if (!plans || !plans.length) return [];
       const qName = normalizeNameForMatch(loc.name);
+      const qCore = inspectionLocationCoreName_(loc.name);
       const qLabel = normalizeNameForMatch(getLocLabel(loc));
       if (!qName && !qLabel) return [];
       return plans.filter(function(p) {
         const place = normalizeNameForMatch(p.place);
         if (!place) return false;
-        if (place === qName || place === qLabel) return true;
-        if (qName && (place.includes(qName) || qName.includes(place))) return true;
-        if (qLabel && (place.includes(qLabel) || qLabel.includes(place))) return true;
-        return false;
+        let nameOk = false;
+        if (place === qName || place === qLabel || place === qCore) nameOk = true;
+        else if (qName && (place.includes(qName) || qName.includes(place))) nameOk = true;
+        else if (qCore && (place.includes(qCore) || qCore.includes(place))) nameOk = true;
+        else if (qLabel && (place.includes(qLabel) || qLabel.includes(place))) nameOk = true;
+        if (!nameOk) return false;
+        return scoreLocationForInspectionPlan_(loc, p) >= 40;
       });
     }
 
