@@ -1466,7 +1466,7 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v4';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v11';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v12';
 const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v10';
 const LIST_CACHE_TTL_SEC = 180;
 
@@ -1823,15 +1823,19 @@ function inspectionFileCommentFromFormula_(formula, plainFallback) {
 function readInspectionFileCommentCell_(sheet, row1, col1, plainVal) {
   const range = sheet.getRange(row1, col1);
   let plain = cellStr_(plainVal != null ? plainVal : range.getValue());
+  let fromFormula = plain;
   try {
     const formula = range.getFormula();
-    if (formula) plain = inspectionFileCommentFromFormula_(formula, plain);
+    if (formula) fromFormula = inspectionFileCommentFromFormula_(formula, plain);
   } catch (ignore) {}
+  let fromRich = fromFormula;
   try {
     const rich = range.getRichTextValue();
-    if (rich) plain = inspectionFileCommentFromRichText_(rich, plain);
+    if (rich) fromRich = inspectionFileCommentFromRichText_(rich, fromFormula);
   } catch (ignore) {}
-  return plain;
+  // ไฮเปอร์ลิงก์สูตรมี URL แต่ rich text เหลือแค่ชื่อไฟล์ — เก็บ URL ไว้ให้กดเปิดได้
+  if (String(fromFormula).indexOf('|http') >= 0 && String(fromRich).indexOf('|http') < 0) return fromFormula;
+  return fromRich;
 }
 
 /** เขียน File comment เป็นไฮเปอร์ลิงก์จริง — กัน Sheets แปลงแล้วเหลือแค่ชื่อไฟล์ */
@@ -2255,17 +2259,14 @@ function readInspectionsMapped_(sheet, opts) {
   const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const fileCommentCol = 13; // FileComment (1-based)
   const recoverDrive = !!(opts && opts.recoverDrive);
-  const fastList = !(opts && opts.fullFileComments);
   let richComments = null;
   let formulas = null;
-  if (!fastList) {
-    try {
-      richComments = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getRichTextValues();
-    } catch (ignore) {}
-    try {
-      formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
-    } catch (ignore) {}
-  }
+  try {
+    richComments = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getRichTextValues();
+  } catch (ignore) {}
+  try {
+    formulas = sheet.getRange(2, fileCommentCol, lastRow - 1, 1).getFormulas();
+  } catch (ignore) {}
   const out = [];
   const enrichOpts = recoverDrive ? { recoverDrive: true } : { recoverDrive: false };
   for (let i = 0; i < data.length; i++) {
@@ -2273,22 +2274,16 @@ function readInspectionsMapped_(sheet, opts) {
     if (!row[3]) continue;
     const mapped = mapInspectionRow_(row);
     let comment = mapped.fileComment;
-    if (!fastList) {
-      const sheetRow = i + 2;
-      try {
-        if (formulas && formulas[i] && formulas[i][0]) {
-          comment = inspectionFileCommentFromFormula_(formulas[i][0], comment);
-        }
-        if (richComments && richComments[i] && richComments[i][0]) {
-          comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
-        }
-        comment = enrichInspectionFileComment_(comment, sheet, sheetRow, fileCommentCol, enrichOpts);
-      } catch (ignore) {
-        comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
+    try {
+      if (richComments && richComments[i] && richComments[i][0]) {
+        comment = inspectionFileCommentFromRichText_(richComments[i][0], comment);
       }
-    } else {
-      comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
-    }
+      if (formulas && formulas[i] && formulas[i][0]) {
+        const fromFormula = inspectionFileCommentFromFormula_(formulas[i][0], comment);
+        if (String(fromFormula).indexOf('|http') >= 0 || String(comment).indexOf('|http') < 0) comment = fromFormula;
+      }
+      if (recoverDrive) comment = enrichInspectionFileComment_(comment, null, 0, 0, enrichOpts);
+    } catch (ignore) {}
     mapped.fileComment = comment;
     out.push(mapped);
   }
