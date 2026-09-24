@@ -283,10 +283,28 @@
       display: block;
     }
     .insp-map-marker.is-done { background: #2563eb; }
+    .insp-map-marker.is-nofile { background: #2563eb; }
+    .insp-map-marker.is-nofile i { font-size: 13px; font-weight: 900; }
     .insp-map-marker.is-ready { background: #d97706; }
     .insp-map-marker.is-ready i { font-size: 15px; font-weight: 900; }
     .insp-map-marker.is-pending { background: #475569; }
     .insp-map-marker.is-pending i { font-size: 12px; }
+    .leaflet-div-icon.insp-map-marker-wrap.is-dimmed {
+      opacity: 0.32;
+      filter: grayscale(0.45);
+      z-index: 1 !important;
+    }
+    .insp-map-marker.is-dimmed {
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+      border-color: rgba(255, 255, 255, 0.85);
+    }
+    .leaflet-div-icon.insp-map-marker-wrap.is-active-hit {
+      z-index: 600 !important;
+    }
+    .insp-map-marker.is-active-hit {
+      box-shadow: 0 3px 12px rgba(15, 23, 42, 0.5);
+      transform: scale(1.06);
+    }
     .leaflet-div-icon.insp-trip-num-marker {
       background: transparent !important;
       border: none !important;
@@ -299,6 +317,7 @@
     }
     #inspectionMapLegend .insp-lg-swatch i { color: #fff; font-size: 9px; line-height: 1; }
     #inspectionMapLegend .insp-lg-swatch.is-done { background: #2563eb; }
+    #inspectionMapLegend .insp-lg-swatch.is-nofile { background: #2563eb; }
     #inspectionMapLegend .insp-lg-swatch.is-ready { background: #d97706; }
     #inspectionMapLegend .insp-lg-swatch.is-pending { background: #475569; }
     .inspection-form-template-banner {
@@ -1079,14 +1098,15 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
-            <small class="text-muted">แสดงเฉพาะสถานที่ที่ตรงตัวกรองด้านบน — สอดคล้องกับรายการด้านล่าง</small>
+            <small class="text-muted">ตรงตัวกรอง = สีเข้ม · นอกตัวกรอง = สีจาง — สอดคล้องกับรายการด้านล่าง</small>
           </div>
           <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
         </div>
         <div class="row g-2 mb-3 align-items-end" id="inspectionMapFilterBar">
           <div class="col-12">
             <div class="d-flex flex-wrap gap-3 small text-muted" id="inspectionMapLegend">
-              <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> ตรวจแล้ว</span>
+              <span><span class="insp-lg-swatch is-done" aria-hidden="true"><i class="fa-solid fa-check"></i></span> ตรวจแล้ว+มีไฟล์</span>
+              <span><span class="insp-lg-swatch is-nofile" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span> ไปแล้ว ยังไม่อัปไฟล์</span>
               <span><span class="insp-lg-swatch is-ready" aria-hidden="true"><i class="fa-solid fa-exclamation"></i></span> พร้อมเข้าตรวจ</span>
               <span><span class="insp-lg-swatch is-pending" aria-hidden="true"><i class="fa-regular fa-circle"></i></span> ยังไม่พร้อม</span>
               <span><i class="fa-solid fa-circle" style="color:#0ea5e9"></i> ตำแหน่งของฉัน</span>
@@ -2549,25 +2569,47 @@
 
     /** หมุดแผนที่ตรวจรับ: สี + สัญลักษณ์ (รองรับตาบอดสี) — ไม่ใช้สีเฟส */
     function getInspectionMapStatusKey_(p) {
-      if (p && p.visited) return 'done';
+      if (p && p.visited) {
+        return inspectionHasFileUrl_(p.fileComment) ? 'done' : 'nofile';
+      }
       if (inspectionHasHandoverRound_(p)) return 'ready';
       return 'pending';
     }
 
-    function getInspectionMapIcon_(p) {
+    function getInspectionMapIcon_(p, opts) {
+      opts = opts || {};
+      const dimmed = !!opts.dimmed;
       const key = getInspectionMapStatusKey_(p);
-      const symbol = key === 'done'
-        ? '<i class="fa-solid fa-check" aria-hidden="true"></i>'
-        : (key === 'ready'
-          ? '<i class="fa-solid fa-exclamation" aria-hidden="true"></i>'
-          : '<i class="fa-regular fa-circle" aria-hidden="true"></i>');
-      const label = key === 'done' ? 'ตรวจแล้ว' : (key === 'ready' ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม');
+      let symbol;
+      let label;
+      if (key === 'done') {
+        symbol = '<i class="fa-solid fa-check" aria-hidden="true"></i>';
+        label = 'ตรวจแล้ว (มีไฟล์)';
+      } else if (key === 'nofile') {
+        symbol = '<i class="fa-solid fa-xmark" aria-hidden="true"></i>';
+        label = 'ไปแล้ว ยังไม่อัปไฟล์';
+      } else if (key === 'ready') {
+        symbol = '<i class="fa-solid fa-exclamation" aria-hidden="true"></i>';
+        label = 'พร้อมเข้าตรวจ';
+      } else {
+        symbol = '<i class="fa-regular fa-circle" aria-hidden="true"></i>';
+        label = 'ยังไม่พร้อม';
+      }
+      const markCls = 'insp-map-marker is-' + key + (dimmed ? ' is-dimmed' : ' is-active-hit');
       return L.divIcon({
-        className: 'insp-map-marker-wrap',
-        html: '<div class="insp-map-marker is-' + key + '" title="' + label + '" aria-label="' + label + '">' + symbol + '</div>',
+        className: 'insp-map-marker-wrap' + (dimmed ? ' is-dimmed' : ' is-active-hit'),
+        html: '<div class="' + markCls + '" title="' + label + (dimmed ? ' (นอกตัวกรอง)' : '') + '" aria-label="' + label + '">' + symbol + '</div>',
         iconSize: [30, 30],
         iconAnchor: [15, 15],
         popupAnchor: [0, -15]
+      });
+    }
+
+    /** หมุดฐานบนแผนที่: เฟสตามตัวกรอง (ยังไม่ตัดค้นหา/ภาค/รอบ ฯลฯ) — นอกตัวกรองจะแสดงจาง */
+    function getInspectionMapBasePlans_() {
+      const phaseVal = document.getElementById('inspectionPhaseSelect')?.value ?? '34';
+      return (inspectionData || []).filter(function(p) {
+        return inspectionMatchesPhaseFilter_(p, phaseVal);
       });
     }
 
@@ -2578,15 +2620,19 @@
       const inspectors = String((p && p.inspectors) || '').replace(/\s+/g, ' ').trim();
       const hasRound = inspectionHasHandoverRound_(p);
       const statusKey = getInspectionMapStatusKey_(p);
-      const statusSymbol = statusKey === 'done' ? '✓ ' : (statusKey === 'ready' ? '! ' : '○ ');
+      const statusSymbol = statusKey === 'done' ? '✓ '
+        : (statusKey === 'nofile' ? '✕ '
+          : (statusKey === 'ready' ? '! ' : '○ '));
       let html = '<div class="insp-map-tip"><div class="insp-map-tip-name">' + escHtml(name) + '</div>';
       if (info && info.province) {
         html += '<div class="insp-map-tip-meta">จ.' + escHtml(info.province) + '</div>';
       }
-      html += '<div class="insp-map-tip-meta">' + statusSymbol +
-        (p && p.visited ? 'ตรวจแล้ว' : 'ยังไม่เข้าตรวจ') +
-        ' · ' + (hasRound ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม') +
-        '</div>';
+      const visitLine = statusKey === 'done'
+        ? 'ตรวจแล้ว · มีไฟล์'
+        : (statusKey === 'nofile'
+          ? 'ไปแล้ว · ยังไม่อัปไฟล์'
+          : ((p && p.visited ? 'ตรวจแล้ว' : 'ยังไม่เข้าตรวจ') + ' · ' + (hasRound ? 'พร้อมเข้าตรวจ' : 'ยังไม่พร้อม')));
+      html += '<div class="insp-map-tip-meta">' + statusSymbol + visitLine + '</div>';
       if (schedule) {
         html += '<div class="insp-map-tip-row"><i class="fa-solid fa-calendar-check"></i> กำหนดตรวจ: <b>' + escHtml(schedule) + '</b></div>';
       }
@@ -6627,8 +6673,8 @@
     }
 
     function inspectionRoundValuesMatch_(a, b) {
-      const sa = String(a || '').trim();
-      const sb = String(b || '').trim();
+      const sa = stripInspectionRoundOrdinalLabel_(a);
+      const sb = stripInspectionRoundOrdinalLabel_(b);
       if (!sa || !sb) return false;
       if (sa === sb) return true;
       const ka = inspectionHandoverDateKey_(sa);
@@ -6661,6 +6707,71 @@
       });
     }
 
+    function stripInspectionRoundOrdinalLabel_(s) {
+      return String(s || '').replace(/\s*\(ครั้งที่\s*\d+\)\s*$/u, '').trim();
+    }
+
+    function sortInspectionRoundLabels_(labels) {
+      return (labels || []).slice().sort(function(a, b) {
+        const ka = inspectionHandoverDateKey_(a);
+        const kb = inspectionHandoverDateKey_(b);
+        if (ka && kb) return ka.localeCompare(kb);
+        if (ka) return -1;
+        if (kb) return 1;
+        return String(a).localeCompare(String(b), 'th');
+      });
+    }
+
+    /** ครั้งที่ 1 = วันส่งมอบจริงที่เร็วที่สุด (ทุกภาค) */
+    function getInspectionRoundOrdinalLookup_() {
+      const seen = {};
+      const labels = [];
+      function add_(raw) {
+        const clean = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(raw, false) || String(raw || '').trim());
+        if (!clean) return;
+        const key = inspectionHandoverDateKey_(clean) || clean;
+        if (seen[key]) return;
+        seen[key] = true;
+        labels.push(clean);
+      }
+      (inspectionHandoverRoundOptions_ || []).forEach(add_);
+      (inspectionData || []).forEach(function(p) {
+        if (!p || !p.handoverRound) return;
+        const planRaw = String(p.handoverPlan || '').trim();
+        const roundRaw = String(p.handoverRound || '').trim();
+        if (planRaw) {
+          const rk = inspectionHandoverDateKey_(roundRaw);
+          const pk = inspectionHandoverDateKey_(planRaw);
+          if (rk && pk && rk === pk) return;
+        }
+        add_(roundRaw);
+      });
+      const ordered = sortInspectionRoundLabels_(labels);
+      const byKey = {};
+      ordered.forEach(function(label, idx) {
+        const n = idx + 1;
+        byKey[label] = n;
+        const k = inspectionHandoverDateKey_(label);
+        if (k) byKey[k] = n;
+      });
+      return { order: ordered, byKey: byKey };
+    }
+
+    function inspectionRoundOrdinalNumber_(raw) {
+      const clean = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(raw, false) || String(raw || '').trim());
+      if (!clean) return 0;
+      const look = getInspectionRoundOrdinalLookup_();
+      const key = inspectionHandoverDateKey_(clean) || clean;
+      return look.byKey[key] || look.byKey[clean] || 0;
+    }
+
+    function formatInspectionRoundWithOrdinal_(raw, emptyDash) {
+      const label = formatInspectionHandoverDate_(raw, false) || stripInspectionRoundOrdinalLabel_(String(raw || '').trim());
+      if (!label) return emptyDash ? '-' : '';
+      const n = inspectionRoundOrdinalNumber_(label);
+      return n ? (label + ' (ครั้งที่ ' + n + ')') : label;
+    }
+
     function collectInspectionRoundLabels_(plans) {
       const rounds = [];
       const seenLabel = {};
@@ -6674,22 +6785,14 @@
           const pk = inspectionHandoverDateKey_(planRaw);
           if (rk && pk && rk === pk) return; // ข้ามค่าที่คัดลอกจากแผนส่งมอบ
         }
-        const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
+        const roundLabel = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(roundRaw, false) || roundRaw);
         const key = inspectionHandoverDateKey_(roundRaw) || roundLabel;
         if (seenKey[key] || seenLabel[roundLabel]) return;
         seenKey[key] = true;
         seenLabel[roundLabel] = true;
         rounds.push(roundLabel);
       });
-      rounds.sort(function(a, b) {
-        const ka = inspectionHandoverDateKey_(a);
-        const kb = inspectionHandoverDateKey_(b);
-        if (ka && kb) return ka.localeCompare(kb);
-        if (ka) return -1;
-        if (kb) return 1;
-        return a.localeCompare(b, 'th');
-      });
-      return rounds;
+      return sortInspectionRoundLabels_(rounds);
     }
 
     function collectInspectionRoundLabelsFromOptions_(options) {
@@ -6697,7 +6800,7 @@
       const seenLabel = {};
       const seenKey = {};
       (options || []).forEach(function(raw) {
-        const roundLabel = formatInspectionHandoverDate_(raw, false) || String(raw || '').trim();
+        const roundLabel = stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(raw, false) || String(raw || '').trim());
         if (!roundLabel) return;
         const key = inspectionHandoverDateKey_(roundLabel) || roundLabel;
         if (seenKey[key] || seenLabel[roundLabel]) return;
@@ -6705,15 +6808,7 @@
         seenLabel[roundLabel] = true;
         rounds.push(roundLabel);
       });
-      rounds.sort(function(a, b) {
-        const ka = inspectionHandoverDateKey_(a);
-        const kb = inspectionHandoverDateKey_(b);
-        if (ka && kb) return ka.localeCompare(kb);
-        if (ka) return -1;
-        if (kb) return 1;
-        return a.localeCompare(b, 'th');
-      });
-      return rounds;
+      return sortInspectionRoundLabels_(rounds);
     }
 
     function setupInspectionHandoverFilters_(ui, sourcePlans) {
@@ -6723,7 +6818,7 @@
         try {
           const cached = JSON.parse(localStorage.getItem('pwa_insp_round_opts_v2') || localStorage.getItem('pwa_insp_round_opts_v1') || 'null');
           if (Array.isArray(cached)) inspectionHandoverRoundOptions_ = cached.map(function(r) {
-            return formatInspectionHandoverDate_(r, false) || String(r || '').trim();
+            return stripInspectionRoundOrdinalLabel_(formatInspectionHandoverDate_(r, false) || String(r || '').trim());
           }).filter(Boolean);
         } catch (e) {}
       }
@@ -6735,10 +6830,15 @@
       if (!topRounds.length) topRounds = collectInspectionRoundLabels_(inspectionData || []);
       const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
-        topRounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
-      const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
-        ? ui.handoverRound
-        : (roundSel.value || '');
+        topRounds.map(function(r) {
+          const text = formatInspectionRoundWithOrdinal_(r, false) || r;
+          return '<option value="' + escHtml(r) + '">' + escHtml(text) + '</option>';
+        }).join('');
+      const curRound = stripInspectionRoundOrdinalLabel_(
+        (ui && ui.handoverRound != null && ui.handoverRound !== '')
+          ? ui.handoverRound
+          : (roundSel.value || '')
+      );
       roundSel.innerHTML = topRoundOptionsHtml;
       const picked = pickInspectionRoundOption_(topRounds, curRound);
       if (picked) roundSel.value = picked;
@@ -7581,10 +7681,13 @@
 
     function inspectionInlineDateInput_(p, field, placeholder) {
       const display = formatInspectionHandoverDate_(p[field], false);
+      const shown = (field === 'handoverRound')
+        ? (formatInspectionRoundWithOrdinal_(p[field], false) || display)
+        : display;
       // รอบส่งมอบงานจริง: บันทึกแล้วต้องกดปุ่มแก้ไข (โมดัล) ก่อนถึงจะเปลี่ยนได้
       if (field === 'handoverRound' && String(display).trim()) {
         return '<div class="insp-locked-date" title="กดปุ่มแก้ไขเพื่อเปลี่ยน">' +
-          '<span class="insp-locked-date-text">' + escHtml(display) + '</span>' +
+          '<span class="insp-locked-date-text">' + escHtml(shown) + '</span>' +
           '<span class="insp-locked-hint"><i class="fa-solid fa-lock me-1"></i>กดแก้ไขเพื่อเปลี่ยน</span></div>';
       }
       const filledCls = String(display).trim() ? ' has-value' : '';
@@ -7644,7 +7747,9 @@
         return renderInspectionFileCommentHtml_(p);
       }
       if (col.type === 'thaiDate') {
-        const text = formatInspectionHandoverDate_(p[col.key], true);
+        const text = (col.key === 'handoverRound')
+          ? (formatInspectionRoundWithOrdinal_(p[col.key], true) || '-')
+          : formatInspectionHandoverDate_(p[col.key], true);
         return '<span title="' + escHtml(text) + '">' + escHtml(text) + '</span>';
       }
       const val = p[col.key];
@@ -8796,7 +8901,7 @@
       const info = getInspectionMapLocation_(latest);
       const loc = info.loc;
       const safeId = String(latest.id).replace(/'/g, "\\'");
-      const roundTxt = formatInspectionHandoverDate_(latest.handoverRound, false) || (latest.handoverRound || '-');
+      const roundTxt = formatInspectionRoundWithOrdinal_(latest.handoverRound, false) || (latest.handoverRound || '-');
       const planTxt = formatInspectionHandoverDate_(latest.handoverPlan, false) || (latest.handoverPlan || '-');
       const statusBadge = latest.visited
         ? '<span class="badge bg-success"><i class="fa-solid fa-check"></i> ตรวจแล้ว</span>'
@@ -8941,36 +9046,64 @@
         startMapGpsTracking();
       }
       refreshInspectionTripDatalist_();
-      const bounds = [];
+      const matchedPlans = getInspectionMapFilteredPlans_();
+      const matchedIds = {};
+      (matchedPlans || []).forEach(function(p) {
+        if (p && p.id != null) matchedIds[String(p.id)] = true;
+      });
+      const basePlans = getInspectionMapBasePlans_();
+      const highlightActive = (matchedPlans || []).length < (basePlans || []).length;
+      const boundsMatched = [];
+      const boundsAll = [];
       let plotted = 0;
+      let plottedMatched = 0;
+      let plottedDimmed = 0;
       let plottedReady = 0;
       let plottedNotReady = 0;
       let plottedDone = 0;
-      const mapPlans = getInspectionMapFilteredPlans_();
       const missingCoords = [];
-      mapPlans.forEach(function(p) {
+      // วาดหมุดจางก่อน แล้วค่อยหมุดเข้ม — ให้หมุดที่ตรงตัวกรองอยู่บน
+      const ordered = [];
+      (basePlans || []).forEach(function(p) {
+        const matched = !!(p && p.id != null && matchedIds[String(p.id)]);
+        ordered.push({ p: p, matched: matched });
+      });
+      ordered.sort(function(a, b) { return (a.matched === b.matched) ? 0 : (a.matched ? 1 : -1); });
+
+      ordered.forEach(function(item) {
+        const p = item.p;
+        const matched = item.matched;
+        const dimmed = highlightActive && !matched;
         const info = getInspectionMapLocation_(p);
         const loc = info.loc;
         const lat = loc ? Number(loc.lat) : NaN;
         const lng = loc ? Number(loc.lng) : NaN;
         if (!loc || !isFinite(lat) || !isFinite(lng)) {
-          missingCoords.push(p);
+          if (matched) missingCoords.push(p);
           return;
         }
         const hasRound = inspectionHasHandoverRound_(p);
-        const marker = L.marker([lat, lng], { icon: getInspectionMapIcon_(p) });
-        if (p.visited) {
-          plottedDone++;
+        const marker = L.marker([lat, lng], {
+          icon: getInspectionMapIcon_(p, { dimmed: dimmed }),
+          opacity: 1,
+          zIndexOffset: dimmed ? 0 : 800
+        });
+        if (matched) {
+          plottedMatched++;
+          if (p.visited) plottedDone++;
+          if (hasRound) plottedReady++;
+          else plottedNotReady++;
+          boundsMatched.push([lat, lng]);
+        } else {
+          plottedDimmed++;
         }
-        if (hasRound) plottedReady++;
-        else plottedNotReady++;
         const tipHtml = buildInspectionMapTooltipHtml_(p, info);
         if (tipHtml) {
           marker.bindTooltip(tipHtml, {
             direction: 'top',
             offset: [0, -28],
-            opacity: 1,
-            className: 'insp-map-tip-wrap',
+            opacity: dimmed ? 0.85 : 1,
+            className: 'insp-map-tip-wrap' + (dimmed ? ' is-dimmed' : ''),
             sticky: true
           });
         }
@@ -8982,14 +9115,27 @@
           }
         });
         inspectionMarkersLayer.addLayer(marker);
-        bounds.push([lat, lng]);
+        boundsAll.push([lat, lng]);
         plotted++;
       });
       if (badge) {
-        badge.textContent = plotted
-          ? (plotted + ' จุด · ส่งมอบแล้ว ' + plottedReady + ' · ตรวจแล้ว ' + plottedDone + (plottedNotReady ? ' · ยังไม่ส่งมอบ ' + plottedNotReady : '') + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : ''))
-          : (mapPlans.length ? ('0 จุด · มี ' + mapPlans.length + ' รายการแต่ไม่มีพิกัด') : '0 จุด');
+        if (plottedMatched) {
+          badge.textContent = plottedMatched + ' จุดตรงตัวกรอง'
+            + (plottedDimmed ? ' · จาง ' + plottedDimmed + ' จุดอื่น' : '')
+            + ' · ส่งมอบแล้ว ' + plottedReady
+            + ' · ตรวจแล้ว ' + plottedDone
+            + (plottedNotReady ? ' · ยังไม่ส่งมอบ ' + plottedNotReady : '')
+            + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : '');
+        } else if (plottedDimmed) {
+          badge.textContent = '0 จุดตรงตัวกรอง · แสดงจาง ' + plottedDimmed + ' จุด'
+            + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : '');
+        } else if (matchedPlans.length) {
+          badge.textContent = '0 จุด · มี ' + matchedPlans.length + ' รายการแต่ไม่มีพิกัด';
+        } else {
+          badge.textContent = '0 จุด';
+        }
       }
+      const bounds = boundsMatched.length ? boundsMatched : boundsAll;
       if (bounds.length > 1) {
         try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
       } else if (bounds.length === 1) {
@@ -8999,8 +9145,9 @@
       }
       if (panel) {
         const selectedId = panel.dataset.inspSelected || '';
-        const stillVisible = selectedId && mapPlans.some(function(p) { return String(p.id) === selectedId; });
-        if (!plotted) {
+        const stillVisible = selectedId && (matchedPlans.some(function(p) { return String(p.id) === selectedId; })
+          || basePlans.some(function(p) { return String(p.id) === selectedId; }));
+        if (!plottedMatched && !plottedDimmed) {
           panel.dataset.inspSelected = '';
           if (missingCoords.length) {
             const names = missingCoords.slice(0, 12).map(function(p) {
