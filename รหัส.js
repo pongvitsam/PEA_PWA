@@ -1466,7 +1466,7 @@ function readOutagesMapped_(sheet) {
 }
 
 const OUTAGE_LIST_CACHE_KEY = 'outage_list_v4';
-const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v10';
+const INSPECTION_LIST_CACHE_KEY = 'inspection_list_v11';
 const INSPECTION_LIST_CACHE_GEN_KEY = 'inspection_list_gen_v10';
 const LIST_CACHE_TTL_SEC = 180;
 
@@ -1715,9 +1715,16 @@ function formatInspectionDateDisplay_(val) {
     }
     return s;
   }
-  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) {
-    const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+  // วันที่อย่างเดียว — ไม่ตัดเอา YYYY-MM-DD จาก ISO ที่มีเวลา (กันเลื่อนวันจาก UTC)
+  const isoDateOnly = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoDateOnly) {
+    const d = new Date(parseInt(isoDateOnly[1], 10), parseInt(isoDateOnly[2], 10) - 1, parseInt(isoDateOnly[3], 10));
+    if (!isNaN(d.getTime())) {
+      return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
+    }
+  }
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const d = new Date(s);
     if (!isNaN(d.getTime())) {
       return d.getDate() + ' ' + THAI_MONTHS_FULL_INSP_[d.getMonth()] + ' ' + (inspectionChristianYear_(d) + 543);
     }
@@ -2527,29 +2534,31 @@ function collectSourceInspectionRows_() {
   return collected;
 }
 
-/** รายการวันที่รอบส่งมอบงานจริงจากข้อมูลในแอป (หลัง merge) — ไม่ดึงวันที่ลอยจากชีทต้นทาง */
+/** รายการวันที่รอบส่งมอบงานจริงจากชีทต้นทาง (ข้อความที่เห็นจริง) + ค่าที่กรอกในแอป */
 function collectInspectionHandoverRoundOptions_(precollected, destSheet) {
   const seen = {};
   const out = [];
-  function addLabel_(raw) {
+  function addLabel_(raw, planVal) {
     const label = formatInspectionDateDisplay_(raw) || String(raw || '').trim();
     if (!label || seen[label]) return;
+    if (planVal && isInspectionRoundSameAsPlan_(label, planVal)) return;
     seen[label] = true;
     out.push(label);
   }
-  function addFromPlan_(p) {
-    if (!p || !p.handoverRound) return;
-    addLabel_(p.handoverRound);
-  }
+  const rows = precollected || collectSourceInspectionRows_();
+  rows.forEach(function(item) {
+    const f = item && item.fields;
+    if (!f) return;
+    addLabel_(f.handoverRound, f.handoverPlan);
+  });
+  // รวมค่าที่กรอกในแอปแล้ว (เช่น ชีทต้นทางยังว่าง) แต่ไม่เอาค่าที่คัดลอกจากแผนส่งมอบ
   try {
     const sheet = destSheet || ensureInspectionSheet_(getSpreadsheet_());
-    readInspectionsMapped_(sheet).forEach(addFromPlan_);
-  } catch (ignore) {
-    const rows = precollected || collectSourceInspectionRows_();
-    rows.forEach(function(item) {
-      addFromPlan_(item && item.fields);
+    readInspectionsMapped_(sheet).forEach(function(p) {
+      if (!p || !p.handoverRound) return;
+      addLabel_(p.handoverRound, p.handoverPlan);
     });
-  }
+  } catch (ignore) {}
   out.sort(function(a, b) {
     const da = parseThaiDate_(a);
     const db = parseThaiDate_(b);
@@ -2737,7 +2746,7 @@ function getInspectionPlans(sessionToken) {
   return redactSheetAccessForSession_(result, sessionToken);
 }
 
-const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v6';
+const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v7';
 const INSPECTION_SYNC_TTL_SEC = 300;
 const INSPECTION_SYNC_SOFT_LOCK_KEY = 'inspection_src_sync_running';
 

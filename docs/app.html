@@ -1554,7 +1554,7 @@
   
     <!-- GitHub Pages: polyfill google.script.run â†’ Apps Script API (à¸­à¸¢à¹ˆà¸²à¸¥à¸šà¹€à¸¡à¸·à¹ˆà¸­ sync à¸ˆà¸²à¸ Index.html) -->
   <script src="js/config.js"></script>
-  <script src="js/pwa-gas-api.js?v=28"></script>
+  <script src="js/pwa-gas-api.js?v=21"></script>
   
   <script>
     let map, markersLayer, editModalObj, drilldownModalObj, dbLocationModalObj, outageModalObj, inspectionModalObj, calendar;
@@ -2215,7 +2215,7 @@
     let provinceBordersLoaded = false;
     const LOC_LS_KEY = 'pwa_locations_v1';
     const OUTAGE_LS_KEY = 'pwa_outages_v1';
-    const INSPECTION_LS_KEY = 'pwa_inspection_v4';
+    const INSPECTION_LS_KEY = 'pwa_inspection_v5';
     const _assetLoadPromises_ = {};
     let _locationLookupCache_ = null;
     let _outageRegionCache_ = {};
@@ -2250,10 +2250,12 @@
 
     function readCachedInspections_() {
       try {
-        const keys = [INSPECTION_LS_KEY, 'pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v1'];
+        const keys = [INSPECTION_LS_KEY, 'pwa_inspection_v4', 'pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v1'];
         for (let i = 0; i < keys.length; i++) {
           const c = JSON.parse(localStorage.getItem(keys[i]) || 'null');
-          if (c && Array.isArray(c.data) && c.data.length) return scrubCompanyHiddenInspectionFields_(c.data);
+          if (c && Array.isArray(c.data) && c.data.length) {
+            return scrubCompanyHiddenInspectionFields_(normalizeCachedInspectionDates_(c.data));
+          }
         }
       } catch (e) { /* ignore */ }
       return null;
@@ -2269,12 +2271,26 @@
       });
     }
 
+    /** แปลงวันที่ใน cache เก่า (เช่น ISO UTC) ให้เป็นข้อความไทย — กันเลื่อนวัน */
+    function normalizeCachedInspectionDates_(plans) {
+      if (!plans || !plans.length) return plans;
+      return plans.map(function(p) {
+        if (!p) return p;
+        const o = Object.assign({}, p);
+        ['handoverPlan', 'handoverRound', 'inspectSchedule'].forEach(function(k) {
+          if (o[k] == null || o[k] === '') return;
+          o[k] = formatInspectionHandoverDate_(o[k], false) || String(o[k]).trim();
+        });
+        return o;
+      });
+    }
+
     /** กู้รอบส่งมอบที่เคยกรอกจาก cache เก่า ถ้าซิงก์ล่าสุดล้างค่าไป */
     function mergePreservedHandoverRounds_(plans) {
       if (!plans || !plans.length) return plans;
       let old = null;
       try {
-        const keys = ['pwa_inspection_v3', 'pwa_inspection_v2', 'pwa_inspection_v4', INSPECTION_LS_KEY];
+        const keys = ['pwa_inspection_v5', 'pwa_inspection_v4', 'pwa_inspection_v3', 'pwa_inspection_v2', INSPECTION_LS_KEY];
         for (let i = 0; i < keys.length; i++) {
           const c = JSON.parse(localStorage.getItem(keys[i]) || 'null');
           if (c && Array.isArray(c.data) && c.data.length) { old = c.data; break; }
@@ -6274,7 +6290,7 @@
       const ui = opts.preserveUi ? captureInspectionUiState_() : null;
       if (Array.isArray(pack.roundOptions)) {
         inspectionHandoverRoundOptions_ = pack.roundOptions.slice();
-        try { localStorage.setItem('pwa_insp_round_opts_v1', JSON.stringify(inspectionHandoverRoundOptions_)); } catch (e) {}
+        try { localStorage.setItem('pwa_insp_round_opts_v2', JSON.stringify(inspectionHandoverRoundOptions_)); } catch (e) {}
       }
       const shouldUpdate = !!(pack.synced || !(inspectionData && inspectionData.length));
       if (shouldUpdate && pack.plans) {
@@ -6393,14 +6409,16 @@
       if (window._inspectionSyncTimer_) return;
       window._inspectionSyncTimer_ = setTimeout(function() {
         window._inspectionSyncTimer_ = null;
-        // ไม่ force ทุกครั้ง — force sync จากชีทภายนอกช้ามาก; ใช้ปุ่มรีเฟรชเมื่อต้องการข้อมูลล่าสุด
+        // force ครั้งแรกหลังแก้วันที่รอบส่งมอบเพี้ยน — จากนั้นใช้ปุ่มรีเฟรชเมื่อต้องการ
+        const forceOnce = !sessionStorage.getItem('insp_round_datefix_v1');
         google.script.run.withSuccessHandler(function(pack) {
+          try { sessionStorage.setItem('insp_round_datefix_v1', '1'); } catch (e) {}
           applyInspectionPack(pack, { showError: false, preserveUi: true });
         }).withFailureHandler(function(err) {
           const msg = (err && err.message) ? err.message : String(err || '');
           if (/timeout|API timeout/i.test(msg)) return;
-        }).refreshInspectionPlansFromSource(false);
-      }, 8000);
+        }).refreshInspectionPlansFromSource(forceOnce);
+      }, 2500);
     }
 
     function patchInspectionLocal_(formData) {
@@ -6589,8 +6607,38 @@
       (plans || []).forEach(function(p) {
         const roundRaw = String((p && p.handoverRound) || '').trim();
         if (!roundRaw) return;
+        const planRaw = String((p && p.handoverPlan) || '').trim();
+        if (planRaw) {
+          const rk = inspectionHandoverDateKey_(roundRaw);
+          const pk = inspectionHandoverDateKey_(planRaw);
+          if (rk && pk && rk === pk) return; // ข้ามค่าที่คัดลอกจากแผนส่งมอบ
+        }
         const roundLabel = formatInspectionHandoverDate_(roundRaw, false) || roundRaw;
         const key = inspectionHandoverDateKey_(roundRaw) || roundLabel;
+        if (seenKey[key] || seenLabel[roundLabel]) return;
+        seenKey[key] = true;
+        seenLabel[roundLabel] = true;
+        rounds.push(roundLabel);
+      });
+      rounds.sort(function(a, b) {
+        const ka = inspectionHandoverDateKey_(a);
+        const kb = inspectionHandoverDateKey_(b);
+        if (ka && kb) return ka.localeCompare(kb);
+        if (ka) return -1;
+        if (kb) return 1;
+        return a.localeCompare(b, 'th');
+      });
+      return rounds;
+    }
+
+    function collectInspectionRoundLabelsFromOptions_(options) {
+      const rounds = [];
+      const seenLabel = {};
+      const seenKey = {};
+      (options || []).forEach(function(raw) {
+        const roundLabel = formatInspectionHandoverDate_(raw, false) || String(raw || '').trim();
+        if (!roundLabel) return;
+        const key = inspectionHandoverDateKey_(roundLabel) || roundLabel;
         if (seenKey[key] || seenLabel[roundLabel]) return;
         seenKey[key] = true;
         seenLabel[roundLabel] = true;
@@ -6611,18 +6659,47 @@
       const roundSel = document.getElementById('inspectionHandoverRoundSelect');
       const mapRoundSel = document.getElementById('inspectionMapRoundSelect');
       if (!roundSel && !mapRoundSel) return;
-      const rounds = collectInspectionRoundLabels_(sourcePlans || inspectionData || []);
+      if (!inspectionHandoverRoundOptions_) {
+        try {
+          const cached = JSON.parse(localStorage.getItem('pwa_insp_round_opts_v2') || localStorage.getItem('pwa_insp_round_opts_v1') || 'null');
+          if (Array.isArray(cached)) inspectionHandoverRoundOptions_ = cached.map(function(r) {
+            return formatInspectionHandoverDate_(r, false) || String(r || '').trim();
+          }).filter(Boolean);
+        } catch (e) {}
+      }
+      // dropdown บนตาราง: ใช้รายการจากชีทต้นทางเป็นหลัก (กันวันที่เพี้ยน/ลอย)
+      let topRounds = collectInspectionRoundLabelsFromOptions_(inspectionHandoverRoundOptions_);
+      if (!topRounds.length) topRounds = collectInspectionRoundLabels_(inspectionData || []);
+      else {
+        const seen = {};
+        topRounds.forEach(function(r) { seen[r] = true; });
+        collectInspectionRoundLabels_(inspectionData || []).forEach(function(r) {
+          if (seen[r]) return;
+          seen[r] = true;
+          topRounds.push(r);
+        });
+        topRounds.sort(function(a, b) {
+          const ka = inspectionHandoverDateKey_(a);
+          const kb = inspectionHandoverDateKey_(b);
+          if (ka && kb) return ka.localeCompare(kb);
+          if (ka) return -1;
+          if (kb) return 1;
+          return a.localeCompare(b, 'th');
+        });
+      }
+      // dropdown แผนที่: เฉพาะวันที่ของสถานที่ที่ตรงตัวกรองตอนนี้
+      const mapRounds = collectInspectionRoundLabels_(sourcePlans || inspectionData || []);
       const topRoundOptionsHtml = '<option value="">ทุกรอบส่งมอบงานจริง</option>' +
         '<option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
-        rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
+        topRounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
       const mapRoundOptionsHtml = '<option value="">ทุกรอบที่มีวันที่ (คอลัมน์รอบส่งมอบงานจริง)</option>' +
-        rounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
+        mapRounds.map(function(r) { return '<option value="' + escHtml(r) + '">' + escHtml(r) + '</option>'; }).join('');
       const curRound = (ui && ui.handoverRound != null && ui.handoverRound !== '')
         ? ui.handoverRound
         : ((roundSel && roundSel.value) || '');
       if (roundSel) {
         roundSel.innerHTML = topRoundOptionsHtml;
-        const picked = pickInspectionRoundOption_(rounds, curRound);
+        const picked = pickInspectionRoundOption_(topRounds, curRound);
         if (picked) roundSel.value = picked;
       }
       if (mapRoundSel) {
@@ -6630,7 +6707,7 @@
           ? ui.mapRound
           : (mapRoundSel.value || '');
         mapRoundSel.innerHTML = mapRoundOptionsHtml;
-        const pickedMap = pickInspectionRoundOption_(rounds, curMapRound);
+        const pickedMap = pickInspectionRoundOption_(mapRounds, curMapRound);
         if (pickedMap) mapRoundSel.value = pickedMap;
       }
     }
@@ -6767,10 +6844,20 @@
       }
       const s = String(raw).replace(/\u00a0/g, ' ').trim();
       if (!s) return null;
-      const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if (iso) {
-        const dt = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+      // วันที่อย่างเดียว (ไม่มีเวลา) — ใช้เป็นปฏิทินตรง ๆ
+      const isoDateOnly = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (isoDateOnly) {
+        const dt = new Date(parseInt(isoDateOnly[1], 10), parseInt(isoDateOnly[2], 10) - 1, parseInt(isoDateOnly[3], 10));
         if (!isNaN(dt.getTime())) return dt;
+      }
+      // ISO มีเวลา/โซน (เช่น จาก JSON.stringify(Date)) — ใช้วันท้องถิ่น กันเลื่อน -1 วันจาก UTC
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          let y = d.getFullYear();
+          if (y > 2400) y -= 543;
+          return new Date(y, d.getMonth(), d.getDate());
+        }
       }
       const th = s.match(/(\d{1,2})\s*([ก-๙\.]+)\s*(\d{2,4})/);
       if (th) {
