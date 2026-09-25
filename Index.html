@@ -240,13 +240,46 @@
     .inspection-trip-panel .insp-trip-hint {
       font-size: 0.72rem; color: #64748b; margin: -0.15rem 0 0.5rem;
     }
+    .inspection-mobile-list { display: flex; flex-direction: column; gap: 0.65rem; }
+    .inspection-mobile-card {
+      background: #fff; border: 1px solid #cbd5e1; border-radius: 14px;
+      padding: 0.8rem 0.85rem; box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+    }
+    .inspection-mobile-card.is-visited { opacity: 0.92; }
+    .inspection-mobile-card .insp-m-title { font-weight: 700; color: #1e293b; line-height: 1.4; font-size: 0.95rem; }
+    .inspection-mobile-card .insp-m-sub { font-size: 0.78rem; color: #64748b; margin-top: 0.15rem; }
+    .inspection-mobile-card .insp-m-row {
+      display: grid; grid-template-columns: 6.6rem minmax(0, 1fr);
+      gap: 0.2rem 0.55rem; align-items: start;
+      font-size: 0.82rem; margin-top: 0.45rem;
+    }
+    .inspection-mobile-card .insp-m-label { color: #64748b; font-weight: 600; padding-top: 0.15rem; }
+    .inspection-mobile-card .insp-m-value { min-width: 0; }
+    .inspection-mobile-card .insp-file-link,
+    .inspection-sheet-table .insp-file-cell .insp-file-link {
+      word-break: break-word; overflow-wrap: anywhere;
+    }
+    .inspection-mobile-card .insp-file-link {
+      display: flex; align-items: center; gap: 0.35rem; width: 100%; box-sizing: border-box;
+      padding: 0.55rem 0.6rem; border-radius: 8px; background: #fef2f2; border: 1px solid #fecaca;
+      color: #991b1b; text-decoration: none; line-height: 1.35; min-height: 44px;
+    }
+    .inspection-mobile-region {
+      background: linear-gradient(90deg, #1e40af, #2563eb); color: #fff; font-weight: 700;
+      border-radius: 10px; padding: 0.4rem 0.75rem; font-size: 0.8rem;
+    }
     @media (max-width: 991.98px) {
       .inspection-map-col,
       .inspection-side-card { height: auto; min-height: 0; }
-      #inspectionMap { height: 55vh; max-height: none; min-height: 320px; }
-      .inspection-map-details { height: auto; min-height: 160px; max-height: none; }
+      #inspectionMap {
+        flex: none; width: 100%; height: 52dvh; max-height: none; min-height: 280px;
+      }
+      .inspection-map-details { height: auto; min-height: 0; max-height: none; overflow: visible; }
       .inspection-trip-panel { max-height: none; overflow: visible; }
       .inspection-trip-panel #inspectionTripList { overflow: visible; }
+      .inspection-table-wrap { max-height: none; overflow-x: auto; overflow-y: visible; }
+      .inspection-page-header { padding: 1rem; border-radius: 16px; }
+      .inspection-map-panel, .inspection-list-panel { padding: 0.85rem; border-radius: 16px; }
     }
     .inspection-map-col .leaflet-tooltip.insp-map-tip-wrap {
       background: #fff; border: 1px solid #cbd5e1; border-radius: 10px;
@@ -435,7 +468,7 @@
     .inspection-sheet-table .insp-file-cell .insp-file-link {
       display: flex; align-items: center; gap: 0.35rem; width: 100%; box-sizing: border-box;
       padding: 0.4rem 0.5rem; border-radius: 6px; background: #fef2f2; border: 1px solid #fecaca;
-      color: #991b1b; text-decoration: none; word-break: break-all; line-height: 1.3;
+      color: #991b1b; text-decoration: none; word-break: break-word; overflow-wrap: anywhere; line-height: 1.3;
     }
     .inspection-sheet-table .insp-file-cell .insp-file-link:hover { background: #fee2e2; color: #7f1d1d; }
     .inspection-sheet-table .insp-file-cell .insp-file-note {
@@ -1098,7 +1131,7 @@
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div>
             <h5 class="fw-bold mb-0"><i class="fa-solid fa-map-location-dot text-primary"></i> แผนที่สถานที่ตรวจรับ</h5>
-            <small class="text-muted">ตรงตัวกรอง = สีเข้ม · นอกตัวกรอง = สีจาง — สอดคล้องกับรายการด้านล่าง</small>
+            <small class="text-muted">แสดงเฉพาะสถานที่ที่ตรงตัวกรอง — สอดคล้องกับรายการด้านล่าง</small>
           </div>
           <span class="badge bg-light text-dark border" id="inspectionMapCountBadge">0 จุด</span>
         </div>
@@ -4968,6 +5001,11 @@
             renderInspectionMap_();
           }
         }, 250);
+        setTimeout(function() {
+          if (inspectionMap) {
+            try { inspectionMap.invalidateSize(); } catch (e) {}
+          }
+        }, 700);
       }
     }
 
@@ -7901,18 +7939,59 @@
       });
     }
 
+    function isInspectionNarrowLayout_() {
+      try { return window.matchMedia('(max-width: 991.98px)').matches; } catch (e) { return false; }
+    }
+
+    function renderInspectionMobileCards_(sorted, inspCols, regionFilter) {
+      const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
+      let html = '<div class="inspection-mobile-list">';
+      let lastRegion = '';
+      sorted.forEach(function(p) {
+        const reg = (p.region || 'NC').toUpperCase();
+        if (!regionFilter && reg !== lastRegion) {
+          lastRegion = reg;
+          html += '<div class="inspection-mobile-region"><i class="fa-solid fa-layer-group me-2"></i>' + escHtml(REGION_LABELS_[reg] || reg) + '</div>';
+        }
+        const safeId = String(p.id).replace(/'/g, "\\'");
+        const editBtn = canEditInspection()
+          ? '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2" onclick="editInspection(\'' + safeId + '\')" title="แก้ไขทั้งหมด"><i class="fa-solid fa-pen"></i></button>'
+          : '';
+        const placeCol = inspCols.filter(function(c) { return c.key === 'mapLocation'; })[0];
+        const title = placeCol ? renderInspectionTableCell_(p, placeCol) : escHtml(p.place || '-');
+        html += '<article class="inspection-mobile-card' + (p.visited ? ' is-visited' : '') + '">';
+        html += '<div class="d-flex justify-content-between align-items-start gap-2"><div class="insp-m-title">' + title + '</div>' + editBtn + '</div>';
+        inspCols.forEach(function(col) {
+          if (col.key === 'mapLocation') return;
+          html += '<div class="insp-m-row"><div class="insp-m-label">' + escHtml(col.label) + '</div><div class="insp-m-value">' + renderInspectionTableCell_(p, col) + '</div></div>';
+        });
+        html += '</article>';
+      });
+      html += '</div>';
+      return html;
+    }
+
     function renderInspectionListNow_(preserveUi) {
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
+      window._inspListNarrow_ = isInspectionNarrowLayout_();
       if (!filteredInspectionData.length) {
         container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการตามตัวกรอง</p></div>';
         return;
       }
-      const REGION_ORDER_ = { NC: 0, NE: 1, S: 2 };
       const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
       const regionFilter = getInspectionRegionFilter_();
       const sorted = [...filteredInspectionData].sort(compareInspectionPlans_);
       const inspCols = getInspectionTableColumns_();
+      if (window._inspListNarrow_) {
+        container.innerHTML = renderInspectionMobileCards_(sorted, inspCols, regionFilter);
+        bindInspectionLazyDatePickers_();
+        initInspectionInlineDatePickers_();
+        if (preserveUi && (preserveUi.scrollTop > 0 || preserveUi.windowScrollY > 0)) {
+          restoreInspectionScroll_(preserveUi);
+        }
+        return;
+      }
       let html = '<div class="inspection-table-wrap"><table class="table table-sm table-bordered inspection-sheet-table mb-0"><thead><tr>';
       inspCols.forEach(function(col) { html += renderInspectionHeaderCell_(col); });
       const hasColFilters = Object.keys(inspectionColumnFilters).length > 0;
@@ -8997,9 +9076,12 @@
         window._inspMapResizeBound = true;
         window.addEventListener('resize', function() {
           const menu = document.getElementById('menu-inspection');
-          if (inspectionMap && menu && menu.style.display !== 'none') {
+          if (!menu || menu.style.display === 'none') return;
+          if (inspectionMap) {
             try { inspectionMap.invalidateSize(); } catch (e) {}
           }
+          const narrow = isInspectionNarrowLayout_();
+          if (narrow !== window._inspListNarrow_) renderInspectionList();
         });
       }
     }
@@ -9019,64 +9101,40 @@
         startMapGpsTracking();
       }
       refreshInspectionTripDatalist_();
-      const matchedPlans = getInspectionMapFilteredPlans_();
-      const matchedIds = {};
-      (matchedPlans || []).forEach(function(p) {
-        if (p && p.id != null) matchedIds[String(p.id)] = true;
-      });
-      const basePlans = getInspectionMapBasePlans_();
-      const highlightActive = (matchedPlans || []).length < (basePlans || []).length;
-      const boundsMatched = [];
-      const boundsAll = [];
+      const matchedPlans = getInspectionMapFilteredPlans_() || [];
+      const bounds = [];
       let plotted = 0;
-      let plottedMatched = 0;
-      let plottedDimmed = 0;
       let plottedReady = 0;
       let plottedNotReady = 0;
       let plottedDone = 0;
       const missingCoords = [];
-      // วาดหมุดจางก่อน แล้วค่อยหมุดเข้ม — ให้หมุดที่ตรงตัวกรองอยู่บน
-      const ordered = [];
-      (basePlans || []).forEach(function(p) {
-        const matched = !!(p && p.id != null && matchedIds[String(p.id)]);
-        ordered.push({ p: p, matched: matched });
-      });
-      ordered.sort(function(a, b) { return (a.matched === b.matched) ? 0 : (a.matched ? 1 : -1); });
-
-      ordered.forEach(function(item) {
-        const p = item.p;
-        const matched = item.matched;
-        const dimmed = highlightActive && !matched;
+      matchedPlans.forEach(function(p) {
         const info = getInspectionMapLocation_(p);
         const loc = info.loc;
         const lat = loc ? Number(loc.lat) : NaN;
         const lng = loc ? Number(loc.lng) : NaN;
         if (!loc || !isFinite(lat) || !isFinite(lng)) {
-          if (matched) missingCoords.push(p);
+          missingCoords.push(p);
           return;
         }
         const hasRound = inspectionHasHandoverRound_(p);
         const marker = L.marker([lat, lng], {
-          icon: getInspectionMapIcon_(p, { dimmed: dimmed }),
+          icon: getInspectionMapIcon_(p),
           opacity: 1,
-          zIndexOffset: dimmed ? 0 : 800
+          zIndexOffset: 800
         });
-        if (matched) {
-          plottedMatched++;
-          if (p.visited) plottedDone++;
-          if (hasRound) plottedReady++;
-          else plottedNotReady++;
-          boundsMatched.push([lat, lng]);
-        } else {
-          plottedDimmed++;
-        }
+        plotted++;
+        if (p.visited) plottedDone++;
+        if (hasRound) plottedReady++;
+        else plottedNotReady++;
+        bounds.push([lat, lng]);
         const tipHtml = buildInspectionMapTooltipHtml_(p, info);
         if (tipHtml) {
           marker.bindTooltip(tipHtml, {
             direction: 'top',
             offset: [0, -28],
-            opacity: dimmed ? 0.85 : 1,
-            className: 'insp-map-tip-wrap' + (dimmed ? ' is-dimmed' : ''),
+            opacity: 1,
+            className: 'insp-map-tip-wrap',
             sticky: true
           });
         }
@@ -9088,19 +9146,13 @@
           }
         });
         inspectionMarkersLayer.addLayer(marker);
-        boundsAll.push([lat, lng]);
-        plotted++;
       });
       if (badge) {
-        if (plottedMatched) {
-          badge.textContent = plottedMatched + ' จุดตรงตัวกรอง'
-            + (plottedDimmed ? ' · จาง ' + plottedDimmed + ' จุดอื่น' : '')
+        if (plotted) {
+          badge.textContent = plotted + ' จุด'
             + ' · ส่งมอบแล้ว ' + plottedReady
             + ' · ตรวจแล้ว ' + plottedDone
             + (plottedNotReady ? ' · ยังไม่ส่งมอบ ' + plottedNotReady : '')
-            + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : '');
-        } else if (plottedDimmed) {
-          badge.textContent = '0 จุดตรงตัวกรอง · แสดงจาง ' + plottedDimmed + ' จุด'
             + (missingCoords.length ? ' · ไม่มีพิกัด ' + missingCoords.length : '');
         } else if (matchedPlans.length) {
           badge.textContent = '0 จุด · มี ' + matchedPlans.length + ' รายการแต่ไม่มีพิกัด';
@@ -9108,7 +9160,6 @@
           badge.textContent = '0 จุด';
         }
       }
-      const bounds = boundsMatched.length ? boundsMatched : boundsAll;
       if (bounds.length > 1) {
         try { inspectionMap.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 }); } catch (e) {}
       } else if (bounds.length === 1) {
@@ -9118,9 +9169,8 @@
       }
       if (panel) {
         const selectedId = panel.dataset.inspSelected || '';
-        const stillVisible = selectedId && (matchedPlans.some(function(p) { return String(p.id) === selectedId; })
-          || basePlans.some(function(p) { return String(p.id) === selectedId; }));
-        if (!plottedMatched && !plottedDimmed) {
+        const stillVisible = selectedId && matchedPlans.some(function(p) { return String(p.id) === selectedId; });
+        if (!plotted) {
           panel.dataset.inspSelected = '';
           if (missingCoords.length) {
             const names = missingCoords.slice(0, 12).map(function(p) {
