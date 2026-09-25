@@ -178,6 +178,9 @@
       background: #fff; border-radius: 20px; padding: 1.25rem; margin-top: 1.25rem;
       box-shadow: var(--pwa-shadow); border: 1px solid var(--pwa-border);
     }
+    .inspection-list-own-filters {
+      background: #f8fafc; border: 1px solid var(--pwa-border); border-radius: 12px; padding: 0.75rem;
+    }
     .inspection-map-layout > [class*="col-"] {
       display: flex; flex-direction: column; min-width: 0;
     }
@@ -1212,6 +1215,39 @@
             </a>
           </div>
           <button class="btn btn-custom-primary rounded-pill px-3 shadow-sm btn-sm" onclick="openInspectionModal()" id="btnAddInspection" disabled><i class="fa-solid fa-plus"></i> เพิ่ม</button>
+        </div>
+        <div class="inspection-list-own-filters mb-3" id="inspectionListOwnFilterBar">
+          <div class="small text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>กรองรายการนี้เอง — ไม่เปลี่ยนแผนที่ด้านบน</div>
+          <div class="row g-2">
+            <div class="col-md-3">
+              <input type="text" id="inspectionListSearch" class="form-control form-control-sm" placeholder="ค้นหาในรายการ..." oninput="onInspectionListFilterInput_()" autocomplete="off">
+            </div>
+            <div class="col-6 col-md-2">
+              <select id="inspectionListRegion" class="form-select form-select-sm" onchange="refreshInspectionListOnly_()">
+                <option value="">ทุกภาคในรายการ</option>
+                <option value="NC">NC</option>
+                <option value="NE">NE</option>
+                <option value="S">S</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-2">
+              <select id="inspectionListZone" class="form-select form-select-sm" onchange="refreshInspectionListOnly_()">
+                <option value="">ทุกเขต กฟภ.</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <select id="inspectionListRound" class="form-select form-select-sm" onchange="refreshInspectionListOnly_()">
+                <option value="">ทุกรอบส่งมอบ</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-2">
+              <select id="inspectionListVisited" class="form-select form-select-sm" onchange="refreshInspectionListOnly_()">
+                <option value="">ไปแล้ว/ยังไม่ไป</option>
+                <option value="yes">ไปแล้ว</option>
+                <option value="no">ยังไม่ไป</option>
+              </select>
+            </div>
+          </div>
         </div>
         <div id="inspectionFormTemplateBanner" class="inspection-form-template-banner empty mb-3">
           <div class="insp-form-icon"><i class="fa-solid fa-clipboard-list"></i></div>
@@ -6756,8 +6792,7 @@
         const matchPhase = inspectionMatchesPhaseFilter_(p, phaseVal);
         const matchPwa = !pwaVal || (p.pwaDistrict || '') === pwaVal;
         const matchRegion = !regionVal || (p.region || 'NC').toUpperCase() === regionVal;
-        const matchColumns = matchesInspectionColumnFilters_(p);
-        return matchText && matchPhase && matchPwa && matchRegion && matchColumns;
+        return matchText && matchPhase && matchPwa && matchRegion;
       });
     }
 
@@ -7369,10 +7404,77 @@
       return true;
     }
 
+    function inspectionListOwnFilterValue_(id) {
+      return (document.getElementById(id)?.value || '').trim();
+    }
+
+    function matchesInspectionListOwnFilters_(p) {
+      const textVal = inspectionListOwnFilterValue_('inspectionListSearch').toLowerCase();
+      if (textVal) {
+        const info = getInspectionMapLocation_(p);
+        const blob = [p.place, p.region, p.phase, p.peaZone, p.peaOffice, p.pwaDistrict, p.pwaBranch, p.inspectors, p.inspectSchedule, p.handoverRound, info && info.name].join(' ').toLowerCase();
+        if (!blob.includes(textVal)) return false;
+      }
+      const regionVal = inspectionListOwnFilterValue_('inspectionListRegion').toUpperCase();
+      if (regionVal && (p.region || 'NC').toUpperCase() !== regionVal) return false;
+      const zoneVal = inspectionListOwnFilterValue_('inspectionListZone');
+      if (zoneVal && String(p.peaZone || '').trim() !== zoneVal) return false;
+      const roundVal = inspectionListOwnFilterValue_('inspectionListRound');
+      if (roundVal === '__empty__') {
+        if (inspectionHasHandoverRound_(p)) return false;
+      } else if (roundVal && !inspectionRoundValuesMatch_(p.handoverRound, roundVal)) return false;
+      const visitedVal = inspectionListOwnFilterValue_('inspectionListVisited');
+      if (visitedVal === 'yes' && !p.visited) return false;
+      if (visitedVal === 'no' && p.visited) return false;
+      return matchesInspectionColumnFilters_(p);
+    }
+
+    function getInspectionListVisiblePlans_() {
+      return (filteredInspectionData || []).filter(matchesInspectionListOwnFilters_);
+    }
+
+    function setupInspectionListOwnFilterOptions_() {
+      const zoneSel = document.getElementById('inspectionListZone');
+      const roundSel = document.getElementById('inspectionListRound');
+      if (!zoneSel || !roundSel) return;
+      const curZone = zoneSel.value;
+      const curRound = roundSel.value;
+      const zones = [];
+      const seen = {};
+      (filteredInspectionData || []).forEach(function(p) {
+        const z = String(p.peaZone || '').trim();
+        if (z && !seen[z]) { seen[z] = true; zones.push(z); }
+      });
+      zones.sort(function(a, b) { return a.localeCompare(b, 'th'); });
+      zoneSel.innerHTML = '<option value="">ทุกเขต กฟภ.</option>' + zones.map(function(z) {
+        return '<option value="' + escHtml(z) + '">' + escHtml(z) + '</option>';
+      }).join('');
+      if (curZone && zones.indexOf(curZone) >= 0) zoneSel.value = curZone;
+      const rounds = collectInspectionRoundLabels_(filteredInspectionData);
+      roundSel.innerHTML = '<option value="">ทุกรอบส่งมอบ</option><option value="__empty__">ยังไม่มีรอบส่งมอบ</option>' +
+        rounds.map(function(r) {
+          const text = formatInspectionRoundWithOrdinal_(r, false) || r;
+          return '<option value="' + escHtml(r) + '">' + escHtml(text) + '</option>';
+        }).join('');
+      if (curRound === '__empty__' || rounds.some(function(r) { return inspectionRoundValuesMatch_(r, curRound); })) {
+        const picked = curRound === '__empty__' ? '__empty__' : (pickInspectionRoundOption_(rounds, curRound) || '');
+        if (picked) roundSel.value = picked;
+      }
+    }
+
+    function refreshInspectionListOnly_() {
+      updateInspectionListScopeLabel_();
+      renderInspectionList();
+    }
+    window.refreshInspectionListOnly_ = refreshInspectionListOnly_;
+
+    const onInspectionListFilterInput_ = debounce_(refreshInspectionListOnly_, 120);
+    window.onInspectionListFilterInput_ = onInspectionListFilterInput_;
+
     function updateInspectionListScopeLabel_() {
       const el = document.getElementById('inspectionListScopeLabel');
       if (!el) return;
-      const n = (filteredInspectionData || []).length;
+      const n = getInspectionListVisiblePlans_().length;
       const bits = [];
       const regionVal = getInspectionRegionFilter_();
       if (regionVal) bits.push(regionVal);
@@ -7392,6 +7494,18 @@
       else if (roundVal) bits.push(formatInspectionRoundWithOrdinal_(roundVal, false) || roundVal);
       const searchVal = (document.getElementById('inspectionSearchInput')?.value || '').trim();
       if (searchVal) bits.push('ค้นหา ' + searchVal);
+      const listSearch = inspectionListOwnFilterValue_('inspectionListSearch');
+      if (listSearch) bits.push('ในรายการ ' + listSearch);
+      const listRegion = inspectionListOwnFilterValue_('inspectionListRegion');
+      if (listRegion) bits.push('รายการ ' + listRegion);
+      const listZone = inspectionListOwnFilterValue_('inspectionListZone');
+      if (listZone) bits.push(listZone);
+      const listRound = inspectionListOwnFilterValue_('inspectionListRound');
+      if (listRound === '__empty__') bits.push('รายการยังไม่มีรอบ');
+      else if (listRound) bits.push('รายการ ' + (formatInspectionRoundWithOrdinal_(listRound, false) || listRound));
+      const listVisited = inspectionListOwnFilterValue_('inspectionListVisited');
+      if (listVisited === 'yes') bits.push('ไปแล้ว');
+      else if (listVisited === 'no') bits.push('ยังไม่ไป');
       if (Object.keys(inspectionColumnFilters).length) bits.push('กรองหัวตาราง');
       el.textContent = '(' + n + ' รายการ' + (bits.length ? ' · ' + bits.join(' · ') : ' · ตามตัวกรอง') + ')';
     }
@@ -8024,13 +8138,14 @@
       const container = document.getElementById('inspectionListContainer');
       if (!container) return;
       window._inspListNarrow_ = isInspectionNarrowLayout_();
-      if (!filteredInspectionData.length) {
+      const listRows = getInspectionListVisiblePlans_();
+      if (!listRows.length) {
         container.innerHTML = '<div class="text-center text-muted py-5"><i class="fa-solid fa-clipboard-list fa-3x mb-3 opacity-50"></i><p>ไม่พบรายการตามตัวกรอง</p></div>';
         return;
       }
       const REGION_LABELS_ = { NC: 'NC — ภาคกลาง-เหนือ', NE: 'NE — ภาคอีสาน', S: 'S — ภาคใต้' };
-      const regionFilter = getInspectionRegionFilter_();
-      const sorted = [...filteredInspectionData].sort(compareInspectionPlans_);
+      const regionFilter = getInspectionRegionFilter_() || inspectionListOwnFilterValue_('inspectionListRegion').toUpperCase();
+      const sorted = listRows.slice().sort(compareInspectionPlans_);
       const inspCols = getInspectionTableColumns_();
       if (window._inspListNarrow_) {
         container.innerHTML = renderInspectionMobileCards_(sorted, inspCols, regionFilter);
@@ -8105,6 +8220,7 @@
         return matchVisited && matchRound;
       });
 
+      setupInspectionListOwnFilterOptions_();
       updateInspectionListScopeLabel_();
       renderInspectionList(preserveUi);
       updateInspectionStats();
