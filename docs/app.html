@@ -7171,7 +7171,7 @@
             }
           }
           syncInspInlineFilledClass_(el);
-          if (opts.autoSave !== false) {
+          if (opts.autoSave !== false && el && el.getAttribute('data-insp-confirming') !== '1') {
             const newVal = el.value.trim();
             if (el.getAttribute('data-last-saved') !== newVal) {
               saveInspectionInline(el);
@@ -8026,7 +8026,16 @@
       }
       formData.changedKeys = [field];
       applyInspectionInlineValueLocal_(id, field, displayVal);
-      el.setAttribute('data-last-saved', String(displayVal == null ? '' : displayVal).trim());
+      const shown = String(displayVal == null ? '' : displayVal).trim();
+      el.value = shown;
+      el.setAttribute('data-last-saved', shown);
+      if (el._flatpickr && shown) {
+        const d = parseInspectionHandoverDate_(shown);
+        if (d) {
+          el._flatpickr.setDate(d, false);
+          applyInspectionPickerDisplay_(el, d);
+        }
+      }
       syncInspInlineFilledClass_(el);
       google.script.run.withSuccessHandler(function(res) {
         handleInspectionSaveResultQuiet_(res);
@@ -8073,6 +8082,7 @@
       }
       // กำหนดตรวจงาน: เปลี่ยนได้เลย แต่ต้องยืนยันก่อนบันทึก
       if (field === 'inspectSchedule') {
+        el.setAttribute('data-insp-confirming', '1');
         Swal.fire({
           title: 'ยืนยันเปลี่ยนกำหนดตรวจงาน?',
           html: prevSaved
@@ -8083,11 +8093,13 @@
           confirmButtonText: 'ตกลง',
           cancelButtonText: 'ยกเลิก'
         }).then(function(res) {
+          el.removeAttribute('data-insp-confirming');
           if (!res.isConfirmed) {
             revertInspectionInlineDate_(el, prevSaved);
             return;
           }
           commitInspectionInlineSave_(el, formData, displayVal);
+          filterInspections(captureInspectionUiState_());
         });
         return;
       }
