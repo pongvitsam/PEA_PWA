@@ -5580,14 +5580,34 @@
       return best;
     }
 
+    /** ชื่อสถานที่ตรงกับแผนที่เฟส 3–4 หรือ 1–2 (รวมชื่อที่ตัดวงเล็บแล้ว) */
+    function inspectionLocationPhaseHit_(digits, q) {
+      if (!q) return false;
+      if (!_locationLookupCache_) rebuildLocationLookup_();
+      const list = (_locationLookupCache_ && _locationLookupCache_.list) || [];
+      const coreQ = inspectionLocationCoreName_(q);
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const digit = item.digit || projectPhaseDigit_(item.d && item.d.phase);
+        const ok = digits === '34' ? (digit === '3' || digit === '4') : (digit === '1' || digit === '2');
+        if (!ok) continue;
+        const nameOnly = item.nameOnly || '';
+        const core = inspectionLocationCoreName_(item.d && item.d.name);
+        if (nameOnly === q || core === q || nameOnly === coreQ || core === coreQ) return true;
+        if (q.length >= 6 && core && (core.indexOf(q) >= 0 || q.indexOf(core) >= 0)) return true;
+      }
+      return false;
+    }
+
     /** สถานที่เฟส 1–2 ของแผนที่โครงการห้ามโชว์ในหน้าแผนตรวจรับเฟส 3–4 */
     function inspectionBlockedAsProjectPhase12_(p) {
       const sheetPh = projectPhaseDigit_(p && p.phase);
+      if (sheetPh === '3' || sheetPh === '4') return false;
       if (sheetPh === '1' || sheetPh === '2') return true;
       const q = normalizeNameForMatch(p && p.place);
       if (!q) return false;
-      if (_inspLocExact34_ && _inspLocExact34_.has(q)) return false;
-      if (_inspLocExact12_ && _inspLocExact12_.has(q)) return true;
+      if (inspectionLocationPhaseHit_('34', q)) return false;
+      if (inspectionLocationPhaseHit_('12', q)) return true;
       return false;
     }
 
@@ -6933,7 +6953,11 @@
       if (inspectionBlockedAsProjectPhase12_(p)) return false;
       const ph = projectPhaseDigit_(p.phase);
       if (!phaseVal) return ph !== '1' && ph !== '2';
-      if (phaseVal === '34') return ph === '3' || ph === '4';
+      if (phaseVal === '34') {
+        if (ph === '3' || ph === '4') return true;
+        if (ph === '1' || ph === '2') return false;
+        return inspectionLocationPhaseHit_('34', normalizeNameForMatch(p && p.place));
+      }
       return ph === phaseVal;
     }
 
