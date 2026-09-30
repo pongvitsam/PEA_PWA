@@ -5479,16 +5479,40 @@
     }
 
     /** คะแนนจับคู่แผนตรวจรับ ↔ สถานที่แผนที่ — ใช้ กปภ./กฟภ./จังหวัด กันชื่อซ้ำ (เช่น ศูนย์ราชการ) */
+    function inspectionPlanPlaceCore_(place) {
+      return inspectionLocationCoreName_(place) || normalizeNameForMatch(place);
+    }
+
+    function inspectionPlanBranchHints_(p) {
+      const hints = [];
+      const raw = String((p && p.place) || '');
+      const chunks = raw.match(/\(([^)]+)\)/g) || [];
+      chunks.forEach(function(chunk) {
+        const cleaned = normalizeNameForMatch(chunk.replace(/[()]/g, ''))
+          .replace(/^กปภ\.?\s*/i, '')
+          .replace(/^(สาขา|เขต)\s*/i, '')
+          .trim();
+        if (cleaned.length >= 3) hints.push(cleaned);
+      });
+      const branch = normalizeNameForMatch((p && (p.pwaBranch || p.pwaDistrict)) || '')
+        .replace(/^กปภ\.?\s*/i, '')
+        .replace(/^(สาขา|เขต)\s*/i, '')
+        .trim();
+      if (branch.length >= 3) hints.push(branch);
+      return hints;
+    }
+
     function scoreLocationForInspectionPlan_(loc, p) {
       if (!loc || !p) return 0;
-      const placeQ = normalizeNameForMatch(p.place);
+      const placeQ = inspectionPlanPlaceCore_(p.place);
       if (!placeQ) return 0;
       const locName = normalizeNameForMatch(loc.name);
       const locCore = inspectionLocationCoreName_(loc.name);
+      const exactName = locName === placeQ || locCore === placeQ;
       let score = 0;
-      if (locName === placeQ || locCore === placeQ) score += 80;
-      else if (locName.indexOf(placeQ) >= 0 || placeQ.indexOf(locCore) >= 0 || locCore.indexOf(placeQ) >= 0) {
-        if (Math.min(placeQ.length, locCore.length) < 8) return 0;
+      if (exactName) score += 80;
+      else if (locName.indexOf(placeQ) >= 0 || (locCore && placeQ.indexOf(locCore) >= 0) || (locCore && locCore.indexOf(placeQ) >= 0)) {
+        if (Math.min(placeQ.length, (locCore || locName).length) < 8) return 0;
         score += 45;
       } else return 0;
 
@@ -5498,14 +5522,20 @@
       const locBlob = normalizeNameForMatch([
         loc.name, loc.peaRegion, loc.pwaRegion, loc.province
       ].filter(Boolean).join(' '));
+      const hints = inspectionPlanBranchHints_(p);
+      let branchOk = false;
+      hints.forEach(function(h) {
+        if (h && (locName.indexOf(h) >= 0 || locBlob.indexOf(h) >= 0)) branchOk = true;
+      });
       const planProv = guessThaiProvinceFromText_(planBlob);
       const locProv = resolveLocationProvince_(loc) || guessThaiProvinceFromText_(locBlob);
       if (planProv && locProv) {
         if (planProv === locProv) score += 50;
-        else score -= 80;
+        else if (!exactName && !branchOk) score -= 80;
       } else if (planProv && locName.indexOf(normalizeNameForMatch(planProv)) >= 0) {
         score += 40;
       }
+      if (branchOk) score += 40;
       if (loc.pwaRegion && planBlob.indexOf(normalizeNameForMatch(loc.pwaRegion)) >= 0) score += 25;
       if (loc.peaRegion && planBlob.indexOf(normalizeNameForMatch(loc.peaRegion)) >= 0) score += 25;
       const pwaHint = normalizeNameForMatch(p.pwaBranch || p.pwaDistrict || '');
