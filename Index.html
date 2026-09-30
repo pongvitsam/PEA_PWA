@@ -5502,18 +5502,35 @@
       return hints;
     }
 
+    function inspectionSiteKey_(name) {
+      let s = inspectionLocationCoreName_(name) || normalizeNameForMatch(name);
+      const prefixes = ['สถานีผลิตน้ำ', 'โรงผลิตน้ำ', 'สถานีผลิต', 'โรงผลิต', 'สถานี', 'โรง'];
+      for (let i = 0; i < prefixes.length; i++) {
+        if (s.indexOf(prefixes[i]) === 0) {
+          s = s.slice(prefixes[i].length).trim();
+          break;
+        }
+      }
+      return s;
+    }
+
     function scoreLocationForInspectionPlan_(loc, p) {
       if (!loc || !p) return 0;
       const placeQ = inspectionPlanPlaceCore_(p.place);
       if (!placeQ) return 0;
       const locName = normalizeNameForMatch(loc.name);
       const locCore = inspectionLocationCoreName_(loc.name);
+      const placeKey = inspectionSiteKey_(p.place);
+      const locKey = inspectionSiteKey_(loc.name);
       const exactName = locName === placeQ || locCore === placeQ;
+      const sameSite = !!(placeKey && locKey && placeKey === locKey && placeKey.length >= 6);
       let score = 0;
-      if (exactName) score += 80;
+      if (exactName || sameSite) score += 80;
       else if (locName.indexOf(placeQ) >= 0 || (locCore && placeQ.indexOf(locCore) >= 0) || (locCore && locCore.indexOf(placeQ) >= 0)) {
         if (Math.min(placeQ.length, (locCore || locName).length) < 8) return 0;
         score += 45;
+      } else if (placeKey && placeKey.length >= 6 && locCore.indexOf(placeKey) >= 0) {
+        score += 60;
       } else return 0;
 
       const planBlob = normalizeNameForMatch([
