@@ -1896,9 +1896,8 @@ function getInspectionDriveFileIndex_() {
   const index = {};
   try {
     const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-    const folders = parent.getFolders();
-    while (folders.hasNext()) {
-      const folder = folders.next();
+    // ราก / ภาค / สถานที่ / ไฟล์ (และโฟลเดอร์สถานที่เดิมที่ยังอยู่ที่ราก)
+    const indexFolder = function(folder, depth) {
       const files = folder.getFiles();
       while (files.hasNext()) {
         const file = files.next();
@@ -1911,7 +1910,12 @@ function getInspectionDriveFileIndex_() {
         const norm = normInspectionPdfKey_(name);
         if (norm) index[norm] = url;
       }
-    }
+      if (depth >= 2) return;
+      const subs = folder.getFolders();
+      while (subs.hasNext()) indexFolder(subs.next(), depth + 1);
+    };
+    const folders = parent.getFolders();
+    while (folders.hasNext()) indexFolder(folders.next(), 1);
   } catch (e) {
     Logger.log('inspection drive index failed: ' + e.message);
   }
@@ -3197,11 +3201,77 @@ function buildInspectionFileFolderName_(plan) {
   return sanitizeDriveFolderName_(base);
 }
 
+/** โฟลเดอร์ภาคภายในโฟลเดอร์หลักแผนตรวจรับ: ราก / ภาค / "NC - สถานที่" */
+const INSPECTION_REGION_FOLDER_NAMES_ = {
+  NC: '1. ภาคเหนือ-กลาง NC',
+  NE: '2. ภาคอีสาน NE',
+  S: '3. ภาคใต้ S'
+};
+
+function inspectionRegionFromFolderName_(folderName) {
+  const m = String(folderName || '').trim().match(/^(NC|NE|S)\s*-\s*/i);
+  return m ? m[1].toUpperCase() : '';
+}
+
+function getInspectionRegionFolder_(root, region) {
+  const name = INSPECTION_REGION_FOLDER_NAMES_[region];
+  return name ? getOrCreateDriveSubFolder_(root, name) : root;
+}
+
+/** หาหรือสร้างโฟลเดอร์สถานที่ไว้ใต้โฟลเดอร์ภาค — ย้ายโฟลเดอร์เดิมที่อยู่ที่รากเข้าไปให้ด้วย */
+function getInspectionPlaceFolder_(folderName) {
+  const root = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+  const region = inspectionRegionFromFolderName_(folderName);
+  if (!region) return getOrCreateDriveSubFolder_(root, folderName);
+  const regionFolder = getInspectionRegionFolder_(root, region);
+  const inRegion = regionFolder.getFoldersByName(folderName);
+  if (inRegion.hasNext()) return inRegion.next();
+  const legacy = root.getFoldersByName(folderName);
+  if (legacy.hasNext()) {
+    const f = legacy.next();
+    f.moveTo(regionFolder);
+    return f;
+  }
+  return regionFolder.createFolder(folderName);
+}
+
+/** ย้ายโฟลเดอร์สถานที่เดิม ("NC - ...", "NE - ...", "S - ...") ที่อยู่ที่รากเข้าโฟลเดอร์ภาค — รันครั้งเดียวจาก Apps Script editor */
+function migrateInspectionFoldersByRegion() {
+  const root = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
+  const moved = { NC: 0, NE: 0, S: 0 };
+  const skipped = [];
+  const it = root.getFolders();
+  const all = [];
+  while (it.hasNext()) all.push(it.next());
+  all.forEach(function(f) {
+    const name = f.getName();
+    const region = inspectionRegionFromFolderName_(name);
+    if (!region) { skipped.push(name); return; }
+    const regionFolder = getInspectionRegionFolder_(root, region);
+    const dup = regionFolder.getFoldersByName(name);
+    if (dup.hasNext()) {
+      const target = dup.next();
+      const files = f.getFiles();
+      while (files.hasNext()) files.next().moveTo(target);
+      const subs = f.getFolders();
+      while (subs.hasNext()) subs.next().moveTo(target);
+      f.setTrashed(true);
+    } else {
+      f.moveTo(regionFolder);
+    }
+    moved[region]++;
+  });
+  INSPECTION_DRIVE_FILE_INDEX_ = null;
+  const regionNames = Object.keys(INSPECTION_REGION_FOLDER_NAMES_).map(function(k) { return INSPECTION_REGION_FOLDER_NAMES_[k]; });
+  const result = { moved: moved, skipped: skipped.filter(function(n) { return regionNames.indexOf(n) < 0; }) };
+  Logger.log(JSON.stringify(result));
+  return result;
+}
+
 function createInspectionCommentFile_(opts) {
   let finalUrl = '';
   try {
-    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-    const targetFolder = getOrCreateDriveSubFolder_(parent, opts.folderName);
+    const targetFolder = getInspectionPlaceFolder_(opts.folderName);
     const driveName = opts.fileName.toLowerCase().endsWith('.pdf') ? opts.fileName : (opts.fileName + '.pdf');
     let blob = opts.blob;
     if (!blob) {
@@ -3674,8 +3744,7 @@ function resolvePdfUploadDriveName_(info) {
 function resolvePdfUploadTargetFolderId_(info) {
   if (info.kind === 'inspectionForm') return INSPECTION_FILE_FOLDER_ID;
   if (info.kind === 'inspection') {
-    const parent = DriveApp.getFolderById(INSPECTION_FILE_FOLDER_ID);
-    return getOrCreateDriveSubFolder_(parent, info.folderName).getId();
+    return getInspectionPlaceFolder_(info.folderName).getId();
   }
   if (info.kind === 'site') {
     const parent = DriveApp.getFolderById(FOLDER_ID);
