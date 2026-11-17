@@ -5779,7 +5779,17 @@
         }
         if (!inHole) return p.th;
       }
-      return '';
+      // จุดริมชายแดน/ชายฝั่งที่ตกนอกเส้นขอบเล็กน้อย → ใช้จังหวัดที่ขอบใกล้ที่สุด (ไม่เกิน ~0.15° ≈ 16 กม.)
+      let best = '', bestD = 0.15 * 0.15;
+      for (let i = 0; i < _provPolys_.length; i++) {
+        const ring = _provPolys_[i].rings[0];
+        for (let k = 0; k < ring.length; k++) {
+          const dx = ring[k][0] - x, dy = ring[k][1] - y;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = _provPolys_[i].th; }
+        }
+      }
+      return best;
     }
 
     function applyGeoProvinceToLocations_(list) {

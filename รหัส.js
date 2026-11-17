@@ -4187,8 +4187,19 @@ function beginPdfChunkUpload(meta, sessionToken) {
 
   // เซิร์ฟเวอร์เปิด resumable session และถือ token เอง — ไม่ส่ง OAuth token ให้เบราว์เซอร์
   info.folderId = resolvePdfUploadTargetFolderId_(info);
-  info.uploadUri = startDriveResumableUpload_(info.folderId, info.driveName, fileSize);
-  info.uploadMode = 'resumable';
+  try {
+    info.uploadUri = startDriveResumableUpload_(info.folderId, info.driveName, fileSize);
+    info.uploadMode = 'resumable';
+  } catch (e) {
+    // เจ้าของสคริปต์ยังไม่ได้อนุญาต UrlFetchApp (script.external_request) → ใช้โหมดเก็บชิ้นใน Drive แล้วประกอบตอน finalize (ไม่ใช้ UrlFetchApp)
+    const msg = (e && e.message) ? e.message : String(e);
+    if (!/external_request|UrlFetchApp|ไม่ได้รับอนุญาต|not authorized|permission/i.test(msg)) throw e;
+    if (fileSize > GAS_BLOB_MAX_BYTES_) {
+      throw new Error('ไฟล์ใหญ่เกิน 50MB ต้องให้เจ้าของสคริปต์อนุญาตสิทธิ์ external_request ก่อน (เปิดสคริปต์ใน Apps Script แล้วรันฟังก์ชันใดก็ได้เพื่อกดอนุญาต)');
+    }
+    info.uploadMode = 'legacy';
+    delete info.uploadUri;
+  }
 
   CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(info), 3600);
   return { success: true, uploadId: uploadId, chunkTotal: chunkTotal, chunkBytes: info.chunkBytes, uploadMode: info.uploadMode };
