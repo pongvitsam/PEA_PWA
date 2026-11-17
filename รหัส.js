@@ -4240,7 +4240,8 @@ function savePdfUploadChunk(formObj, sessionToken) {
     const prevId = m.partIds[String(chunkIndex)];
     const partId = savePdfUploadChunkPart_(uploadId, chunkIndex, chunkData, prevId);
     m.partIds[String(chunkIndex)] = partId;
-    m.received = (parseInt(m.received, 10) || 0) + 1;
+    // นับจากจำนวนชิ้นที่ไม่ซ้ำ — ส่งชิ้นเดิมซ้ำ (retry) ต้องไม่ทำให้ received เกินจริง
+    m.received = Object.keys(m.partIds).length;
   });
   const legacyMeta = getPdfChunkUploadMeta_(uploadId);
   return { success: true, chunkIndex: chunkIndex, received: legacyMeta.received, chunkTotal: legacyMeta.chunkTotal };

@@ -1,5 +1,5 @@
 /* PEA PWA — HTML/JS ดึงจากเน็ตก่อน (ให้มือถือตรงกับเว็บ) แคชไว้ตอนออฟไลน์ */
-const CACHE = 'pea-pwa-shell-v5';
+const CACHE = 'pea-pwa-shell-v6';
 const PRECACHE = [
   './',
   './index.html',
@@ -38,6 +38,14 @@ function isShellAsset_(url) {
     p.endsWith('/') || p.indexOf('/icons/') >= 0;
 }
 
+/** network-first แต่ไม่รอเน็ตช้านานเกินไป — เกินเวลาให้ตกไปใช้ cache */
+function fetchWithTimeout_(req, ms) {
+  return new Promise(function (resolve, reject) {
+    const t = setTimeout(function () { reject(new Error('timeout')); }, ms);
+    fetch(req).then(function (res) { clearTimeout(t); resolve(res); }, function (e) { clearTimeout(t); reject(e); });
+  });
+}
+
 self.addEventListener('fetch', function (event) {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -54,7 +62,7 @@ self.addEventListener('fetch', function (event) {
 
   event.respondWith(
     (isHtmlJs
-      ? fetch(req).then(function (res) {
+      ? fetchWithTimeout_(req, 8000).then(function (res) {
           if (res && res.ok) {
             const copy = res.clone();
             caches.open(CACHE).then(function (c) { c.put(req, copy); });
