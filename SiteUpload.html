@@ -208,39 +208,36 @@
         return pct + '%';
       }
 
-      function uploadPdfToDriveDirect(file, session, onProgress) {
-        return new Promise(function(resolve, reject) {
-          var xhr = new XMLHttpRequest();
-          var url = 'https://www.googleapis.com/upload/drive/v3/files/'
-            + encodeURIComponent(session.fileId)
-            + '?uploadType=media&supportsAllDrives=true';
-          xhr.open('PATCH', url);
-          xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
-          xhr.setRequestHeader('Content-Type', 'application/pdf');
-          xhr.upload.onprogress = function(ev) {
-            if (ev.lengthComputable && onProgress) onProgress(ev.loaded, ev.total);
-          };
-          xhr.onload = function() {
-            if (xhr.status >= 200 && xhr.status < 300) resolve(session.fileId);
-            else reject(new Error('อัปโหลด Drive ไม่สำเร็จ (' + xhr.status + ')'));
-          };
-          xhr.onerror = function() { reject(new Error('เครือข่ายขัดข้องขณะอัปโหลด')); };
-          xhr.send(file);
-        });
-      }
+      // ชิ้นละ 3MB (ทวีคูณของ 256KiB ตามข้อกำหนด Drive resumable) — เซิร์ฟเวอร์ถือ token Drive เอง
+      var CHUNK_BYTES = 12 * 256 * 1024;
 
       function uploadInChunks(file, meta) {
         var uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-        var beginMeta = Object.assign({}, meta, { uploadId: uploadId, fileSize: file.size });
-        return gasRun('beginPdfDirectUpload', beginMeta, token).then(function(session) {
-          if (!session || !session.fileId || !session.accessToken) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
+        var chunkTotal = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
+        var beginMeta = Object.assign({}, meta, {
+          uploadId: uploadId, fileSize: file.size, chunkTotal: chunkTotal, chunkBytes: CHUNK_BYTES
+        });
+        return gasRun('beginPdfChunkUpload', beginMeta, token).then(function(begin) {
+          if (!begin || !begin.success) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
           setStatus('<span class="spin"></span>กำลังอัปโหลด... 0%', '');
-          return uploadPdfToDriveDirect(file, session, function(loaded, total) {
-            setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(loaded, total), '');
-          }).then(function(fileId) {
-            setStatus('<span class="spin"></span>กำลังบันทึกข้อมูล...', '');
-            return gasRun('finalizePdfDirectUpload', { uploadId: session.uploadId, fileId: fileId }, token);
-          });
+          var chain = Promise.resolve();
+          for (var i = 0; i < chunkTotal; i++) {
+            (function(idx) {
+              chain = chain.then(function() {
+                var start = idx * CHUNK_BYTES;
+                var end = Math.min(file.size, start + CHUNK_BYTES);
+                return readSliceAsBase64(file.slice(start, end)).then(function(b64) {
+                  return gasRun('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: idx, chunkData: b64 }, token);
+                }).then(function() {
+                  setStatus('<span class="spin"></span>กำลังอัปโหลด... ' + formatUploadProgress(end, file.size), '');
+                });
+              });
+            })(i);
+          }
+          return chain;
+        }).then(function() {
+          setStatus('<span class="spin"></span>กำลังบันทึกข้อมูล...', '');
+          return gasRun('finalizePdfChunkUpload', uploadId, token);
         });
       }
 

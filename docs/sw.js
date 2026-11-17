@@ -1,5 +1,5 @@
 /* PEA PWA — HTML/JS ดึงจากเน็ตก่อน (ให้มือถือตรงกับเว็บ) แคชไว้ตอนออฟไลน์ */
-const CACHE = 'pea-pwa-shell-v4';
+const CACHE = 'pea-pwa-shell-v5';
 const PRECACHE = [
   './',
   './index.html',

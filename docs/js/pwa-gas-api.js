@@ -22,6 +22,20 @@
     saveProjectDoc: 1
   };
 
+  /** คำขอทั่วไปจำกัด 50,000 ตัวอักษร; อัปโหลด (base64) ส่งผ่าน POST ได้ใหญ่กว่า */
+  var MAX_ARGS_CHARS = 50000;
+  var MAX_UPLOAD_ARGS_CHARS = 48 * 1024 * 1024;
+
+  /** action ที่เขียนข้อมูล — ห้ามส่งซ้ำอัตโนมัติ (กันบันทึก/ลบซ้ำเมื่อ timeout) และส่งด้วย POST ทางเดียว */
+  function isMutating_(action) {
+    return /^(save|update|delete|create|restore|push|upload|begin|finalize|edit|revoke)/i.test(String(action || ''));
+  }
+
+  /** รับ postMessage เฉพาะจากโดเมน Google (HtmlService) */
+  function isGoogleOrigin_(origin) {
+    return /^https:\/\/([a-z0-9-]+\.)*(google|googleusercontent)\.com$/i.test(String(origin || ''));
+  }
+
   function isIOS_() {
     var ua = navigator.userAgent || '';
     if (/iPad|iPhone|iPod/i.test(ua)) return true;
@@ -178,6 +192,7 @@
       }
 
       function onMessage(ev) {
+        if (!ev || !isGoogleOrigin_(ev.origin)) return;
         const d = ev && ev.data;
         if (!d || d.type !== 'GAS_API_DONE') return;
         if (d.requestId && d.requestId !== requestId) return;
@@ -192,7 +207,8 @@
         args: args || [],
         sessionToken: getStoredSessionToken(),
         requestId: requestId,
-        client: 'pages'
+        client: 'pages',
+        origin: window.location.origin
       };
 
       try {
@@ -270,8 +286,14 @@
     const argsJson = JSON.stringify(compact || []);
     const waitMs = timeoutForAction_(action);
 
-    if (argsJson.length > 50000) {
+    const maxChars = UPLOAD_ACTIONS_[action] ? MAX_UPLOAD_ARGS_CHARS : MAX_ARGS_CHARS;
+    if (argsJson.length > maxChars) {
       return Promise.reject(new Error('คำขอนี้ใหญ่เกินไป'));
+    }
+
+    // เขียนข้อมูล: POST ครั้งเดียว ไม่ fallback ซ้ำ (JSONP timeout อาจทำงานฝั่งเซิร์ฟเวอร์ไปแล้ว)
+    if (isMutating_(action)) {
+      return gasCallPopupPost_(action, compact, requestId, waitMs);
     }
 
     const probeCb = '_gasJsonp_' + requestId.replace(/[^\w]/g, '');

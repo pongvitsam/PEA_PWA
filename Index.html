@@ -3487,36 +3487,35 @@
       return pct + '%';
     }
 
-    function uploadPdfToDriveDirect_(file, session, onProgress) {
-      return new Promise(function(resolve, reject) {
-        const xhr = new XMLHttpRequest();
-        const url = 'https://www.googleapis.com/upload/drive/v3/files/'
-          + encodeURIComponent(session.fileId)
-          + '?uploadType=media&supportsAllDrives=true';
-        xhr.open('PATCH', url);
-        xhr.setRequestHeader('Authorization', 'Bearer ' + session.accessToken);
-        xhr.setRequestHeader('Content-Type', 'application/pdf');
-        xhr.upload.onprogress = function(ev) {
-          if (ev.lengthComputable && onProgress) onProgress(ev.loaded, ev.total);
-        };
-        xhr.onload = function() {
-          if (xhr.status >= 200 && xhr.status < 300) resolve(session.fileId);
-          else reject(new Error('อัปโหลด Drive ไม่สำเร็จ (' + xhr.status + ')'));
-        };
-        xhr.onerror = function() { reject(new Error('เครือข่ายขัดข้องขณะอัปโหลด')); };
-        xhr.send(file);
-      });
-    }
+    /** ขนาดชิ้นอัปโหลด — ต้องเป็นทวีคูณของ 256KiB (ข้อกำหนด Drive resumable) */
+    const PDF_UPLOAD_CHUNK_BYTES_ = 12 * 256 * 1024;
 
+    /** อัปโหลดเป็นชิ้นผ่านเซิร์ฟเวอร์ (เซิร์ฟเวอร์ถือ token Drive เอง ไม่ส่งให้เบราว์เซอร์) */
     function uploadPdfInChunks_(file, token, meta, onProgress) {
       const uploadId = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-      const beginMeta = Object.assign({}, meta, { uploadId: uploadId, fileSize: file.size });
-      return gasRunPromise_('beginPdfDirectUpload', beginMeta, token).then(function(session) {
-        if (!session || !session.fileId || !session.accessToken) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
-        return uploadPdfToDriveDirect_(file, session, onProgress).then(function(fileId) {
-          if (onProgress) onProgress(file.size, file.size, 'save');
-          return gasRunPromise_('finalizePdfDirectUpload', { uploadId: session.uploadId, fileId: fileId }, token);
-        });
+      const chunkBytes = PDF_UPLOAD_CHUNK_BYTES_;
+      const chunkTotal = Math.max(1, Math.ceil(file.size / chunkBytes));
+      const beginMeta = Object.assign({}, meta, {
+        uploadId: uploadId, fileSize: file.size, chunkTotal: chunkTotal, chunkBytes: chunkBytes
+      });
+      return gasRunPromise_('beginPdfChunkUpload', beginMeta, token).then(function(begin) {
+        if (!begin || !begin.success) throw new Error('เริ่มอัปโหลดไม่สำเร็จ');
+        let chain = Promise.resolve();
+        for (let i = 0; i < chunkTotal; i++) {
+          chain = chain.then(function() {
+            const start = i * chunkBytes;
+            const end = Math.min(file.size, start + chunkBytes);
+            return readFileSliceAsBase64_(file.slice(start, end)).then(function(b64) {
+              return gasRunPromise_('savePdfUploadChunk', { uploadId: uploadId, chunkIndex: i, chunkData: b64 }, token);
+            }).then(function() {
+              if (onProgress) onProgress(end, file.size);
+            });
+          });
+        }
+        return chain;
+      }).then(function() {
+        if (onProgress) onProgress(file.size, file.size, 'save');
+        return gasRunPromise_('finalizePdfChunkUpload', uploadId, token);
       });
     }
 
@@ -3920,6 +3919,14 @@
       let prov = document.getElementById('filterProv').value.trim();
       let checkedPhases = Array.from(document.querySelectorAll('.phase-filter:checked')).map(cb => cb.value);
 
+      // ชื่อจังหวัดครบ (เลือกจาก datalist / พิมพ์ครบ) → เทียบจังหวัดตรงๆ ไม่ค้นในชื่อสถานที่ (กันคำสั้นๆ เช่น ตาก/เลย/แพร่)
+      const provExact = THAI_PROVINCES.indexOf(prov) >= 0;
+      if (provExact && !_provPolys_) {
+        ensureProvincePolys_().then(function(ok) {
+          if (ok && document.getElementById('filterProv').value.trim() === prov) applyFilters();
+        });
+      }
+
       filteredData = allData.filter(loc => {
         let phaseMatch = checkedPhases.includes(String(loc.phase));
         let peaMatch = (!p || loc.peaRegion === p);
@@ -3927,9 +3934,12 @@
         let provMatch = true;
 
         if (prov !== "") {
-          let concatText = [loc.province, loc.name, loc.peaRegion, loc.pwaRegion].join(' ').toLowerCase();
-          let provLower = prov.toLowerCase();
-          if (!concatText.includes(provLower)) provMatch = false;
+          if (provExact) {
+            provMatch = resolveLocationProvince_(loc) === prov;
+          } else {
+            let concatText = [loc.province, loc.name, loc.peaRegion, loc.pwaRegion].join(' ').toLowerCase();
+            provMatch = concatText.includes(prov.toLowerCase());
+          }
         }
 
         return phaseMatch && peaMatch && pwaMatch && provMatch;
@@ -5700,8 +5710,99 @@
       return '';
     }
 
+    /* ---- จังหวัดจากพิกัด (point-in-polygon กับขอบเขตจังหวัด) — แม่นกว่าเดาจากชื่อสถานที่ ---- */
+    const PROVINCE_EN_TO_TH_ = {
+      'Mae Hong Son': 'แม่ฮ่องสอน', 'Chumphon': 'ชุมพร', 'Nakhon Si Thammarat': 'นครศรีธรรมราช', 'Phuket': 'ภูเก็ต',
+      'Phangnga': 'พังงา', 'Ranong': 'ระนอง', 'Surat Thani': 'สุราษฎร์ธานี', 'Krabi': 'กระบี่', 'Phatthalung': 'พัทลุง',
+      'Satun': 'สตูล', 'Songkhla': 'สงขลา', 'Trang': 'ตรัง', 'Yala': 'ยะลา', 'Chiang Rai': 'เชียงราย', 'Chiang Mai': 'เชียงใหม่',
+      'Lampang': 'ลำปาง', 'Lamphun': 'ลำพูน', 'Nan': 'น่าน', 'Phayao': 'พะเยา', 'Phrae': 'แพร่', 'Phitsanulok': 'พิษณุโลก',
+      'Sukhothai': 'สุโขทัย', 'Uttaradit': 'อุตรดิตถ์', 'Kanchanaburi': 'กาญจนบุรี', 'Kamphaeng Phet': 'กำแพงเพชร',
+      'Phichit': 'พิจิตร', 'Phetchabun': 'เพชรบูรณ์', 'Suphan Buri': 'สุพรรณบุรี', 'Tak': 'ตาก', 'Uthai Thani': 'อุทัยธานี',
+      'Ang Thong': 'อ่างทอง', 'Chai Nat': 'ชัยนาท', 'Lop Buri': 'ลพบุรี', 'Nakhon Nayok': 'นครนายก', 'Prachin Buri': 'ปราจีนบุรี',
+      'Nakhon Sawan': 'นครสวรรค์', 'Phra Nakhon Si Ayutthaya': 'พระนครศรีอยุธยา', 'Pathum Thani': 'ปทุมธานี', 'Sing Buri': 'สิงห์บุรี',
+      'Saraburi': 'สระบุรี', 'Bangkok Metropolis': 'กรุงเทพมหานคร', 'Nonthaburi': 'นนทบุรี', 'Nakhon Pathom': 'นครปฐม',
+      'Phetchaburi': 'เพชรบุรี', 'Prachuap Khiri Khan': 'ประจวบคีรีขันธ์', 'Ratchaburi': 'ราชบุรี', 'Samut Prakan': 'สมุทรปราการ',
+      'Samut Sakhon': 'สมุทรสาคร', 'Samut Songkhram': 'สมุทรสงคราม', 'Si Sa Ket': 'ศรีสะเกษ', 'Ubon Ratchathani': 'อุบลราชธานี',
+      'Amnat Charoen': 'อำนาจเจริญ', 'Yasothon': 'ยโสธร', 'Chon Buri': 'ชลบุรี', 'Chachoengsao': 'ฉะเชิงเทรา', 'Chanthaburi': 'จันทบุรี',
+      'Sa Kaeo': 'สระแก้ว', 'Rayong': 'ระยอง', 'Trat': 'ตราด', 'Buri Ram': 'บุรีรัมย์', 'Chaiyaphum': 'ชัยภูมิ', 'Khon Kaen': 'ขอนแก่น',
+      'Kalasin': 'กาฬสินธุ์', 'Maha Sarakham': 'มหาสารคาม', 'Nakhon Ratchasima': 'นครราชสีมา', 'Roi Et': 'ร้อยเอ็ด', 'Surin': 'สุรินทร์',
+      'Loei': 'เลย', 'Nong Khai': 'หนองคาย', 'Sakon Nakhon': 'สกลนคร', 'Udon Thani': 'อุดรธานี', 'Nong Bua Lam Phu': 'หนองบัวลำภู',
+      'Nakhon Phanom': 'นครพนม', 'Mukdahan': 'มุกดาหาร', 'Narathiwat': 'นราธิวาส', 'Pattani': 'ปัตตานี', 'Bueng Kan': 'บึงกาฬ'
+    };
+    let _provPolys_ = null;
+    let _provPolysPromise_ = null;
+
+    function buildProvincePolys_(geo) {
+      const out = [];
+      ((geo && geo.features) || []).forEach(function(f) {
+        const th = PROVINCE_EN_TO_TH_[f && f.properties && f.properties.name];
+        const g = f && f.geometry;
+        if (!th || !g) return;
+        const polys = g.type === 'Polygon' ? [g.coordinates] : (g.type === 'MultiPolygon' ? g.coordinates : []);
+        polys.forEach(function(rings) {
+          const outer = rings[0] || [];
+          let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+          outer.forEach(function(c) {
+            if (c[0] < minX) minX = c[0]; if (c[0] > maxX) maxX = c[0];
+            if (c[1] < minY) minY = c[1]; if (c[1] > maxY) maxY = c[1];
+          });
+          out.push({ th: th, rings: rings, bbox: [minX, minY, maxX, maxY] });
+        });
+      });
+      return out;
+    }
+
+    function pointInRing_(x, y, ring) {
+      let inside = false;
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+        if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+      }
+      return inside;
+    }
+
+    function provinceFromLatLng_(lat, lng) {
+      if (!_provPolys_) return '';
+      const x = Number(lng), y = Number(lat);
+      if (!isFinite(x) || !isFinite(y)) return '';
+      for (let i = 0; i < _provPolys_.length; i++) {
+        const p = _provPolys_[i];
+        if (x < p.bbox[0] || x > p.bbox[2] || y < p.bbox[1] || y > p.bbox[3]) continue;
+        if (!pointInRing_(x, y, p.rings[0])) continue;
+        let inHole = false;
+        for (let h = 1; h < p.rings.length; h++) {
+          if (pointInRing_(x, y, p.rings[h])) { inHole = true; break; }
+        }
+        if (!inHole) return p.th;
+      }
+      return '';
+    }
+
+    function applyGeoProvinceToLocations_(list) {
+      (list || []).forEach(function(loc) {
+        const gp = provinceFromLatLng_(loc.lat, loc.lng);
+        if (gp) { loc.geoProv = gp; loc.province = gp; }
+      });
+    }
+
+    /** โหลดขอบเขตจังหวัดครั้งเดียว (ใช้เมื่อผู้ใช้กรองจังหวัด) แล้วคำนวณจังหวัดจากพิกัดให้ทุกจุด */
+    function ensureProvincePolys_() {
+      if (_provPolys_) return Promise.resolve(true);
+      if (_provPolysPromise_) return _provPolysPromise_;
+      _provPolysPromise_ = fetch('https://cdn.jsdelivr.net/gh/apisit/thailand.json@master/thailand.json')
+        .then(function(res) { return res.json(); })
+        .then(function(geo) {
+          _provPolys_ = buildProvincePolys_(geo);
+          applyGeoProvinceToLocations_(allData);
+          return true;
+        })
+        .catch(function() { _provPolysPromise_ = null; return false; });
+      return _provPolysPromise_;
+    }
+
     function resolveLocationProvince_(loc) {
       if (!loc) return '';
+      if (loc.geoProv) return loc.geoProv;
       const existing = String(loc.province || '').trim();
       if (existing) return existing;
       return guessThaiProvinceFromText_([
@@ -5713,6 +5814,7 @@
       (list || []).forEach(function(loc) {
         loc.province = resolveLocationProvince_(loc);
       });
+      applyGeoProvinceToLocations_(list);
     }
 
     function locationMapTooltipText_(loc) {

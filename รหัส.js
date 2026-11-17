@@ -128,8 +128,10 @@ function parsePostPayload_(e) {
   throw new Error('Empty payload');
 }
 
-function postMessageHtml_(obj) {
+function postMessageHtml_(obj, targetOrigin) {
   const payload = Object.assign({ type: 'GAS_API_DONE' }, obj || {});
+  // ส่งกลับเฉพาะ origin ของหน้าที่เรียก (ถ้าส่งมาและรูปแบบถูกต้อง) — ไม่งั้น fallback '*'
+  const origin = /^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(String(targetOrigin || '')) ? String(targetOrigin) : '*';
   const safe = JSON.stringify(payload).replace(/<\/script/gi, '<\\/script');
   // iOS Safari: HtmlService ซ้อน iframe — ต้องยิง top/parent.parent ซ้ำๆ ไม่ใช่แค่ parent
   const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -138,8 +140,8 @@ function postMessageHtml_(obj) {
     '.box{max-width:280px;margin:24px auto;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px}' +
     'button{margin-top:12px;padding:8px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}</style></head><body>' +
     '<div class="box"><p id="m">กำลังส่งผลกลับ...</p><button type="button" onclick="tryClose()">ปิดหน้าต่างนี้</button></div>' +
-    '<script>(function(){var o=' + safe + ';' +
-    'function send(w){try{if(w&&w.postMessage)w.postMessage(o,"*")}catch(e){}}' +
+    '<script>(function(){var o=' + safe + ';var T=' + JSON.stringify(origin) + ';' +
+    'function send(w){try{if(w&&w.postMessage)w.postMessage(o,T)}catch(e){}}' +
     'function blast(){' +
     'try{if(window.top)send(window.top)}catch(e){}' +
     'try{if(parent&&parent!==window)send(parent)}catch(e){}' +
@@ -169,12 +171,12 @@ function doPost(e) {
     const result = dispatchApi_(payload.action, payload.args || [], payload.sessionToken || null);
     if (payload.jobId) setApiJob_(payload.jobId, { status: 'done', result: result });
     const out = { ok: true, result: result, requestId: payload.requestId || null, jobId: payload.jobId || null };
-    if (payload.client === 'pages') return postMessageHtml_(out);
+    if (payload.client === 'pages') return postMessageHtml_(out, payload.origin);
     return jsonOutput_(out);
   } catch (err) {
     if (payload && payload.jobId) setApiJob_(payload.jobId, { status: 'error', error: err.message || String(err) });
     const out = { ok: false, error: err.message || String(err), requestId: payload.requestId || null, jobId: payload.jobId || null };
-    if (payload && payload.client === 'pages') return postMessageHtml_(out);
+    if (payload && payload.client === 'pages') return postMessageHtml_(out, payload.origin);
     return jsonOutput_(out);
   }
 }
@@ -206,7 +208,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'revokeSession': return revokeSession(args[0] || tok);
     case 'getOutages': return getOutages(tok);
     case 'refreshOutagesFromSource':
-      if (args[0]) assertEditorOrAdminFromSession_(tok);
+      if (args[0]) assertEditorOrAdminFromSession_(tok); else validateSession_(tok);
       return redactSheetAccessForSession_(refreshOutagesFromSource(args[0]), tok);
     case 'debugOutageSourceSheets':
       assertEditorOrAdminFromSession_(tok);
@@ -216,7 +218,7 @@ function dispatchApi_(action, args, sessionToken) {
     case 'deleteOutage': return deleteOutage(args[0], args[1] || tok);
     case 'getInspectionPlans': return getInspectionPlans(tok);
     case 'refreshInspectionPlansFromSource':
-      if (args[0]) assertEditorOrAdminFromSession_(tok);
+      if (args[0]) assertEditorOrAdminFromSession_(tok); else validateSession_(tok);
       return redactSheetAccessForSession_(refreshInspectionPlansFromSource(args[0]), tok);
     case 'pushInspectionPlansToSource': return pushInspectionPlansToSource(args[0] || tok);
     case 'debugInspectionSourceSheets':
@@ -231,8 +233,6 @@ function dispatchApi_(action, args, sessionToken) {
     case 'beginPdfChunkUpload': return beginPdfChunkUpload(args[0], args[1] || tok);
     case 'savePdfUploadChunk': return savePdfUploadChunk(args[0], args[1] || tok);
     case 'finalizePdfChunkUpload': return finalizePdfChunkUpload(args[0], args[1] || tok);
-    case 'beginPdfDirectUpload': return beginPdfDirectUpload(args[0], args[1] || tok);
-    case 'finalizePdfDirectUpload': return finalizePdfDirectUpload(args[0], args[1] || tok);
     case 'deleteInspectionFileComment': return deleteInspectionFileComment(args[0], args[1] || tok);
     case 'getInspectionFormTemplate': return getInspectionFormTemplate();
     case 'uploadInspectionFormTemplate': return uploadInspectionFormTemplate(args[0], args[1] || tok);
@@ -281,8 +281,11 @@ function isLikelySessionToken_(token) {
 
 function getSessionsSheet_() {
   const ss = getSpreadsheet_();
-  const sheet = getOrCreateSheet_(ss, SESSIONS_SHEET, ['Token', 'Username', 'Role', 'ExpireMs']);
-  sheet.getRange('D:D').setNumberFormat('@');
+  let sheet = ss.getSheetByName(SESSIONS_SHEET);
+  if (!sheet) {
+    sheet = getOrCreateSheet_(ss, SESSIONS_SHEET, ['Token', 'Username', 'Role', 'ExpireMs']);
+    sheet.getRange('D:D').setNumberFormat('@'); // ตั้งครั้งเดียวตอนสร้างชีต
+  }
   return sheet;
 }
 
@@ -295,6 +298,10 @@ function parseSessionExpireMs_(val) {
 }
 
 function cleanupExpiredSessionsSheet_() {
+  // เก็บกวาดไม่เกินทุก 10 นาที — เดิมทำทุกครั้งที่ล็อกอิน/โหลด session (อ่านทั้งชีต + deleteRow ช้าและชนกันได้)
+  const cache = CacheService.getScriptCache();
+  if (cache.get('sess_cleanup_ts')) return;
+  cache.put('sess_cleanup_ts', '1', 600);
   const sheet = getSessionsSheet_();
   const data = sheet.getDataRange().getValues();
   const now = Date.now();
@@ -314,7 +321,6 @@ function writeSessionToSheet_(token, username, role, expire) {
 }
 
 function readSessionFromSheet_(sessionToken) {
-  cleanupExpiredSessionsSheet_();
   const data = getSessionsSheet_().getDataRange().getValues();
   const now = Date.now();
   for (let i = 1; i < data.length; i++) {
@@ -408,14 +414,13 @@ function redactSheetAccessPayload_(payload) {
   return out;
 }
 
+/** fail-closed: เห็นข้อมูล Sheet ได้เฉพาะ admin/editor ที่ session ถูกต้อง — ที่เหลือ (ไม่มี/หมดอายุ/role อื่น) ถูก redact */
 function redactSheetAccessForSession_(payload, sessionToken) {
-  if (!sessionToken) return payload;
   try {
-    if (getRoleFromSession_(sessionToken) === 'user') {
-      return redactSheetAccessPayload_(payload);
-    }
-  } catch (e) { /* invalid session — leave payload */ }
-  return payload;
+    const role = getRoleFromSession_(sessionToken);
+    if (role === 'admin' || role === 'editor') return payload;
+  } catch (e) { /* invalid session — redact */ }
+  return redactSheetAccessPayload_(payload);
 }
 
 function assertAdminFromSession_(sessionToken) {
@@ -459,6 +464,24 @@ function revokeSession(sessionToken) {
     }
   }
   return { success: true };
+}
+
+/** ยกเลิกทุก session ของผู้ใช้ (ลบทั้งในชีตและ cache) — ใช้ตอนลบบัญชี */
+function revokeSessionsForUser_(username) {
+  const target = (username || '').toString().trim().toLowerCase();
+  if (!target) return 0;
+  const sheet = getSessionsSheet_();
+  const data = sheet.getDataRange().getValues();
+  const cache = CacheService.getScriptCache();
+  let n = 0;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][1].toString().trim().toLowerCase() === target) {
+      try { cache.remove(sessionCacheKey_(data[i][0])); } catch (ignore) {}
+      sheet.deleteRow(i + 1);
+      n++;
+    }
+  }
+  return n;
 }
 
 function ensureUsersSheet_(ss) {
@@ -608,6 +631,8 @@ function getLocationsUncached_() {
       const parts = row[5].split(',');
       lat = parseFloat(parts[0].trim());
       lng = parseFloat(parts[1].trim());
+      // parse ไม่ได้ (NaN) ต้องถือว่าไม่มีพิกัด — เดิม NaN !== null จึงหลุดเข้า filter
+      if (!isFinite(lat) || !isFinite(lng)) { lat = null; lng = null; }
     }
     const richL = richLink && richLink[index] ? richLink[index][0] : null;
     const richP = richPea && richPea[index] ? richPea[index][0] : null;
@@ -689,6 +714,12 @@ function updateLocation(data, sessionToken) {
 
   const ss = getSpreadsheet_();
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+
+  const rowNo = Number(data && data.row);
+  if (!isFinite(rowNo) || rowNo !== Math.floor(rowNo) || rowNo < 2 || rowNo > sheet.getLastRow()) {
+    throw new Error('หมายเลขแถวไม่ถูกต้อง');
+  }
+  data.row = rowNo;
 
   const rowData = [
     data.phase, data.seq, data.link, data.peaRegion, data.name, data.latlngRaw,
@@ -776,10 +807,13 @@ function deleteUserAccount(username, sessionToken) {
   if (!sheet) throw new Error('ไม่พบตารางผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0].toString() === username) {
+    // เทียบแบบไม่สนตัวพิมพ์ — ให้ตรงกับตอนสร้าง/ล็อกอิน
+    if (data[i][0].toString().trim().toLowerCase() === username.toLowerCase()) {
       const rowRole = normalizeUserRole_(data[i][2]);
       if (rowRole === 'admin') throw new Error('ไม่สามารถลบแอดมินหลักได้');
+      const sheetUsername = data[i][0].toString();
       sheet.deleteRow(i + 1);
+      revokeSessionsForUser_(sheetUsername);
       logAction('ลบผู้ใช้: ' + username);
       return { success: true, message: 'ลบผู้ใช้สำเร็จ' };
     }
@@ -1498,16 +1532,21 @@ function invalidateInspectionListCache_() {
 
 /** โหลดรายการจาก OutagePlan อย่างเดียว — เร็ว ไม่ซิงก์ชีทภายนอก */
 function getOutages(sessionToken) {
+  return redactSheetAccessForSession_(getOutagesRaw_(), sessionToken);
+}
+
+/** ภายในเท่านั้น — ไม่ redact (ผู้เรียก API ต้องผ่าน redactSheetAccessForSession_ เสมอ) */
+function getOutagesRaw_() {
   const cache = CacheService.getScriptCache();
   try {
     const hit = cache.get(OUTAGE_LIST_CACHE_KEY);
-    if (hit) return redactSheetAccessForSession_(JSON.parse(hit), sessionToken);
+    if (hit) return JSON.parse(hit);
   } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureOutageSheet_(ss);
   const result = readOutagesMapped_(sheet);
   try { cache.put(OUTAGE_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC); } catch (ignore) {}
-  return redactSheetAccessForSession_(result, sessionToken);
+  return result;
 }
 
 const OUTAGE_SYNC_CACHE_KEY = 'outage_src_sync_v1';
@@ -1523,18 +1562,18 @@ function refreshOutagesFromSource(force) {
   const wantForce = !!force;
   const cache = CacheService.getScriptCache();
   if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
-    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+    return { synced: false, outages: getOutagesRaw_(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
   }
 
   // soft-lock กันเรียกซ้ำซ้อนจากหลายแท็บ (ไม่ใช้ error หลอกผู้ใช้)
   if (cache.get(OUTAGE_SYNC_SOFT_LOCK_KEY)) {
-    return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+    return { synced: false, outages: getOutagesRaw_(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
   }
   cache.put(OUTAGE_SYNC_SOFT_LOCK_KEY, '1', 120);
 
   try {
     if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
-      return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+      return { synced: false, outages: getOutagesRaw_(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
     }
 
     let sourceRows;
@@ -1546,7 +1585,7 @@ function refreshOutagesFromSource(force) {
       return {
         synced: false,
         error: friendlyOutageSheetError_(e),
-        outages: getOutages(),
+        outages: getOutagesRaw_(),
         sourceTitle: OUTAGE_SOURCE_TITLE,
         sourceUrl: OUTAGE_SOURCE_URL
       };
@@ -1555,11 +1594,11 @@ function refreshOutagesFromSource(force) {
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(5000)) {
       // ระบบอื่นกำลังเขียนชีทหลัก — คืนข้อมูลเดิมโดยไม่โชว์ error
-      return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+      return { synced: false, outages: getOutagesRaw_(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
     }
     try {
       if (!wantForce && cache.get(OUTAGE_SYNC_CACHE_KEY)) {
-        return { synced: false, outages: getOutages(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
+        return { synced: false, outages: getOutagesRaw_(), sourceTitle: OUTAGE_SOURCE_TITLE, sourceUrl: OUTAGE_SOURCE_URL };
       }
       const ss = getSpreadsheet_();
       const sheet = ensureOutageSheet_(ss);
@@ -2728,10 +2767,15 @@ function syncInspectionsFromSource_(destSheet, precollected) {
 }
 
 function getInspectionPlans(sessionToken) {
+  return redactSheetAccessForSession_(getInspectionPlansRaw_(), sessionToken);
+}
+
+/** ภายในเท่านั้น — ไม่ redact */
+function getInspectionPlansRaw_() {
   const gen = inspectionListCacheGen_();
   try {
     const hit = cacheGetChunks_(INSPECTION_LIST_CACHE_KEY);
-    if (hit) return redactSheetAccessForSession_(JSON.parse(hit), sessionToken);
+    if (hit) return JSON.parse(hit);
   } catch (ignore) {}
   const ss = getSpreadsheet_();
   const sheet = ensureInspectionSheet_(ss);
@@ -2742,7 +2786,7 @@ function getInspectionPlans(sessionToken) {
       cachePutChunks_(INSPECTION_LIST_CACHE_KEY, JSON.stringify(result), LIST_CACHE_TTL_SEC);
     }
   } catch (ignore) {}
-  return redactSheetAccessForSession_(result, sessionToken);
+  return result;
 }
 
 const INSPECTION_SYNC_CACHE_KEY = 'inspection_src_sync_v7';
@@ -2763,7 +2807,7 @@ function refreshInspectionPlansFromSource(force) {
   if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
     return {
       synced: false,
-      plans: getInspectionPlans(),
+      plans: getInspectionPlansRaw_(),
       roundOptions: getInspectionRoundOptionsCached_() || undefined,
       sourceTitle: INSPECTION_SOURCE_TITLE,
       sourceUrl: INSPECTION_SOURCE_URL
@@ -2772,7 +2816,7 @@ function refreshInspectionPlansFromSource(force) {
   if (cache.get(INSPECTION_SYNC_SOFT_LOCK_KEY)) {
     return {
       synced: false,
-      plans: getInspectionPlans(),
+      plans: getInspectionPlansRaw_(),
       roundOptions: getInspectionRoundOptionsCached_() || undefined,
       sourceTitle: INSPECTION_SOURCE_TITLE,
       sourceUrl: INSPECTION_SOURCE_URL
@@ -2783,7 +2827,7 @@ function refreshInspectionPlansFromSource(force) {
     if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
       return {
         synced: false,
-        plans: getInspectionPlans(),
+        plans: getInspectionPlansRaw_(),
         roundOptions: getInspectionRoundOptionsCached_() || undefined,
         sourceTitle: INSPECTION_SOURCE_TITLE,
         sourceUrl: INSPECTION_SOURCE_URL
@@ -2798,7 +2842,7 @@ function refreshInspectionPlansFromSource(force) {
       return {
         synced: false,
         error: e.message,
-        plans: getInspectionPlans(),
+        plans: getInspectionPlansRaw_(),
         roundOptions: getInspectionRoundOptionsCached_() || undefined,
         sourceTitle: INSPECTION_SOURCE_TITLE,
         sourceUrl: INSPECTION_SOURCE_URL
@@ -2808,7 +2852,7 @@ function refreshInspectionPlansFromSource(force) {
     if (!lock.tryLock(5000)) {
       return {
         synced: false,
-        plans: getInspectionPlans(),
+        plans: getInspectionPlansRaw_(),
         roundOptions: getInspectionRoundOptionsCached_() || undefined,
         sourceTitle: INSPECTION_SOURCE_TITLE,
         sourceUrl: INSPECTION_SOURCE_URL
@@ -2818,7 +2862,7 @@ function refreshInspectionPlansFromSource(force) {
       if (!wantForce && cache.get(INSPECTION_SYNC_CACHE_KEY)) {
         return {
           synced: false,
-          plans: getInspectionPlans(),
+          plans: getInspectionPlansRaw_(),
           roundOptions: getInspectionRoundOptionsCached_() || undefined,
           sourceTitle: INSPECTION_SOURCE_TITLE,
           sourceUrl: INSPECTION_SOURCE_URL
@@ -3804,42 +3848,16 @@ function isDriveFileInFolder_(file, folderId) {
   return false;
 }
 
-/** เริ่มอัปโหลด PDF จากเบราว์เซอร์ตรงเข้า Drive — ไม่ใช้ UrlFetchApp */
-function beginPdfDirectUpload(meta, sessionToken) {
-  const info = buildPdfUploadInfo_(meta, sessionToken);
-  const emptyBlob = Utilities.newBlob([], 'application/pdf', info.driveName);
-  const file = DriveApp.getFolderById(info.folderId).createFile(emptyBlob);
-  info.driveFileId = file.getId();
-  info.uploadMode = 'direct';
-  CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + info.uploadId, JSON.stringify(info), 3600);
-  return {
-    success: true,
-    uploadId: info.uploadId,
-    fileId: info.driveFileId,
-    folderId: info.folderId,
-    driveName: info.driveName,
-    accessToken: ScriptApp.getOAuthToken()
-  };
+/**
+ * ถอดออกแล้ว: เดิมคืน ScriptApp.getOAuthToken() (สิทธิ์ Drive เต็มของเจ้าของสคริปต์) ให้เบราว์เซอร์
+ * ใช้ beginPdfChunkUpload / savePdfUploadChunk / finalizePdfChunkUpload แทน (เซิร์ฟเวอร์ถือ token เอง)
+ */
+function beginPdfDirectUpload() {
+  throw new Error('วิธีอัปโหลดนี้ถูกยกเลิกแล้ว — กรุณารีเฟรชหน้า (Ctrl+F5) แล้วลองใหม่');
 }
 
-function finalizePdfDirectUpload(formObj, sessionToken) {
-  const uploadId = (formObj && formObj.uploadId != null ? formObj.uploadId : '').toString().trim();
-  const fileId = (formObj && formObj.fileId != null ? formObj.fileId : '').toString().trim();
-  if (!uploadId) throw new Error('ไม่พบรหัสอัปโหลด');
-  if (!fileId) throw new Error('ไม่พบรหัสไฟล์');
-  const meta = getPdfChunkUploadMeta_(uploadId);
-  assertPdfChunkUploadAuth_(meta, sessionToken);
-  if (meta.driveFileId && meta.driveFileId !== fileId) throw new Error('รหัสไฟล์ไม่ตรงกับการอัปโหลด');
-  const file = DriveApp.getFileById(fileId);
-  if (meta.folderId && !isDriveFileInFolder_(file, meta.folderId)) {
-    throw new Error('ไฟล์ไม่อยู่ในโฟลเดอร์ที่กำหนด');
-  }
-  const bytes = parseInt(file.getSize(), 10) || 0;
-  if (bytes < 1) throw new Error('อัปโหลด PDF ไม่สำเร็จ — ไฟล์ว่าง');
-  if (bytes > PDF_UPLOAD_MAX_BYTES_) throw new Error('ไฟล์ใหญ่เกินไป — รองรับไม่เกิน 100MB');
-  meta.driveFileId = fileId;
-  CacheService.getScriptCache().remove(PDF_UPLOAD_CACHE_PREFIX_ + uploadId);
-  return finishResumablePdfUpload_(meta);
+function finalizePdfDirectUpload() {
+  throw new Error('วิธีอัปโหลดนี้ถูกยกเลิกแล้ว — กรุณารีเฟรชหน้า (Ctrl+F5) แล้วลองใหม่');
 }
 
 function startDriveResumableUpload_(parentFolderId, driveName, fileSize) {
@@ -3978,6 +3996,9 @@ function assertPdfChunkUploadAuth_(meta, sessionToken) {
   else if (kind === 'inspectionForm') assertAdminFromSession_(sessionToken);
   else if (kind === 'site') assertEditorOrAdminFromSession_(sessionToken);
   else throw new Error('ประเภทอัปโหลดไม่ถูกต้อง');
+  if (meta.owner && validateSession_(sessionToken).username !== meta.owner) {
+    throw new Error('ไม่มีสิทธิ์ใช้รหัสอัปโหลดนี้');
+  }
 }
 
 function getPdfChunkUploadMeta_(uploadId) {
@@ -4149,13 +4170,28 @@ function beginPdfChunkUpload(meta, sessionToken) {
   }
 
   info.driveName = resolvePdfUploadDriveName_(info);
-  if (fileSize > GAS_BLOB_MAX_BYTES_) {
-    throw new Error('กรุณารีเฟรชหน้า (Ctrl+F5) แล้วอัปโหลดใหม่ — ระบบอัปโหลดตรงเข้า Drive');
+  if (fileSize < 1) throw new Error('ไม่พบขนาดไฟล์');
+  // Drive resumable: ทุกชิ้นยกเว้นชิ้นสุดท้ายต้องเป็นทวีคูณของ 256KiB
+  if (chunkTotal > 1 && info.chunkBytes % (256 * 1024) !== 0) throw new Error('ขนาดชิ้นไฟล์ไม่ถูกต้อง');
+  if (Math.ceil(fileSize / info.chunkBytes) !== chunkTotal) throw new Error('จำนวนชิ้นไฟล์ไม่ตรงกับขนาดไฟล์');
+
+  // กันชน uploadId ของผู้ใช้อื่น
+  const sess = validateSession_(sessionToken);
+  const prevRaw = CacheService.getScriptCache().get(PDF_UPLOAD_CACHE_PREFIX_ + uploadId);
+  if (prevRaw) {
+    let prev = null;
+    try { prev = JSON.parse(prevRaw); } catch (ignore) {}
+    if (prev && prev.owner && prev.owner !== sess.username) throw new Error('รหัสอัปโหลดซ้ำ — ลองใหม่');
   }
-  info.uploadMode = 'legacy';
+  info.owner = sess.username;
+
+  // เซิร์ฟเวอร์เปิด resumable session และถือ token เอง — ไม่ส่ง OAuth token ให้เบราว์เซอร์
+  info.folderId = resolvePdfUploadTargetFolderId_(info);
+  info.uploadUri = startDriveResumableUpload_(info.folderId, info.driveName, fileSize);
+  info.uploadMode = 'resumable';
 
   CacheService.getScriptCache().put(PDF_UPLOAD_CACHE_PREFIX_ + uploadId, JSON.stringify(info), 3600);
-  return { success: true, uploadId: uploadId, chunkTotal: chunkTotal, uploadMode: info.uploadMode };
+  return { success: true, uploadId: uploadId, chunkTotal: chunkTotal, chunkBytes: info.chunkBytes, uploadMode: info.uploadMode };
 }
 
 function savePdfUploadChunk(formObj, sessionToken) {
@@ -4176,6 +4212,8 @@ function savePdfUploadChunk(formObj, sessionToken) {
     if (!chunkBytes) throw new Error('ขนาดชิ้นไม่ถูกต้อง');
     const start = chunkIndex * chunkBytes;
     const bytes = Utilities.base64Decode(chunkData);
+    const expectedLen = Math.min(chunkBytes, meta.fileSize - start);
+    if (bytes.length !== expectedLen) throw new Error('ขนาดชิ้นไฟล์ไม่ตรง (ชิ้นที่ ' + (chunkIndex + 1) + ')');
     const result = putDriveResumableChunk_(meta.uploadUri, bytes, start, meta.fileSize);
     const updated = updatePdfChunkUploadMeta_(uploadId, function(m) {
       if (result.fileId) m.driveFileId = result.fileId;
